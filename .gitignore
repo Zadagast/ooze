@@ -1,0 +1,9 @@
+# Meson / Ninja
+build/
+
+# Editor / OS
+*~
+*.swp
+.vscode/
+.idea/
+.DS_Store
