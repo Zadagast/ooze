@@ -1,6 +1,10 @@
 # Meson / Ninja
 build/
 
+# AppImage output + downloaded packaging tools
+dist/
+packaging/appimage/tools/
+
 # Bundled elementary icon theme (~38MB, fetched by `ninja -C build`)
 data/icons/elementary/
 .cache/

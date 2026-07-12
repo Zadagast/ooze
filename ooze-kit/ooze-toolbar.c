@@ -45,6 +45,28 @@ ooze_toolbar_ensure_css (void)
     "}"
     ".ooze-settings-grid {"
     "  padding: 8px 16px 24px 16px;"
+    "}"
+    /* King system-app launcher tiles: large color icon + caption. */
+    ".ooze-launcher-tile {"
+    "  min-width: 128px;"
+    "  min-height: 120px;"
+    "  padding: 14px 12px;"
+    "}"
+    ".ooze-launcher-tile .ooze-button-label {"
+    "  font-size: 11pt;"
+    "  margin-top: 4px;"
+    "}"
+    ".ooze-launcher-grid {"
+    "  padding: 28px 24px 36px 24px;"
+    "}"
+    /* Spot Back / Forward: slightly wider nav tiles. */
+    ".ooze-nav-btn {"
+    "  min-width: 64px;"
+    "  padding: 4px 6px;"
+    "}"
+    ".ooze-toolbar-btn:disabled,"
+    ".ooze-nav-btn:disabled {"
+    "  opacity: 0.42;"
     "}");
   gtk_style_context_add_provider_for_display (display,
     GTK_STYLE_PROVIDER (p),

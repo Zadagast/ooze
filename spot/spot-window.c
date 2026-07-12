@@ -10,6 +10,7 @@
 #include "ooze-button.h"
 #include "ooze-icons.h"
 #include "ooze-theme.h"
+#include "ooze-toolbar.h"
 
 #include <string.h>
 
@@ -2252,14 +2253,18 @@ spot_create_toolbar (SpotWindow *self)
   GtkWidget *favorites_btn;
   GtkWidget *applications_btn;
 
+  ooze_toolbar_ensure_css ();
+
   toolbar = ooze_surface_new (OOZE_SURFACE_TOOLBAR, GTK_ORIENTATION_HORIZONTAL);
   gtk_box_set_spacing (GTK_BOX (toolbar), 2);
   gtk_widget_add_css_class (toolbar, "spot-toolbar");
 
   self->back_button = spot_create_toolbar_button (spot_icon_back, "Back", "Back",
                                                    FALSE, FALSE);
+  gtk_widget_add_css_class (self->back_button, "ooze-nav-btn");
   self->forward_button = spot_create_toolbar_button (spot_icon_forward, "Forward", "Forward",
                                                      FALSE, FALSE);
+  gtk_widget_add_css_class (self->forward_button, "ooze-nav-btn");
   gtk_box_append (GTK_BOX (toolbar), self->back_button);
   gtk_box_append (GTK_BOX (toolbar), self->forward_button);
 

@@ -14,7 +14,8 @@
 | --- | --- |
 | **Shell** | Global menu bar, dock, desktop icons, system appearance |
 | **Spot** | File manager with sidebar, column, and grid views |
-| **Ooze Command** | Terminal with matching Gel chrome and global menu support |
+| **Ooze King** | System apps launcher (Spot, Command, Ear, Pak) |
+| **Ooze Command** | Terminal with tabs, Gel chrome, and global menu support |
 | **Ooze Gel** | App window dressing — header bar, traffic lights, drag and resize |
 | **OozeKit** | Shared drawing library for surfaces, pinstripes, buttons, and palette |
 
@@ -38,8 +39,12 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 - Column browser rooted at the active sidebar place
 - Theme-aware surfaces through OozeKit, Gel, and Adwaita
 
+### Ooze King
+- Icon + label launcher for Ooze system apps
+- Opens Spot, Ooze Command, Ooze Ear, and Ooze Pak
+
 ### Ooze Command
-- VTE terminal
+- VTE terminal with multiple tabs and New Tab control
 - Shared Ooze Gel header bar and traffic lights
 - Application menu for the shell global menu
 
@@ -101,6 +106,17 @@ For live rebuilds during development:
 ./watch-devkit.sh
 ```
 
+### AppImage (try without installing)
+
+Build a single-file nested demo (binaries + icons; **host Mutter 18** still required):
+
+```bash
+./scripts/build-appimage.sh
+./dist/Ooze-*-x86_64.AppImage
+```
+
+The AppImage puts Spot, Command, King, Ear, and Pak on `PATH` inside the nested session. It does not replace your login desktop.
+
 ---
 
 ## Repository layout
@@ -108,13 +124,15 @@ For live rebuilds during development:
 ```
 src/           Compositor shell (panel, dock, theme, menus, desktop icons)
 spot/          Spot file manager
+ooze-king/     System apps launcher
 ooze-command/  Terminal
 ooze-kit/      Shared drawing toolkit
 ooze-ui/       Ooze Gel (header bar, traffic lights, drag/resize)
 common/        Shared Gel / traffic-light constants
 data/          Icons, desktop entries, branding
 docs/          Screenshots and demo media
-scripts/       Install helpers
+packaging/     AppImage AppRun and desktop entry
+scripts/       Install helpers and AppImage builder
 ```
 
 ---

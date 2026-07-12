@@ -221,6 +221,29 @@ if gtk4_dep.found() and adw_dep.found()
     warning('Ooze Command skipped: install libvte-2.91-gtk4-dev')
   endif
 
+  executable('ooze-king',
+    'ooze-king/main.c',
+    'ooze-king/ooze-king-window.c',
+    'src/my-icons.c',
+    'src/my-icons-gtk.c',
+    ooze_ui_sources,
+    ooze_kit_sources,
+    include_directories: ooze_app_inc,
+    dependencies: [
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.King.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
   pipewire_dep = dependency('libpipewire-0.3', required: false)
   if pipewire_dep.found()
     ooze_sound_sources = [
@@ -262,33 +285,8 @@ if gtk4_dep.found() and adw_dep.found()
     install_data('data/ear-logo.svg',
       install_dir: ooze_data_dir,
     )
-
-    executable('ooze-king',
-      'ooze-king/main.c',
-      'ooze-king/ooze-king-window.c',
-      ooze_sound_sources,
-      'src/my-icons.c',
-      'src/my-icons-gtk.c',
-      ooze_ui_sources,
-      ooze_kit_sources,
-      include_directories: ooze_ear_inc,
-      dependencies: [
-        gtk4_dep,
-        adw_dep,
-        gio_dep,
-        cairo_dep,
-        pipewire_dep,
-        cc.find_library('m'),
-      ],
-      c_args: ooze_app_c_args,
-      install: true,
-    )
-
-    install_data('data/org.ooze.King.desktop',
-      install_dir: get_option('datadir') / 'applications',
-    )
   else
-    warning('Ooze Ear / Ooze King skipped: install libpipewire-0.3-dev')
+    warning('Ooze Ear skipped: install libpipewire-0.3-dev')
   endif
 
 else

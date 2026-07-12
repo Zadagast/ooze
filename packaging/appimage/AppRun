@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Launch a nested Ooze session from an AppImage AppDir.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# When run from a mounted AppImage, APPDIR is set; otherwise use this tree.
+APPDIR="${APPDIR:-$HERE}"
+
+export PATH="${APPDIR}/usr/bin:${PATH}"
+export OOZE_DATA_DIR="${APPDIR}/usr/share/ooze"
+export XDG_DATA_DIRS="${OOZE_DATA_DIR}:${APPDIR}/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+
+# Project-local GSettings so demos do not write the user's dconf DB.
+export GSETTINGS_BACKEND="${GSETTINGS_BACKEND:-keyfile}"
+export GSETTINGS_SCHEMA_DIR="${GSETTINGS_SCHEMA_DIR:-/usr/share/glib-2.0/schemas}"
+export MUTTER_DEBUG_DUMMY_MODE_SPECS="${MUTTER_DEBUG_DUMMY_MODE_SPECS:-1920x1080}"
+
+# Mutter private libs (clutter/cogl/mtk) live next to libmutter on the host.
+if [[ -d /usr/lib/x86_64-linux-gnu/mutter-18 ]]; then
+  export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/mutter-18${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+elif [[ -d /usr/lib64/mutter-18 ]]; then
+  export LD_LIBRARY_PATH="/usr/lib64/mutter-18${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
+if ! command -v gsettings >/dev/null 2>&1; then
+  echo "Ooze AppImage: gsettings not found; continuing without pref tweaks." >&2
+else
+  gsettings set org.gnome.mutter edge-tiling true 2>/dev/null || true
+  gsettings set org.gnome.desktop.peripherals.mouse drag-threshold 16 2>/dev/null || true
+fi
+
+DESKTOP="${APPDIR}/usr/bin/my-desktop"
+if [[ ! -x "$DESKTOP" ]]; then
+  echo "Ooze AppImage: my-desktop missing from AppDir ($DESKTOP)" >&2
+  exit 1
+fi
+
+# Host must provide Mutter 18 (libmutter-18).
+if ! ldconfig -p 2>/dev/null | grep -q 'libmutter-18\.so'; then
+  if [[ ! -e /usr/lib/x86_64-linux-gnu/libmutter-18.so.0 ]] && \
+     [[ ! -e /usr/lib64/libmutter-18.so.0 ]]; then
+    echo "Ooze AppImage requires host Mutter 18 (libmutter-18)." >&2
+    echo "On Ubuntu/Debian: sudo apt install mutter libmutter-18-0" >&2
+    exit 1
+  fi
+fi
+
+if command -v dbus-run-session >/dev/null 2>&1; then
+  exec dbus-run-session -- "$DESKTOP" --wayland --devkit --no-x11 "$@"
+fi
+
+exec "$DESKTOP" --wayland --devkit --no-x11 "$@"

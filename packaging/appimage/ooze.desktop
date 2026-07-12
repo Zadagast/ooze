@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Ooze
+GenericName=Desktop Environment
+Comment=Nested Ooze desktop (Mutter 18 host required)
+Exec=AppRun
+Icon=ooze
+Terminal=false
+Type=Application
+Categories=System;
+StartupNotify=true
+StartupWMClass=org.ooze.Desktop
+Keywords=Ooze;Mutter;Wayland;Desktop;
+X-AppImage-Version=0.1.0
