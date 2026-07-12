@@ -41,6 +41,20 @@ ooze_surface_ensure_css (void)
     "  box-shadow: none;"
     "  padding: 0;"
     "  border-radius: 0;"
+    "}"
+    /*
+     * Status bar chrome stays edge-to-edge (connected to the window frame).
+     * Only children are inset so glyphs clear the CSD corner radius.
+     */
+    ".ooze-surface-statusbar {"
+    "  min-height: 24px;"
+    "  padding: 0;"
+    "}"
+    ".ooze-surface-statusbar > * {"
+    "  margin-top: 3px;"
+    "  margin-bottom: 8px;"
+    "  margin-left: 10px;"
+    "  margin-right: 10px;"
     "}");
   gtk_style_context_add_provider_for_display (display,
     GTK_STYLE_PROVIDER (p),
@@ -127,5 +141,9 @@ ooze_surface_new (OozeSurfaceVariant variant, GtkOrientation orientation)
   OozeSurface *s = g_object_new (OOZE_TYPE_SURFACE, NULL);
   s->variant = variant;
   gtk_orientable_set_orientation (GTK_ORIENTABLE (s), orientation);
+
+  if (variant == OOZE_SURFACE_STATUSBAR)
+    gtk_widget_add_css_class (GTK_WIDGET (s), "ooze-surface-statusbar");
+
   return GTK_WIDGET (s);
 }

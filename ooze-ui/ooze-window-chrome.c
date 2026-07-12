@@ -385,12 +385,117 @@ ooze_window_chrome_ensure_css (void)
                                      "  min-width:  4px;"
                                      "  min-height: 4px;"
                                      "  background: rgba(85, 85, 97, 0.88);"
+                                     "}"
+
+                                     /* Invisible grips for normal Ooze CSD windows. */
+                                     ".ooze-edge-grip {"
+                                     "  background: transparent;"
+                                     "}"
+                                     ".ooze-edge-grip.n,"
+                                     ".ooze-edge-grip.s {"
+                                     "  min-height: 6px;"
+                                     "}"
+                                     ".ooze-edge-grip.e,"
+                                     ".ooze-edge-grip.w {"
+                                     "  min-width: 6px;"
+                                     "}"
+                                     ".ooze-edge-grip.corner {"
+                                     "  min-width: 12px;"
+                                     "  min-height: 12px;"
                                      "}");
   gtk_style_context_add_provider_for_display (display,
                                               GTK_STYLE_PROVIDER (provider),
                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
   g_object_unref (provider);
   loaded = TRUE;
+}
+
+static GtkWidget *
+ooze_edge_grip_new (GtkWindow      *window,
+                    GdkSurfaceEdge  edge,
+                    const char     *extra_class,
+                    const char     *cursor_name,
+                    GtkAlign        halign,
+                    GtkAlign        valign,
+                    gboolean        hexpand,
+                    gboolean        vexpand)
+{
+  GtkWidget *widget = ooze_resize_edge_new (window, edge, "ooze-edge-grip", cursor_name);
+
+  if (extra_class)
+    gtk_widget_add_css_class (widget, extra_class);
+  gtk_widget_set_halign (widget, halign);
+  gtk_widget_set_valign (widget, valign);
+  gtk_widget_set_hexpand (widget, hexpand);
+  gtk_widget_set_vexpand (widget, vexpand);
+  return widget;
+}
+
+void
+ooze_window_install_edge_resize (GtkWindow *window)
+{
+  GtkWidget *child;
+  GtkWidget *overlay;
+  GtkWidget *grip;
+
+  g_return_if_fail (GTK_IS_WINDOW (window));
+
+  if (g_object_get_data (G_OBJECT (window), "ooze-edge-resize-installed"))
+    return;
+
+  child = gtk_window_get_child (window);
+  if (!child)
+    return;
+
+  /* Don't double-wrap the heavy framed chrome path. */
+  if (g_object_get_data (G_OBJECT (window), "ooze-resize-installed"))
+    return;
+
+  /* Mark early so notify::child from reparenting does not re-enter. */
+  g_object_set_data (G_OBJECT (window), "ooze-edge-resize-installed", GINT_TO_POINTER (1));
+
+  ooze_window_chrome_ensure_css ();
+
+  g_object_ref (child);
+  gtk_window_set_child (window, NULL);
+
+  overlay = gtk_overlay_new ();
+  gtk_overlay_set_child (GTK_OVERLAY (overlay), child);
+  g_object_unref (child);
+
+  grip = ooze_edge_grip_new (window, GDK_SURFACE_EDGE_NORTH, "n", "n-resize",
+                             GTK_ALIGN_FILL, GTK_ALIGN_START, TRUE, FALSE);
+  gtk_overlay_add_overlay (GTK_OVERLAY (overlay), grip);
+
+  grip = ooze_edge_grip_new (window, GDK_SURFACE_EDGE_SOUTH, "s", "s-resize",
+                             GTK_ALIGN_FILL, GTK_ALIGN_END, TRUE, FALSE);
+  gtk_overlay_add_overlay (GTK_OVERLAY (overlay), grip);
+
+  grip = ooze_edge_grip_new (window, GDK_SURFACE_EDGE_WEST, "w", "w-resize",
+                             GTK_ALIGN_START, GTK_ALIGN_FILL, FALSE, TRUE);
+  gtk_overlay_add_overlay (GTK_OVERLAY (overlay), grip);
+
+  grip = ooze_edge_grip_new (window, GDK_SURFACE_EDGE_EAST, "e", "e-resize",
+                             GTK_ALIGN_END, GTK_ALIGN_FILL, FALSE, TRUE);
+  gtk_overlay_add_overlay (GTK_OVERLAY (overlay), grip);
+
+  grip = ooze_edge_grip_new (window, GDK_SURFACE_EDGE_NORTH_WEST, "corner", "nwse-resize",
+                             GTK_ALIGN_START, GTK_ALIGN_START, FALSE, FALSE);
+  gtk_overlay_add_overlay (GTK_OVERLAY (overlay), grip);
+
+  grip = ooze_edge_grip_new (window, GDK_SURFACE_EDGE_NORTH_EAST, "corner", "nesw-resize",
+                             GTK_ALIGN_END, GTK_ALIGN_START, FALSE, FALSE);
+  gtk_overlay_add_overlay (GTK_OVERLAY (overlay), grip);
+
+  grip = ooze_edge_grip_new (window, GDK_SURFACE_EDGE_SOUTH_WEST, "corner", "nesw-resize",
+                             GTK_ALIGN_START, GTK_ALIGN_END, FALSE, FALSE);
+  gtk_overlay_add_overlay (GTK_OVERLAY (overlay), grip);
+
+  grip = ooze_edge_grip_new (window, GDK_SURFACE_EDGE_SOUTH_EAST, "corner", "nwse-resize",
+                             GTK_ALIGN_END, GTK_ALIGN_END, FALSE, FALSE);
+  gtk_overlay_add_overlay (GTK_OVERLAY (overlay), grip);
+
+  gtk_window_set_child (window, overlay);
 }
 
 void
@@ -448,7 +553,10 @@ ooze_window_install_resize_handles (GtkWindow *window,
   gtk_widget_set_vexpand (center, TRUE);
 
   gtk_overlay_set_child (GTK_OVERLAY (overlay), grid);
-  adw_application_window_set_content (ADW_APPLICATION_WINDOW (window), overlay);
+  if (ADW_IS_APPLICATION_WINDOW (window))
+    adw_application_window_set_content (ADW_APPLICATION_WINDOW (window), overlay);
+  else
+    gtk_window_set_child (window, overlay);
 
   g_object_set_data (G_OBJECT (window), "ooze-resize-installed", GINT_TO_POINTER (1));
 }

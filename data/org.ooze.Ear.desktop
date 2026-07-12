@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Ooze Ear
+Comment=PipeWire volume and device mixer for Ooze
+Exec=ooze-ear
+Icon=audio-volume-high
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Mixer;
+StartupWMClass=org.ooze.Ear

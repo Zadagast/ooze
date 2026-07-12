@@ -8,21 +8,22 @@
 /* OozeKit — shared surface + button widgets */
 #include "ooze-surface.h"
 #include "ooze-button.h"
+#include "ooze-icons.h"
+#include "ooze-theme.h"
 
 #include <string.h>
 
 #define SPOT_COLUMN_WIDTH     180
 #define SPOT_MIN_COLUMNS       3
-#define SPOT_LIST_ICON_SIZE   16
-#define SPOT_GRID_ICON_SIZE   56
-#define SPOT_GRID_CELL_WIDTH  90
-#define SPOT_TOOLBAR_ICON_SIZE 32
-#define SPOT_SIDEBAR_ICON_SIZE 32
+#define SPOT_LIST_ICON_SIZE    OOZE_ICON_SIZE_LIST
+#define SPOT_GRID_ICON_SIZE    OOZE_ICON_SIZE_GRID
+#define SPOT_GRID_CELL_WIDTH   84
+#define SPOT_TOOLBAR_ICON_SIZE OOZE_ICON_SIZE_TOOLBAR
+#define SPOT_SIDEBAR_ICON_SIZE OOZE_ICON_SIZE_SIDEBAR
 
 typedef enum {
-  SPOT_VIEW_COLUMNS = 0,
-  SPOT_VIEW_GRID    = 1,
-  SPOT_VIEW_LIST    = 2,   /* same as columns for now; reserved */
+  SPOT_VIEW_GRID    = 0,  /* default */
+  SPOT_VIEW_COLUMNS = 1,
 } SpotViewMode;
 
 struct _SpotWindow
@@ -49,16 +50,18 @@ struct _SpotWindow
   GtkWidget *back_button;
   GtkWidget *forward_button;
   GtkWidget *grid_view_button;
-  GtkWidget *list_view_button;
   GtkWidget *column_view_button;
   GtkWidget *new_folder_popover;
   GtkWidget *new_folder_entry;
+  GtkWidget *context_menu;
 
   GFile *current_dir;
+  GFile *context_target; /* file under right-click / for actions */
   GList *back_stack;
   GList *forward_stack;
   guint last_column_count;
   SpotViewMode view_mode;
+  gboolean clipboard_cut;
 };
 
 G_DEFINE_FINAL_TYPE (SpotWindow, spot_window, GTK_TYPE_APPLICATION_WINDOW)
@@ -97,6 +100,7 @@ spot_ensure_css (void)
     return;
 
   my_icons_configure_gtk ();
+  ooze_theme_ensure ();
 
   provider = gtk_css_provider_new ();
   gtk_css_provider_load_from_string (provider,
@@ -135,6 +139,30 @@ spot_ensure_css (void)
                                      /* Window content area — adaptive */
                                      ".spot-finder { background: @window_bg_color; }"
 
+                                     /*
+                                      * Flush chrome → content join.
+                                      * Adwaita/GTK defaults add radius/shadow that make the
+                                      * view look like a floating card under the toolbar.
+                                      * Square edges so toolbar/sidebar pinlines meet cleanly.
+                                      */
+                                     ".spot-finder paned,"
+                                     ".spot-finder paned > *,"
+                                     ".spot-finder stack,"
+                                     ".spot-finder scrolledwindow:not(.spot-column),"
+                                     ".spot-finder scrolledwindow > viewport,"
+                                     ".spot-finder listbox,"
+                                     ".spot-finder .spot-grid-scroll,"
+                                     ".spot-finder .spot-grid-view,"
+                                     ".spot-finder .ooze-surface {"
+                                     "  border-radius: 0;"
+                                     "  box-shadow: none;"
+                                     "  border: none;"
+                                     "  margin: 0;"
+                                     "  outline: none;"
+                                     "}"
+
+                                     /* Column scrolledwindows keep Finder-style pinlines. */
+
                                      /* ── Toolbar layout ── */
                                      ".spot-toolbar {"
                                      "  background: none;"
@@ -153,11 +181,10 @@ spot_ensure_css (void)
                                      /* ── Labeled toolbar buttons — sizing only
                                       * OozeButton (.ooze-button) strips the GTK chrome;
                                       * we add the Spot-specific min-width here. */
-                                     ".spot-finder-btn { min-width: 52px; }"
+                                     ".spot-finder-btn { min-width: 44px; max-width: 88px; }"
                                      ".spot-finder-btn:active { color: #ffffff; }"
-                                     ".spot-finder-btn-label {"
-                                     "  font-size: 10px;"
-                                     "  font-weight: 500;"
+                                     ".spot-finder-btn label {"
+                                     "  max-width-chars: 9;"
                                      "}"
 
                                      /* Icon-only nav/view buttons */
@@ -172,11 +199,11 @@ spot_ensure_css (void)
                                       * Shape + size only.  Background, border, text colour
                                       * and focus ring are left to Adwaita so they adapt
                                       * automatically between light and dark mode.
+                                      * Typography comes from ooze_theme_ensure().
                                       * ─────────────────────────────────────────────────── */
                                      ".spot-toolbar .spot-search {"
-                                     "  min-width: 155px;"
+                                     "  min-width: 96px;"
                                      "  border-radius: 10px;"
-                                     "  font-size: 11px;"
                                      "}"
 
                                      /* ── Sidebar ── */
@@ -187,61 +214,63 @@ spot_ensure_css (void)
                                      "  background: #2968c8;"
                                      "}"
                                      ".spot-sidebar-list .spot-sidebar-label {"
-                                     "  font-size: 11px;"
-                                     "  font-weight: 500;"
                                      "  color: @sidebar_fg_color;"
                                      "}"
                                      ".spot-sidebar-list row:selected .spot-sidebar-label {"
                                      "  color: #ffffff;"
                                      "}"
 
-                                     /* ── Column browser — adaptive colours via Adwaita tokens ── */
-                                     ".spot-column {"
+                                     /* ── Column browser ──
+                                      * Finder-style vertical pinlines between columns.
+                                      * Explicit rgba (not @borders) so dark mode still reads.
+                                      * Specificity must beat flush scrolledwindow rules. */
+                                     ".spot-finder .spot-column {"
                                      "  min-width: 180px;"
-                                     "  border-right: 1px solid @borders;"
+                                     "  border-radius: 0;"
+                                     "  margin: 0;"
+                                     "  border: none;"
                                      "  background: @view_bg_color;"
+                                     "  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.28);"
                                      "}"
-                                     ".spot-column row { padding: 2px 8px; font-size: 11px;"
+                                     ".spot-finder .spot-column:last-child {"
+                                     "  box-shadow: none;"
+                                     "}"
+                                     ".spot-finder .spot-column > viewport,"
+                                     ".spot-finder .spot-column listbox {"
+                                     "  background: transparent;"
+                                     "  border: none;"
+                                     "  box-shadow: none;"
+                                     "}"
+                                     ".spot-column row { padding: 2px 8px;"
                                      "                   color: @view_fg_color; }"
                                      ".spot-column row:hover { background: rgba(41,104,200,0.10); }"
                                      ".spot-column row:selected {"
                                      "  background: #2968c8;"
                                      "  color: #ffffff;"
                                      "}"
+                                     /* Light hairline on dark charcoal. */
+                                     ".dark .spot-finder .spot-column {"
+                                     "  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.18);"
+                                     "}"
+                                     ".dark .spot-finder .spot-column:last-child {"
+                                     "  box-shadow: none;"
+                                     "}"
 
-                                     /* ── Status bar ── */
+                                     /* ── Status bar ──
+                                      * Surface is edge-flush; OozeKit insets only the label
+                                      * (.ooze-surface-statusbar > *) for CSD corner clearance. */
                                      ".spot-statusbar {"
                                      "  background: none;"
-                                     "  padding: 3px 10px;"
-                                     "  font-size: 11px;"
-                                     "  font-weight: 400;"
                                      "  color: @window_fg_color;"
                                      "  opacity: 0.65;"
                                      "}"
 
-                                     /* ── Grid / icon view ────────────────────────────────── *
-                                      * Use @headerbar_bg_color so the content area matches the
-                                      * Ooze dark-charcoal surface in dark mode (~#303030) and
-                                      * a light neutral in light mode — both matching our palette.
-                                      * ─────────────────────────────────────────────────────── */
-
-                                     /* Scrolled window + its inner viewport: uniform background */
-                                     ".spot-grid-scroll {"
-                                     "  background: @headerbar_bg_color;"
-                                     "}"
-                                     ".spot-grid-scroll > viewport {"
-                                     "  background: transparent;"
-                                     "}"
-
-                                     /* FlowBox itself: transparent so the scroll bg shows through */
+                                     /* Content views share one flat plane under the toolbar. */
+                                     ".spot-grid-scroll,"
+                                     ".spot-grid-scroll > viewport,"
                                      ".spot-grid-view {"
-                                     "  background: transparent;"
+                                     "  background: @view_bg_color;"
                                      "}"
-
-                                     /* ── Grid / icon view — visual tokens only ──────────────
-                                      * All spacing and margins are set in C via
-                                      * gtk_widget_set_margin_* so CSS stays visual-only.
-                                      * ─────────────────────────────────────────────────── */
 
                                      /* Selection + hover chrome on the FlowBoxChild */
                                      ".spot-grid-view > flowboxchild {"
@@ -258,7 +287,6 @@ spot_ensure_css (void)
 
                                      /* Filename label — colour follows window fg, not view fg */
                                      ".spot-grid-label {"
-                                     "  font-size: 11px;"
                                      "  color: @window_fg_color;"
                                      "}"
                                      ".spot-grid-view > flowboxchild:selected .spot-grid-label {"
@@ -289,6 +317,671 @@ static void spot_navigate_to (SpotWindow *self, GFile *dir, gboolean push_histor
 static void spot_open_file (GFile *file);
 static void spot_rebuild_columns (SpotWindow *self);
 static gint spot_compare_file_info (gconstpointer a, gconstpointer b);
+static void spot_update_action_states (SpotWindow *self);
+static void spot_install_actions (SpotWindow *self);
+static void spot_attach_context_menu (SpotWindow *self, GtkWidget *widget);
+
+static void
+spot_set_context_target (SpotWindow *self,
+                         GFile      *file)
+{
+  if (self->context_target == file)
+    return;
+  g_clear_object (&self->context_target);
+  if (file)
+    self->context_target = g_object_ref (file);
+}
+
+static GFile *
+spot_find_file_on_widget (GtkWidget *widget)
+{
+  while (widget)
+    {
+      GFile *file = g_object_get_data (G_OBJECT (widget), "spot-file");
+      if (file)
+        return file;
+      widget = gtk_widget_get_parent (widget);
+    }
+  return NULL;
+}
+
+static GFile *
+spot_pick_file_at (GtkWidget *widget,
+                   double     x,
+                   double     y)
+{
+  GtkWidget *picked;
+
+  picked = gtk_widget_pick (widget, x, y, GTK_PICK_DEFAULT);
+  return spot_find_file_on_widget (picked);
+}
+
+static GFile *
+spot_get_selected_file (SpotWindow *self)
+{
+  if (self->context_target)
+    return self->context_target;
+
+  if (self->view_mode == SPOT_VIEW_GRID && self->grid_flow)
+    {
+      g_autoptr (GList) selected = NULL;
+      GtkFlowBoxChild *child;
+      GtkWidget *cell;
+
+      selected = gtk_flow_box_get_selected_children (GTK_FLOW_BOX (self->grid_flow));
+      if (!selected)
+        return NULL;
+      child = selected->data;
+      cell = gtk_flow_box_child_get_child (child);
+      return spot_find_file_on_widget (cell);
+    }
+
+  if (self->columns_box)
+    {
+      GtkWidget *scrolled;
+
+      for (scrolled = gtk_widget_get_last_child (self->columns_box);
+           scrolled != NULL;
+           scrolled = gtk_widget_get_prev_sibling (scrolled))
+        {
+          GtkWidget *list = gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (scrolled));
+          GtkListBoxRow *row;
+
+          if (!GTK_IS_LIST_BOX (list))
+            continue;
+          row = gtk_list_box_get_selected_row (GTK_LIST_BOX (list));
+          if (row)
+            return spot_find_file_on_widget (GTK_WIDGET (row));
+        }
+    }
+
+  return NULL;
+}
+
+static void
+spot_select_file_widget (SpotWindow *self,
+                         GtkWidget  *host G_GNUC_UNUSED,
+                         GFile      *file)
+{
+  if (!file)
+    return;
+
+  if (self->view_mode == SPOT_VIEW_GRID && self->grid_flow)
+    {
+      GtkWidget *child;
+
+      for (child = gtk_widget_get_first_child (self->grid_flow);
+           child != NULL;
+           child = gtk_widget_get_next_sibling (child))
+        {
+          GtkWidget *cell;
+          GFile *f;
+
+          if (!GTK_IS_FLOW_BOX_CHILD (child))
+            continue;
+          cell = gtk_flow_box_child_get_child (GTK_FLOW_BOX_CHILD (child));
+          f = spot_find_file_on_widget (cell);
+          if (f && g_file_equal (f, file))
+            {
+              gtk_flow_box_select_child (GTK_FLOW_BOX (self->grid_flow),
+                                         GTK_FLOW_BOX_CHILD (child));
+              return;
+            }
+        }
+    }
+  else if (self->columns_box)
+    {
+      GtkWidget *scrolled;
+
+      for (scrolled = gtk_widget_get_first_child (self->columns_box);
+           scrolled != NULL;
+           scrolled = gtk_widget_get_next_sibling (scrolled))
+        {
+          GtkWidget *list = gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (scrolled));
+          GtkWidget *row;
+
+          if (!GTK_IS_LIST_BOX (list))
+            continue;
+
+          for (row = gtk_widget_get_first_child (list);
+               row != NULL;
+               row = gtk_widget_get_next_sibling (row))
+            {
+              GFile *f;
+
+              if (!GTK_IS_LIST_BOX_ROW (row))
+                continue;
+              f = spot_find_file_on_widget (row);
+              if (f && g_file_equal (f, file))
+                {
+                  gtk_list_box_select_row (GTK_LIST_BOX (list),
+                                           GTK_LIST_BOX_ROW (row));
+                  return;
+                }
+            }
+        }
+    }
+}
+
+static char *
+spot_unique_child_name (GFile      *parent,
+                        const char *base_name)
+{
+  g_autofree char *name = NULL;
+  g_autofree char *stem = NULL;
+  g_autofree char *ext = NULL;
+  const char *dot;
+  int suffix = 0;
+
+  if (!parent || !base_name || !*base_name)
+    return g_strdup ("untitled");
+
+  dot = strrchr (base_name, '.');
+  if (dot && dot != base_name)
+    {
+      stem = g_strndup (base_name, (gsize) (dot - base_name));
+      ext = g_strdup (dot);
+    }
+  else
+    {
+      stem = g_strdup (base_name);
+      ext = g_strdup ("");
+    }
+
+  while (TRUE)
+    {
+      g_autoptr (GFile) child = NULL;
+
+      if (suffix == 0)
+        name = g_strdup (base_name);
+      else if (suffix == 1)
+        name = g_strdup_printf ("%s copy%s", stem, ext);
+      else
+        name = g_strdup_printf ("%s copy %d%s", stem, suffix, ext);
+
+      child = g_file_get_child (parent, name);
+      if (!g_file_query_exists (child, NULL))
+        return g_steal_pointer (&name);
+
+      g_clear_pointer (&name, g_free);
+      suffix++;
+    }
+}
+
+static gboolean
+spot_copy_file_recursive (GFile   *src,
+                          GFile   *dest,
+                          GError **error)
+{
+  g_autoptr (GFileInfo) info = NULL;
+  GFileType type;
+
+  info = g_file_query_info (src,
+                            G_FILE_ATTRIBUTE_STANDARD_TYPE,
+                            G_FILE_QUERY_INFO_NONE,
+                            NULL,
+                            error);
+  if (!info)
+    return FALSE;
+
+  type = g_file_info_get_file_type (info);
+  if (type == G_FILE_TYPE_DIRECTORY)
+    {
+      g_autoptr (GFileEnumerator) enumerator = NULL;
+      g_autoptr (GError) local_error = NULL;
+      GFileInfo *child_info;
+
+      if (!g_file_make_directory (dest, NULL, error))
+        return FALSE;
+
+      enumerator = g_file_enumerate_children (src,
+                                              G_FILE_ATTRIBUTE_STANDARD_NAME,
+                                              G_FILE_QUERY_INFO_NONE,
+                                              NULL,
+                                              error);
+      if (!enumerator)
+        return FALSE;
+
+      while ((child_info = g_file_enumerator_next_file (enumerator, NULL, &local_error)) != NULL)
+        {
+          const char *name = g_file_info_get_name (child_info);
+          g_autoptr (GFile) child_src = g_file_get_child (src, name);
+          g_autoptr (GFile) child_dest = g_file_get_child (dest, name);
+          gboolean ok;
+
+          ok = spot_copy_file_recursive (child_src, child_dest, error);
+          g_object_unref (child_info);
+          if (!ok)
+            return FALSE;
+        }
+
+      if (local_error)
+        {
+          g_propagate_error (error, g_steal_pointer (&local_error));
+          return FALSE;
+        }
+
+      return TRUE;
+    }
+
+  return g_file_copy (src, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, error);
+}
+
+static void
+spot_clipboard_set_files (SpotWindow *self,
+                          GFile      *file,
+                          gboolean    cut)
+{
+  GdkClipboard *clipboard;
+  GdkContentProvider *provider;
+  GdkFileList *file_list;
+  GSList *files = NULL;
+
+  if (!file)
+    return;
+
+  clipboard = gtk_widget_get_clipboard (GTK_WIDGET (self));
+  files = g_slist_prepend (files, g_object_ref (file));
+  file_list = gdk_file_list_new_from_list (files);
+  g_slist_free_full (files, g_object_unref);
+
+  provider = gdk_content_provider_new_typed (GDK_TYPE_FILE_LIST, file_list);
+  gdk_clipboard_set_content (clipboard, provider);
+  g_object_unref (provider);
+  /* GdkFileList is consumed/copied by the provider path; drop our ref. */
+  g_boxed_free (GDK_TYPE_FILE_LIST, file_list);
+
+  self->clipboard_cut = cut;
+  spot_update_action_states (self);
+}
+
+static void
+spot_paste_files_finish (GObject      *source,
+                         GAsyncResult *result,
+                         gpointer      user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+  g_autoptr (GError) error = NULL;
+  const GValue *value = NULL;
+  GdkFileList *file_list;
+  GSList *files;
+  GSList *l;
+  gboolean cut = self->clipboard_cut;
+
+  value = gdk_clipboard_read_value_finish (GDK_CLIPBOARD (source), result, &error);
+  if (!value)
+    {
+      if (error)
+        spot_show_error (self, "Paste Failed", error->message);
+      return;
+    }
+
+  if (!G_VALUE_HOLDS (value, GDK_TYPE_FILE_LIST))
+    {
+      g_value_unset ((GValue *) value);
+      g_free ((GValue *) value);
+      return;
+    }
+
+  file_list = g_value_get_boxed (value);
+  if (!file_list || !self->current_dir)
+    {
+      g_value_unset ((GValue *) value);
+      g_free ((GValue *) value);
+      return;
+    }
+
+  files = gdk_file_list_get_files (file_list);
+  for (l = files; l != NULL; l = l->next)
+    {
+      GFile *src = l->data;
+      g_autofree char *basename = NULL;
+      g_autofree char *dest_name = NULL;
+      g_autoptr (GFile) dest = NULL;
+      g_autoptr (GError) copy_error = NULL;
+
+      basename = g_file_get_basename (src);
+      dest_name = spot_unique_child_name (self->current_dir, basename);
+      dest = g_file_get_child (self->current_dir, dest_name);
+
+      if (cut)
+        {
+          if (!g_file_move (src, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &copy_error))
+            {
+              spot_show_error (self, "Move Failed", copy_error->message);
+              cut = FALSE;
+              break;
+            }
+        }
+      else if (!spot_copy_file_recursive (src, dest, &copy_error))
+        {
+          spot_show_error (self, "Paste Failed",
+                           copy_error ? copy_error->message : "Could not paste.");
+          break;
+        }
+    }
+
+  g_value_unset ((GValue *) value);
+  g_free ((GValue *) value);
+
+  if (cut)
+    {
+      self->clipboard_cut = FALSE;
+      gdk_clipboard_set_content (gtk_widget_get_clipboard (GTK_WIDGET (self)), NULL);
+    }
+
+  spot_refresh (self);
+  spot_update_action_states (self);
+}
+
+static void
+spot_action_open (GSimpleAction *action G_GNUC_UNUSED,
+                  GVariant      *param G_GNUC_UNUSED,
+                  gpointer       user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+  GFile *file = spot_get_selected_file (self);
+  g_autoptr (GFileInfo) info = NULL;
+
+  if (!file)
+    return;
+
+  info = g_file_query_info (file,
+                            G_FILE_ATTRIBUTE_STANDARD_TYPE,
+                            G_FILE_QUERY_INFO_NONE,
+                            NULL, NULL);
+  if (info && g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
+    spot_navigate_to (self, file, TRUE);
+  else
+    spot_open_file (file);
+}
+
+static void
+spot_action_new_folder (GSimpleAction *action G_GNUC_UNUSED,
+                        GVariant      *param G_GNUC_UNUSED,
+                        gpointer       user_data)
+{
+  spot_show_new_folder_popover (SPOT_WINDOW (user_data));
+}
+
+static void
+spot_action_copy (GSimpleAction *action G_GNUC_UNUSED,
+                  GVariant      *param G_GNUC_UNUSED,
+                  gpointer       user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+  GFile *file = spot_get_selected_file (self);
+
+  spot_clipboard_set_files (self, file, FALSE);
+}
+
+static void
+spot_action_cut (GSimpleAction *action G_GNUC_UNUSED,
+                 GVariant      *param G_GNUC_UNUSED,
+                 gpointer       user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+  GFile *file = spot_get_selected_file (self);
+
+  spot_clipboard_set_files (self, file, TRUE);
+}
+
+static void
+spot_action_paste (GSimpleAction *action G_GNUC_UNUSED,
+                   GVariant      *param G_GNUC_UNUSED,
+                   gpointer       user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+  GdkClipboard *clipboard = gtk_widget_get_clipboard (GTK_WIDGET (self));
+
+  if (!self->current_dir)
+    return;
+
+  gdk_clipboard_read_value_async (clipboard,
+                                  GDK_TYPE_FILE_LIST,
+                                  G_PRIORITY_DEFAULT,
+                                  NULL,
+                                  spot_paste_files_finish,
+                                  self);
+}
+
+static void
+spot_action_trash (GSimpleAction *action G_GNUC_UNUSED,
+                   GVariant      *param G_GNUC_UNUSED,
+                   gpointer       user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+  GFile *file = spot_get_selected_file (self);
+  g_autoptr (GError) error = NULL;
+
+  if (!file)
+    return;
+
+  if (!g_file_trash (file, NULL, &error))
+    {
+      spot_show_error (self, "Could Not Move to Trash", error->message);
+      return;
+    }
+
+  spot_set_context_target (self, NULL);
+  spot_refresh (self);
+  spot_update_action_states (self);
+}
+
+static void
+spot_action_refresh (GSimpleAction *action G_GNUC_UNUSED,
+                     GVariant      *param G_GNUC_UNUSED,
+                     gpointer       user_data)
+{
+  spot_refresh (SPOT_WINDOW (user_data));
+}
+
+static void
+spot_update_action_states (SpotWindow *self)
+{
+  GAction *action;
+  GFile *file = spot_get_selected_file (self);
+  gboolean has_file = file != NULL;
+  gboolean has_dir = self->current_dir != NULL;
+
+  action = g_action_map_lookup_action (G_ACTION_MAP (self), "open");
+  if (action)
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action), has_file);
+
+  action = g_action_map_lookup_action (G_ACTION_MAP (self), "copy");
+  if (action)
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action), has_file);
+
+  action = g_action_map_lookup_action (G_ACTION_MAP (self), "cut");
+  if (action)
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action), has_file);
+
+  action = g_action_map_lookup_action (G_ACTION_MAP (self), "trash");
+  if (action)
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action), has_file);
+
+  action = g_action_map_lookup_action (G_ACTION_MAP (self), "new-folder");
+  if (action)
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action), has_dir);
+
+  action = g_action_map_lookup_action (G_ACTION_MAP (self), "paste");
+  if (action)
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action), has_dir);
+
+  action = g_action_map_lookup_action (G_ACTION_MAP (self), "refresh");
+  if (action)
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action), has_dir);
+}
+
+static GMenuModel *
+spot_build_context_menu_model (gboolean on_item)
+{
+  GMenu *menu = g_menu_new ();
+  GMenu *section;
+
+  if (on_item)
+    {
+      section = g_menu_new ();
+      g_menu_append (section, "Open", "win.open");
+      g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
+      g_object_unref (section);
+
+      section = g_menu_new ();
+      g_menu_append (section, "Cut", "win.cut");
+      g_menu_append (section, "Copy", "win.copy");
+      g_menu_append (section, "Paste", "win.paste");
+      g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
+      g_object_unref (section);
+
+      section = g_menu_new ();
+      g_menu_append (section, "New Folder", "win.new-folder");
+      g_menu_append (section, "Move to Trash", "win.trash");
+      g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
+      g_object_unref (section);
+    }
+  else
+    {
+      section = g_menu_new ();
+      g_menu_append (section, "New Folder", "win.new-folder");
+      g_menu_append (section, "Paste", "win.paste");
+      g_menu_append (section, "Refresh", "win.refresh");
+      g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
+      g_object_unref (section);
+    }
+
+  return G_MENU_MODEL (menu);
+}
+
+static void
+spot_show_context_menu (SpotWindow *self,
+                        GtkWidget  *relative_to,
+                        double      x,
+                        double      y,
+                        gboolean    on_item)
+{
+  g_autoptr (GMenuModel) model = NULL;
+  GdkRectangle rect;
+  graphene_point_t local;
+  graphene_point_t in_window;
+
+  spot_update_action_states (self);
+
+  model = spot_build_context_menu_model (on_item);
+
+  if (self->context_menu)
+    {
+      gtk_widget_unparent (self->context_menu);
+      self->context_menu = NULL;
+    }
+
+  /* Parent to the window — never to FlowBox/ListBox. Those containers are
+   * cleared on refresh; a popover sibling would make remove() loop forever. */
+  self->context_menu = gtk_popover_menu_new_from_model (model);
+  gtk_widget_set_parent (self->context_menu, GTK_WIDGET (self));
+  gtk_popover_set_has_arrow (GTK_POPOVER (self->context_menu), FALSE);
+  gtk_popover_set_position (GTK_POPOVER (self->context_menu), GTK_POS_BOTTOM);
+
+  graphene_point_init (&local, (float) x, (float) y);
+  if (gtk_widget_compute_point (relative_to, GTK_WIDGET (self), &local, &in_window))
+    {
+      rect.x = (int) in_window.x;
+      rect.y = (int) in_window.y;
+    }
+  else
+    {
+      rect.x = (int) x;
+      rect.y = (int) y;
+    }
+  rect.width = 1;
+  rect.height = 1;
+  gtk_popover_set_pointing_to (GTK_POPOVER (self->context_menu), &rect);
+  gtk_popover_popup (GTK_POPOVER (self->context_menu));
+}
+
+static void
+on_context_pressed (GtkGestureClick *gesture,
+                    gint             n_press,
+                    gdouble          x,
+                    gdouble          y,
+                    SpotWindow      *self)
+{
+  GtkWidget *widget;
+  GFile *file;
+
+  if (n_press != 1)
+    return;
+
+  widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+  file = spot_pick_file_at (widget, x, y);
+
+  if (file)
+    {
+      spot_set_context_target (self, file);
+      spot_select_file_widget (self, widget, file);
+    }
+  else
+    {
+      spot_set_context_target (self, NULL);
+    }
+
+  spot_show_context_menu (self, widget, x, y, file != NULL);
+}
+
+static void
+spot_attach_context_menu (SpotWindow *self,
+                          GtkWidget  *widget)
+{
+  GtkGesture *gesture;
+
+  gesture = gtk_gesture_click_new ();
+  gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (gesture), GDK_BUTTON_SECONDARY);
+  g_signal_connect (gesture, "pressed", G_CALLBACK (on_context_pressed), self);
+  gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (gesture));
+}
+
+static void
+spot_install_actions (SpotWindow *self)
+{
+  static const GActionEntry entries[] = {
+    { "open",       spot_action_open,       NULL, NULL, NULL },
+    { "new-folder", spot_action_new_folder, NULL, NULL, NULL },
+    { "copy",       spot_action_copy,       NULL, NULL, NULL },
+    { "cut",        spot_action_cut,        NULL, NULL, NULL },
+    { "paste",      spot_action_paste,      NULL, NULL, NULL },
+    { "trash",      spot_action_trash,      NULL, NULL, NULL },
+    { "refresh",    spot_action_refresh,    NULL, NULL, NULL },
+  };
+  GtkApplication *app;
+  struct {
+    const char *action;
+    const char *accel;
+  } accels[] = {
+    { "win.copy",       "<Control>c" },
+    { "win.cut",        "<Control>x" },
+    { "win.paste",      "<Control>v" },
+    { "win.trash",      "Delete" },
+    { "win.new-folder", "<Control><Shift>n" },
+    { "win.refresh",    "<Control>r" },
+    { "win.open",       "<Control>o" },
+  };
+  gsize i;
+
+  g_action_map_add_action_entries (G_ACTION_MAP (self),
+                                   entries, G_N_ELEMENTS (entries),
+                                   self);
+
+  app = gtk_window_get_application (GTK_WINDOW (self));
+  if (app)
+    {
+      for (i = 0; i < G_N_ELEMENTS (accels); i++)
+        {
+          const char *accel_list[] = { accels[i].accel, NULL };
+          gtk_application_set_accels_for_action (app, accels[i].action, accel_list);
+        }
+    }
+
+  spot_update_action_states (self);
+}
 
 static GIcon *
 spot_info_get_icon (GFileInfo *info)
@@ -353,6 +1046,9 @@ spot_image_new_for_info (GFileInfo *info)
     gtk_image_set_from_gicon (GTK_IMAGE (image), icon);
 
   gtk_image_set_pixel_size (GTK_IMAGE (image), SPOT_LIST_ICON_SIZE);
+  gtk_widget_set_size_request (image, SPOT_LIST_ICON_SIZE, SPOT_LIST_ICON_SIZE);
+  gtk_widget_set_halign (image, GTK_ALIGN_CENTER);
+  gtk_widget_set_valign (image, GTK_ALIGN_CENTER);
   return image;
 }
 
@@ -387,6 +1083,10 @@ spot_image_new_for_info_size (GFileInfo *info, int size)
     gtk_image_set_from_gicon (GTK_IMAGE (image), icon);
 
   gtk_image_set_pixel_size (GTK_IMAGE (image), size);
+  gtk_widget_set_size_request (image, size, size);
+  gtk_widget_set_halign (image, GTK_ALIGN_CENTER);
+  gtk_widget_set_valign (image, GTK_ALIGN_CENTER);
+  gtk_widget_add_css_class (image, "ooze-icon");
   return image;
 }
 
@@ -434,8 +1134,17 @@ spot_clear_grid (SpotWindow *self)
 {
   GtkWidget *child;
 
-  while ((child = gtk_widget_get_first_child (self->grid_flow)) != NULL)
-    gtk_flow_box_remove (GTK_FLOW_BOX (self->grid_flow), child);
+  /* Only remove real FlowBox children — ignore any stray non-item widgets. */
+  child = gtk_widget_get_first_child (self->grid_flow);
+  while (child != NULL)
+    {
+      GtkWidget *next = gtk_widget_get_next_sibling (child);
+
+      if (GTK_IS_FLOW_BOX_CHILD (child))
+        gtk_flow_box_remove (GTK_FLOW_BOX (self->grid_flow), child);
+
+      child = next;
+    }
 }
 
 static void
@@ -534,28 +1243,20 @@ spot_set_view_mode (SpotWindow *self, SpotViewMode mode)
 {
   self->view_mode = mode;
 
-  /* Sync .active class on the three toggle buttons */
   if (mode == SPOT_VIEW_GRID)
     gtk_widget_add_css_class (self->grid_view_button, "active");
   else
     gtk_widget_remove_css_class (self->grid_view_button, "active");
-
-  if (mode == SPOT_VIEW_LIST)
-    gtk_widget_add_css_class (self->list_view_button, "active");
-  else
-    gtk_widget_remove_css_class (self->list_view_button, "active");
 
   if (mode == SPOT_VIEW_COLUMNS)
     gtk_widget_add_css_class (self->column_view_button, "active");
   else
     gtk_widget_remove_css_class (self->column_view_button, "active");
 
-  /* Flip the stack page */
   gtk_stack_set_visible_child_name (
       GTK_STACK (self->content_stack),
       mode == SPOT_VIEW_GRID ? "grid" : "columns");
 
-  /* Repopulate whichever view is now visible */
   if (mode == SPOT_VIEW_GRID)
     spot_populate_grid (self);
   else
@@ -569,13 +1270,6 @@ on_grid_view_clicked (GtkButton *btn G_GNUC_UNUSED, SpotWindow *self)
 }
 
 static void
-on_list_view_clicked (GtkButton *btn G_GNUC_UNUSED, SpotWindow *self)
-{
-  /* Treat list as columns for now */
-  spot_set_view_mode (self, SPOT_VIEW_COLUMNS);
-}
-
-static void
 on_column_view_clicked (GtkButton *btn G_GNUC_UNUSED, SpotWindow *self)
 {
   spot_set_view_mode (self, SPOT_VIEW_COLUMNS);
@@ -584,54 +1278,9 @@ on_column_view_clicked (GtkButton *btn G_GNUC_UNUSED, SpotWindow *self)
 static GtkWidget *
 spot_image_new_from_icon_list (const char * const *icon_names,
                                int                   size,
-                               gboolean              prefer_color)
+                               gboolean              prefer_color G_GNUC_UNUSED)
 {
-  GtkWidget *image;
-  g_autoptr (GtkIconPaintable) paintable = NULL;
-  GtkIconTheme *theme;
-  gsize i;
-
-  image = gtk_image_new ();
-  theme = gtk_icon_theme_get_for_display (gdk_display_get_default ());
-
-  if (prefer_color)
-    {
-      for (i = 0; icon_names && icon_names[i]; i++)
-        {
-          paintable = gtk_icon_theme_lookup_icon (theme,
-                                                  icon_names[i],
-                                                  NULL,
-                                                  size,
-                                                  1,
-                                                  GTK_TEXT_DIR_LTR,
-                                                  GTK_ICON_LOOKUP_PRELOAD);
-          if (paintable)
-            break;
-        }
-    }
-
-  if (!paintable)
-    {
-      for (i = 0; icon_names && icon_names[i]; i++)
-        {
-          paintable = gtk_icon_theme_lookup_icon (theme,
-                                                  icon_names[i],
-                                                  NULL,
-                                                  size,
-                                                  1,
-                                                  GTK_TEXT_DIR_LTR,
-                                                  GTK_ICON_LOOKUP_PRELOAD |
-                                                  GTK_ICON_LOOKUP_FORCE_SYMBOLIC);
-          if (paintable)
-            break;
-        }
-    }
-
-  if (paintable)
-    gtk_image_set_from_paintable (GTK_IMAGE (image), GDK_PAINTABLE (paintable));
-
-  gtk_image_set_pixel_size (GTK_IMAGE (image), size);
-  return image;
+  return ooze_icon_image_new (icon_names, size);
 }
 
 static const char * const spot_icon_back[] = {
@@ -641,13 +1290,10 @@ static const char * const spot_icon_forward[] = {
   "go-next", "go-next-symbolic", NULL
 };
 static const char * const spot_icon_view_grid[] = {
-  "view-grid-symbolic", "view-grid", NULL
-};
-static const char * const spot_icon_view_list[] = {
-  "view-list-symbolic", "view-list", NULL
+  "view-grid-symbolic", "view-grid", "view-app-grid", NULL
 };
 static const char * const spot_icon_view_column[] = {
-  "view-column-symbolic", "view-dual-symbolic", NULL
+  "view-column-symbolic", "view-dual-symbolic", "view-column", "view-dual", NULL
 };
 static const char * const spot_icon_computer[] = {
   "computer", "drive-harddisk", NULL
@@ -712,17 +1358,17 @@ spot_sidebar_icon_names (const SpotPlace *place)
 }
 
 static GtkWidget *
-spot_create_icon_button (const char * const *icon_names,
-                         const char         *tooltip,
-                         gboolean            toggle,
-                         gboolean            active)
+spot_create_toolbar_button (const char * const *icon_names,
+                            const char         *label,
+                            const char         *tooltip,
+                            gboolean            toggle,
+                            gboolean            active)
 {
   GtkWidget *button;
-  GtkWidget *image;
-  int icon_size = toggle ? SPOT_TOOLBAR_ICON_SIZE : 24;
+  GtkWidget *child;
 
-  button = ooze_button_new (OOZE_BUTTON_TOOLBAR);
-  gtk_widget_add_css_class (button, "spot-finder-icon-btn");
+  button = ooze_button_new_toolbar (icon_names, label, tooltip);
+  gtk_widget_add_css_class (button, "spot-finder-btn");
   if (toggle)
     {
       gtk_widget_add_css_class (button, "spot-finder-toggle");
@@ -730,34 +1376,21 @@ spot_create_icon_button (const char * const *icon_names,
         gtk_widget_add_css_class (button, "active");
     }
 
-  image = spot_image_new_from_icon_list (icon_names, icon_size, TRUE);
-  gtk_button_set_child (GTK_BUTTON (button), image);
-  gtk_widget_set_tooltip_text (button, tooltip);
-  return button;
-}
-
-static GtkWidget *
-spot_create_labeled_toolbar_button (const char         *label,
-                                    const char * const *icon_names,
-                                    const char         *tooltip)
-{
-  GtkWidget *button;
-  GtkWidget *box;
-  GtkWidget *image;
-  GtkWidget *lbl;
-
-  button = ooze_button_new (OOZE_BUTTON_TOOLBAR);
-  gtk_widget_add_css_class (button, "spot-finder-btn");
-
-  box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 1);
-  image = spot_image_new_from_icon_list (icon_names, SPOT_TOOLBAR_ICON_SIZE, TRUE);
-  lbl = gtk_label_new (label);
-  gtk_label_set_xalign (GTK_LABEL (lbl), 0.5);
-  gtk_widget_add_css_class (lbl, "spot-finder-btn-label");
-  gtk_box_append (GTK_BOX (box), image);
-  gtk_box_append (GTK_BOX (box), lbl);
-  gtk_button_set_child (GTK_BUTTON (button), box);
-  gtk_widget_set_tooltip_text (button, tooltip);
+  /* Cap label width so the toolbar cannot push window min past half-screen. */
+  child = gtk_button_get_child (GTK_BUTTON (button));
+  if (GTK_IS_BOX (child))
+    {
+      GtkWidget *w = gtk_widget_get_first_child (child);
+      while (w)
+        {
+          if (GTK_IS_LABEL (w))
+            {
+              gtk_label_set_ellipsize (GTK_LABEL (w), PANGO_ELLIPSIZE_END);
+              gtk_label_set_max_width_chars (GTK_LABEL (w), 9);
+            }
+          w = gtk_widget_get_next_sibling (w);
+        }
+    }
 
   return button;
 }
@@ -1344,6 +1977,7 @@ spot_create_column_list (SpotWindow *self,
     gtk_list_box_select_row (GTK_LIST_BOX (list), GTK_LIST_BOX_ROW (selected_row));
 
   g_signal_connect (list, "row-activated", G_CALLBACK (spot_on_column_row_activated), self);
+  spot_attach_context_menu (self, list);
 
   return scrolled;
 }
@@ -1434,6 +2068,7 @@ spot_refresh (SpotWindow *self)
   spot_update_nav_buttons (self);
   spot_update_title (self);
   spot_update_status (self);
+  spot_update_action_states (self);
 }
 
 static void
@@ -1621,8 +2256,10 @@ spot_create_toolbar (SpotWindow *self)
   gtk_box_set_spacing (GTK_BOX (toolbar), 2);
   gtk_widget_add_css_class (toolbar, "spot-toolbar");
 
-  self->back_button = spot_create_icon_button (spot_icon_back, "Back", FALSE, FALSE);
-  self->forward_button = spot_create_icon_button (spot_icon_forward, "Forward", FALSE, FALSE);
+  self->back_button = spot_create_toolbar_button (spot_icon_back, "Back", "Back",
+                                                   FALSE, FALSE);
+  self->forward_button = spot_create_toolbar_button (spot_icon_forward, "Forward", "Forward",
+                                                     FALSE, FALSE);
   gtk_box_append (GTK_BOX (toolbar), self->back_button);
   gtk_box_append (GTK_BOX (toolbar), self->forward_button);
 
@@ -1632,15 +2269,11 @@ spot_create_toolbar (SpotWindow *self)
   gtk_box_append (GTK_BOX (toolbar), sep);
 
   self->grid_view_button =
-    spot_create_icon_button (spot_icon_view_grid, "Icon View", TRUE, FALSE);
+    spot_create_toolbar_button (spot_icon_view_grid, "Grid", "Icon View", TRUE, TRUE);
   gtk_box_append (GTK_BOX (toolbar), self->grid_view_button);
 
-  self->list_view_button =
-    spot_create_icon_button (spot_icon_view_list, "List View", TRUE, FALSE);
-  gtk_box_append (GTK_BOX (toolbar), self->list_view_button);
-
   self->column_view_button =
-    spot_create_icon_button (spot_icon_view_column, "Column View", TRUE, TRUE);
+    spot_create_toolbar_button (spot_icon_view_column, "Columns", "Column View", TRUE, FALSE);
   gtk_box_append (GTK_BOX (toolbar), self->column_view_button);
 
   sep = gtk_separator_new (GTK_ORIENTATION_VERTICAL);
@@ -1648,18 +2281,13 @@ spot_create_toolbar (SpotWindow *self)
   gtk_widget_set_margin_end (sep, 6);
   gtk_box_append (GTK_BOX (toolbar), sep);
 
-  computer_btn = spot_create_labeled_toolbar_button ("Computer",
-                                                     spot_icon_computer,
-                                                     "Computer");
-  home_btn = spot_create_labeled_toolbar_button ("Home",
-                                                 spot_icon_home,
-                                                 "Home");
-  favorites_btn = spot_create_labeled_toolbar_button ("Favorites",
-                                                      spot_icon_favorites,
-                                                      "Favorites");
-  applications_btn = spot_create_labeled_toolbar_button ("Applications",
-                                                         spot_icon_applications,
-                                                         "Applications");
+  computer_btn = spot_create_toolbar_button (spot_icon_computer, "Computer", "Computer",
+                                             FALSE, FALSE);
+  home_btn = spot_create_toolbar_button (spot_icon_home, "Home", "Home", FALSE, FALSE);
+  favorites_btn = spot_create_toolbar_button (spot_icon_favorites, "Favorites", "Favorites",
+                                              FALSE, FALSE);
+  applications_btn = spot_create_toolbar_button (spot_icon_applications, "Applications",
+                                                 "Applications", FALSE, FALSE);
   gtk_box_append (GTK_BOX (toolbar), computer_btn);
   gtk_box_append (GTK_BOX (toolbar), home_btn);
   gtk_box_append (GTK_BOX (toolbar), favorites_btn);
@@ -1672,18 +2300,18 @@ spot_create_toolbar (SpotWindow *self)
   self->search_entry = gtk_entry_new ();
   gtk_entry_set_placeholder_text (GTK_ENTRY (self->search_entry), "Search");
   gtk_widget_add_css_class (self->search_entry, "spot-search");
-  gtk_widget_set_size_request (self->search_entry, 190, -1);
+  /* Soft width hint only — hard size_request raises window min past half-screen. */
   gtk_widget_set_margin_top    (self->search_entry, 9);
   gtk_widget_set_margin_bottom (self->search_entry, 9);
   gtk_widget_set_margin_start  (self->search_entry, 8);
   gtk_widget_set_margin_end    (self->search_entry, 6);
   gtk_widget_set_halign (self->search_entry, GTK_ALIGN_END);
+  gtk_widget_set_hexpand (self->search_entry, FALSE);
   gtk_box_append (GTK_BOX (toolbar), self->search_entry);
 
   g_signal_connect (self->back_button, "clicked", G_CALLBACK (on_back_clicked), self);
   g_signal_connect (self->forward_button, "clicked", G_CALLBACK (on_forward_clicked), self);
   g_signal_connect (self->grid_view_button, "clicked", G_CALLBACK (on_grid_view_clicked), self);
-  g_signal_connect (self->list_view_button, "clicked", G_CALLBACK (on_list_view_clicked), self);
   g_signal_connect (self->column_view_button, "clicked", G_CALLBACK (on_column_view_clicked), self);
   g_signal_connect (computer_btn, "clicked", G_CALLBACK (on_nav_computer_clicked), self);
   g_signal_connect (home_btn, "clicked", G_CALLBACK (on_nav_home_clicked), self);
@@ -1718,6 +2346,8 @@ spot_window_constructed (GObject *object)
    */
   gtk_widget_add_css_class (GTK_WIDGET (self), "spot-finder");
 
+  spot_install_actions (self);
+
   /* OozeHeaderBar becomes the native CSD titlebar widget.
    * GTK4 automatically enables drag-to-move and double-click-to-maximize
    * on it, and marks it with the "titlebar" CSS class. */
@@ -1745,6 +2375,8 @@ spot_window_constructed (GObject *object)
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (self->columns_scrolled),
                                   GTK_POLICY_AUTOMATIC,
                                   GTK_POLICY_AUTOMATIC);
+  gtk_scrolled_window_set_propagate_natural_width (
+      GTK_SCROLLED_WINDOW (self->columns_scrolled), FALSE);
   gtk_widget_set_hexpand (self->columns_scrolled, TRUE);
   gtk_widget_set_vexpand (self->columns_scrolled, TRUE);
 
@@ -1786,6 +2418,9 @@ spot_window_constructed (GObject *object)
                                  self->grid_flow);
   g_signal_connect (self->grid_flow, "child-activated",
                     G_CALLBACK (on_grid_child_activated), self);
+  spot_attach_context_menu (self, self->grid_flow);
+  spot_attach_context_menu (self, self->grid_scrolled);
+  spot_attach_context_menu (self, self->columns_scrolled);
 
   /* ── Stack wraps both views ─────────────────────────────────────── */
   self->content_stack = gtk_stack_new ();
@@ -1799,6 +2434,8 @@ spot_window_constructed (GObject *object)
                        self->columns_scrolled, "columns");
   gtk_stack_add_named (GTK_STACK (self->content_stack),
                        self->grid_scrolled, "grid");
+  gtk_stack_set_visible_child_name (GTK_STACK (self->content_stack), "grid");
+  self->view_mode = SPOT_VIEW_GRID;
 
   gtk_paned_set_end_child (GTK_PANED (content_paned), self->content_stack);
 
@@ -1808,8 +2445,26 @@ spot_window_constructed (GObject *object)
   gtk_label_set_xalign (GTK_LABEL (self->status_label), 0.0);
   gtk_box_append (GTK_BOX (statusbar), self->status_label);
 
-  /* title_header is the CSD titlebar (set above), NOT a shell child. */
-  gtk_box_append (GTK_BOX (shell), self->toolbar);
+  /* title_header is the CSD titlebar (set above), NOT a shell child.
+   * Keep the toolbar in a horizontal scroller so its natural width
+   * (Back…Applications + Search) cannot raise the window min-size above
+   * half the monitor — Mutter refuses side-tile when min_width is too big.
+   */
+  {
+    GtkWidget *toolbar_scroll = gtk_scrolled_window_new ();
+
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (toolbar_scroll),
+                                    GTK_POLICY_AUTOMATIC,
+                                    GTK_POLICY_NEVER);
+    gtk_scrolled_window_set_propagate_natural_height (GTK_SCROLLED_WINDOW (toolbar_scroll),
+                                                      TRUE);
+    gtk_scrolled_window_set_propagate_natural_width (GTK_SCROLLED_WINDOW (toolbar_scroll),
+                                                     FALSE);
+    gtk_widget_set_hexpand (toolbar_scroll, TRUE);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (toolbar_scroll),
+                                   self->toolbar);
+    gtk_box_append (GTK_BOX (shell), toolbar_scroll);
+  }
   gtk_box_append (GTK_BOX (shell), content_paned);
   gtk_box_append (GTK_BOX (shell), statusbar);
 
@@ -1823,6 +2478,8 @@ spot_window_constructed (GObject *object)
     g_signal_connect (keys, "key-pressed", G_CALLBACK (on_new_folder_shortcut), self);
     gtk_widget_add_controller (GTK_WIDGET (self), keys);
   }
+
+  spot_update_action_states (self);
 }
 
 static void
@@ -1831,6 +2488,12 @@ spot_window_dispose (GObject *object)
   SpotWindow *self = SPOT_WINDOW (object);
 
   g_clear_object (&self->current_dir);
+  g_clear_object (&self->context_target);
+  if (self->context_menu)
+    {
+      gtk_widget_unparent (self->context_menu);
+      self->context_menu = NULL;
+    }
   g_list_free_full (self->back_stack, g_object_unref);
   g_list_free_full (self->forward_stack, g_object_unref);
   self->back_stack = NULL;

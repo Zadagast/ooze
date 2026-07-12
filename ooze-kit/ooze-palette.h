@@ -22,8 +22,11 @@ typedef struct
   double pinstripe_alpha;
   int    pinstripe_stride;
 
-  /* ── Hairline separators (alpha only; colour is always black) ─────────── */
+  /* ── Hairline separators (Aqua pinlines) ────────────────────────────────
+   * Groove: dark line + light highlight so chrome edges read as continuous
+   * brushed metal rather than stacked cards. */
   double sep_alpha;
+  double sep_highlight_alpha;
 
   /* ── Button states ──────────────────────────────────────────────────────
    * Hover and active tints are RGBA because they overlay variable surfaces. */

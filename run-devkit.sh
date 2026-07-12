@@ -23,6 +23,10 @@ export PATH="$ROOT/build:$PATH"
 export OOZE_DATA_DIR="$ROOT/data"
 export XDG_DATA_DIRS="$ROOT/data${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 
+# Edge snap must be on before Mutter binds prefs (schema default is false).
+gsettings set org.gnome.mutter edge-tiling true 2>/dev/null || true
+gsettings set org.gnome.desktop.peripherals.mouse drag-threshold 16 2>/dev/null || true
+
 if [[ ! -f "$ROOT/data/icons/elementary/index.theme" ]]; then
   ninja -C build elementary-icons
 fi

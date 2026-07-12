@@ -3,10 +3,12 @@
 #include "my-aqua-menu.h"
 #include "my-desktop-icons.h"
 #include "my-dock.h"
+#include "my-magic-lamp.h"
 #include "my-theme.h"
 #include "my-window.h"
 
 #include "../common/aqua-chrome.h"
+#include "../common/ooze-font.h"
 
 #include <meta/compositor.h>
 #include <meta/display.h>
@@ -18,8 +20,13 @@
 #include <meta/meta-context.h>
 #include <meta/meta-monitor-manager.h>
 #include <meta/meta-window-actor.h>
+#include <meta/meta-workspace-manager.h>
+#include <meta/prefs.h>
 #include <meta/window.h>
+#include <meta/workspace.h>
+#include <mtk/mtk.h>
 
+#include <gio/gio.h>
 #include <glib.h>
 #include <string.h>
 #include <time.h>
@@ -56,10 +63,12 @@ struct _MyPlugin
   ClutterActor *aqua_dock;
   ClutterActor *aqua_dock_plate;
   ClutterActor *aqua_dock_icons;
+  ClutterActor *tile_preview;
   MetaMonitorManager *monitor_manager;
   MetaContext *context;
   MyAquaMenu *menu_popup;
   gulong monitors_changed_handler;
+  gulong workspace_added_handler;
   guint clock_timer;
   gulong stage_key_handler;
   int last_panel_width;
@@ -511,6 +520,8 @@ static void my_plugin_schedule_window_chrome_sync (MetaWindowActor *actor);
 static void my_plugin_sync_window_chrome (MetaWindowActor *actor);
 static void my_plugin_refresh_ooze_button (MyPlugin *plugin);
 static void my_plugin_layout_menu_labels (MyPlugin *plugin);
+static void my_plugin_set_chrome_visible (MetaWindowActor *actor, gboolean visible);
+static gboolean my_plugin_window_is_minimized (MetaWindow *window);
 
 static ClutterActor *
 my_plugin_create_text_label (ClutterActor *ref_actor,
@@ -653,7 +664,7 @@ my_plugin_refresh_theme (MyPlugin *plugin)
         continue;
 
       my_plugin_set_text_label (label,
-                                  "Sans Bold 11",
+                                  OOZE_UI_FONT,
                                   menu_bar_items[i],
                                   (gfloat) palette->menu_text_r,
                                   (gfloat) palette->menu_text_g,
@@ -888,6 +899,9 @@ my_plugin_sync_window_chrome (MetaWindowActor *actor)
 
   if (chrome && CLUTTER_IS_ACTOR (chrome->titlebar))
     {
+      gboolean minimized;
+
+      minimized = my_plugin_window_is_minimized (window);
       clutter_actor_set_position (chrome->titlebar,
                                   (gfloat) frame.x,
                                   (gfloat) frame.y);
@@ -908,7 +922,12 @@ my_plugin_sync_window_chrome (MetaWindowActor *actor)
           chrome->last_titlebar_width = frame.width;
         }
 
-      clutter_actor_show (chrome->titlebar);
+      /* Compositor titlebar is a sibling of the window actor — hide it with
+       * the window or minimize looks broken (titlebar left floating). */
+      if (minimized)
+        clutter_actor_hide (chrome->titlebar);
+      else
+        clutter_actor_show (chrome->titlebar);
     }
 
   if (chrome && CLUTTER_IS_ACTOR (chrome->title_label))
@@ -921,7 +940,7 @@ my_plugin_sync_window_chrome (MetaWindowActor *actor)
           g_free (chrome->last_title);
           chrome->last_title = g_strdup (title);
           my_plugin_set_text_label (chrome->title_label,
-                                    "Sans 10",
+                                    OOZE_UI_FONT,
                                     title,
                                     (gfloat) palette->title_text_r,
                                     (gfloat) palette->title_text_g,
@@ -1011,8 +1030,22 @@ on_traffic_minimize_pressed (ClutterActor *actor G_GNUC_UNUSED,
                              ClutterEvent *event,
                              MetaWindow   *window)
 {
+  MetaWindowActor *window_actor;
+
   if (clutter_event_get_button (event) != CLUTTER_BUTTON_PRIMARY)
     return CLUTTER_EVENT_PROPAGATE;
+
+  if (!meta_window_can_minimize (window))
+    {
+      g_warning ("Ooze: window \"%s\" cannot minimize",
+                 meta_window_get_title (window));
+      return CLUTTER_EVENT_STOP;
+    }
+
+  /* Hide compositor chrome immediately so it doesn't linger mid-animation. */
+  window_actor = META_WINDOW_ACTOR (meta_window_get_compositor_private (window));
+  if (window_actor)
+    my_plugin_set_chrome_visible (window_actor, FALSE);
 
   meta_window_minimize (window);
   return CLUTTER_EVENT_STOP;
@@ -1150,7 +1183,7 @@ my_plugin_apply_window_chrome (MyPlugin         *plugin,
                                 (AQUA_TITLEBAR_HEIGHT - AQUA_TRAFFIC_LIGHT_SIZE) / 2.0f);
 
     chrome->title_label = my_plugin_create_text_label (window_actor,
-                                                       "Sans 10",
+                                                       OOZE_UI_FONT,
                                                        meta_window_get_title (window),
                                                        (gfloat) my_theme_get_palette (NULL)->title_text_r,
                                                        (gfloat) my_theme_get_palette (NULL)->title_text_g,
@@ -1321,7 +1354,7 @@ my_plugin_update_clock (MyPlugin *plugin)
     const MyAquaPalette *palette = my_theme_get_palette (NULL);
 
     my_plugin_set_text_label (plugin->clock_label,
-                              "Sans 11",
+                              OOZE_UI_FONT,
                               buffer,
                               (gfloat) palette->menu_text_r,
                               (gfloat) palette->menu_text_g,
@@ -1367,6 +1400,63 @@ my_plugin_raise_chrome (MyPlugin    *plugin,
 }
 
 static void
+my_plugin_update_builtin_struts (MyPlugin    *plugin G_GNUC_UNUSED,
+                                 MetaDisplay *display)
+{
+  MetaWorkspaceManager *wm;
+  GList *workspaces;
+  GList *l;
+  int width;
+  int height;
+  int panel_h;
+  int dock_h;
+
+  if (!display)
+    return;
+
+  meta_display_get_size (display, &width, &height);
+  if (width < 1 || height < 1)
+    return;
+
+  panel_h = (int) PANEL_HEIGHT;
+  dock_h = (int) (AQUA_DOCK_PLATE_H + AQUA_DOCK_BOTTOM_GAP);
+  if (panel_h + dock_h >= height)
+    return;
+
+  wm = meta_display_get_workspace_manager (display);
+  if (!wm)
+    return;
+
+  workspaces = meta_workspace_manager_get_workspaces (wm);
+  for (l = workspaces; l != NULL; l = l->next)
+    {
+      MetaWorkspace *workspace = l->data;
+      GSList *struts = NULL;
+      MetaStrut *top;
+      MetaStrut *bottom;
+
+      top = g_new0 (MetaStrut, 1);
+      top->side = META_SIDE_TOP;
+      top->rect.x = 0;
+      top->rect.y = 0;
+      top->rect.width = width;
+      top->rect.height = panel_h;
+      struts = g_slist_prepend (struts, top);
+
+      bottom = g_new0 (MetaStrut, 1);
+      bottom->side = META_SIDE_BOTTOM;
+      bottom->rect.x = 0;
+      bottom->rect.y = height - dock_h;
+      bottom->rect.width = width;
+      bottom->rect.height = dock_h;
+      struts = g_slist_prepend (struts, bottom);
+
+      meta_workspace_set_builtin_struts (workspace, struts);
+      g_slist_free_full (struts, g_free);
+    }
+}
+
+static void
 my_plugin_update_layout (MyPlugin     *plugin,
                          MetaDisplay  *display)
 {
@@ -1397,6 +1487,7 @@ my_plugin_update_layout (MyPlugin     *plugin,
   my_plugin_layout_menu_labels (plugin);
 
   my_plugin_update_aqua_dock_layout (plugin, display);
+  my_plugin_update_builtin_struts (plugin, display);
 }
 
 static void
@@ -1459,7 +1550,7 @@ my_plugin_setup_panel (MyPlugin       *plugin,
         ClutterActor *label;
 
         label = my_plugin_create_menu_bar_item (plugin->panel,
-                                                "Sans Bold 11",
+                                                OOZE_UI_FONT,
                                                 menu_bar_items[i],
                                                 (gfloat) palette->menu_text_r,
                                                 (gfloat) palette->menu_text_g,
@@ -1473,7 +1564,7 @@ my_plugin_setup_panel (MyPlugin       *plugin,
       }
 
     plugin->clock_label = my_plugin_create_text_label (plugin->panel,
-                                                       "Sans 11",
+                                                       OOZE_UI_FONT,
                                                        "Sat Jan  1  12:00 PM",
                                                        (gfloat) palette->menu_text_r,
                                                        (gfloat) palette->menu_text_g,
@@ -1683,6 +1774,15 @@ my_plugin_on_monitors_changed (MetaMonitorManager *monitor_manager G_GNUC_UNUSED
 }
 
 static void
+my_plugin_on_workspace_added (MetaWorkspaceManager *wm G_GNUC_UNUSED,
+                              gint                  index G_GNUC_UNUSED,
+                              MyPlugin             *plugin)
+{
+  MetaDisplay *display = meta_plugin_get_display (META_PLUGIN (plugin));
+  my_plugin_update_builtin_struts (plugin, display);
+}
+
+static void
 my_plugin_init_ui (MyPlugin *plugin)
 {
   MetaDisplay *display;
@@ -1714,8 +1814,166 @@ my_plugin_init_ui (MyPlugin *plugin)
                       plugin);
   my_plugin_on_monitors_changed (monitor_manager, plugin);
 
+  {
+    MetaWorkspaceManager *wm = meta_display_get_workspace_manager (display);
+
+    if (wm && !plugin->workspace_added_handler)
+      {
+        plugin->workspace_added_handler =
+          g_signal_connect (wm,
+                            "workspace-added",
+                            G_CALLBACK (my_plugin_on_workspace_added),
+                            plugin);
+      }
+  }
+
   my_theme_get_default ();
   my_theme_watch (NULL, my_plugin_on_theme_changed, plugin);
+}
+
+static void
+my_plugin_set_chrome_visible (MetaWindowActor *actor, gboolean visible)
+{
+  MyWindowChrome *chrome;
+
+  chrome = g_object_get_data (G_OBJECT (actor), "my-window-chrome");
+  if (!chrome || !CLUTTER_IS_ACTOR (chrome->titlebar))
+    return;
+
+  if (visible)
+    clutter_actor_show (chrome->titlebar);
+  else
+    clutter_actor_hide (chrome->titlebar);
+}
+
+static gboolean
+my_plugin_window_is_minimized (MetaWindow *window)
+{
+  gboolean minimized = FALSE;
+
+  if (!window)
+    return FALSE;
+  g_object_get (window, "minimized", &minimized, NULL);
+  return minimized;
+}
+
+static void
+my_plugin_get_lamp_icon_rect (MetaPlugin      *plugin,
+                              MetaWindowActor *window_actor,
+                              gfloat          *out_x,
+                              gfloat          *out_y,
+                              gfloat          *out_w,
+                              gfloat          *out_h)
+{
+  MetaWindow *window;
+  MtkRectangle icon;
+  MetaDisplay *display;
+  int screen_w = 1280, screen_h = 800;
+  MyPlugin *self = MY_PLUGIN (plugin);
+
+  window = meta_window_actor_get_meta_window (window_actor);
+  display = meta_plugin_get_display (plugin);
+  if (display)
+    meta_display_get_size (display, &screen_w, &screen_h);
+
+  if (window && meta_window_get_icon_geometry (window, &icon) &&
+      icon.width > 0 && icon.height > 0)
+    {
+      *out_x = (gfloat) icon.x;
+      *out_y = (gfloat) icon.y;
+      *out_w = (gfloat) icon.width;
+      *out_h = (gfloat) icon.height;
+      return;
+    }
+
+  if (self->aqua_dock)
+    {
+      *out_x = clutter_actor_get_x (self->aqua_dock);
+      *out_y = clutter_actor_get_y (self->aqua_dock);
+      *out_w = clutter_actor_get_width (self->aqua_dock);
+      *out_h = clutter_actor_get_height (self->aqua_dock);
+      return;
+    }
+
+  *out_x = (gfloat) screen_w / 2.0f - 24.f;
+  *out_y = (gfloat) screen_h - AQUA_DOCK_PLATE_H;
+  *out_w = 48.f;
+  *out_h = AQUA_DOCK_PLATE_H;
+}
+
+static void
+my_plugin_magic_lamp_done (MetaPlugin      *plugin,
+                           MetaWindowActor *actor,
+                           gboolean         unminimize,
+                           gpointer         user_data G_GNUC_UNUSED)
+{
+  if (!actor || meta_window_actor_is_destroyed (actor))
+    return;
+
+  if (unminimize)
+    {
+      my_plugin_set_chrome_visible (actor, TRUE);
+      meta_plugin_unminimize_completed (plugin, actor);
+    }
+  else
+    {
+      my_plugin_set_chrome_visible (actor, FALSE);
+      meta_plugin_minimize_completed (plugin, actor);
+    }
+}
+
+static void
+my_plugin_run_magic_lamp (MetaPlugin      *plugin,
+                          MetaWindowActor *window_actor,
+                          gboolean         unminimize)
+{
+  gfloat icon_x, icon_y, icon_w, icon_h;
+
+  if (meta_window_actor_is_destroyed (window_actor))
+    {
+      if (unminimize)
+        meta_plugin_unminimize_completed (plugin, window_actor);
+      else
+        meta_plugin_minimize_completed (plugin, window_actor);
+      return;
+    }
+
+  my_plugin_set_chrome_visible (window_actor, FALSE);
+  my_plugin_get_lamp_icon_rect (plugin, window_actor,
+                                &icon_x, &icon_y, &icon_w, &icon_h);
+  my_magic_lamp_run (plugin, window_actor, unminimize,
+                     icon_x, icon_y, icon_w, icon_h,
+                     my_plugin_magic_lamp_done, NULL);
+}
+
+static void
+my_plugin_minimize (MetaPlugin      *plugin,
+                    MetaWindowActor *actor)
+{
+  MetaWindow *window = meta_window_actor_get_meta_window (actor);
+
+  if (!window || meta_window_get_window_type (window) != META_WINDOW_NORMAL)
+    {
+      meta_plugin_minimize_completed (plugin, actor);
+      return;
+    }
+
+  my_plugin_run_magic_lamp (plugin, actor, FALSE);
+}
+
+static void
+my_plugin_unminimize (MetaPlugin      *plugin,
+                      MetaWindowActor *actor)
+{
+  MetaWindow *window = meta_window_actor_get_meta_window (actor);
+
+  if (!window || meta_window_get_window_type (window) != META_WINDOW_NORMAL)
+    {
+      meta_plugin_unminimize_completed (plugin, actor);
+      return;
+    }
+
+  my_plugin_run_magic_lamp (plugin, actor, TRUE);
 }
 
 static void
@@ -1782,6 +2040,90 @@ on_stage_key_press (ClutterActor *stage G_GNUC_UNUSED,
 }
 
 static void
+my_plugin_apply_wm_preferences (void)
+{
+  g_autoptr (GSettings) mutter = NULL;
+  GSettingsSchemaSource *source;
+  g_autoptr (GSettingsSchema) schema = NULL;
+
+  source = g_settings_schema_source_get_default ();
+  if (!source)
+    return;
+
+  schema = g_settings_schema_source_lookup (source, "org.gnome.mutter", TRUE);
+  if (!schema)
+    {
+      g_warning ("MyPlugin: org.gnome.mutter schema missing; edge tiling unavailable");
+      return;
+    }
+
+  mutter = g_settings_new_full (schema, NULL, NULL);
+
+  /* Schema default is false; enable half-screen / maximize-on-edge snap. */
+  if (g_settings_schema_has_key (schema, "edge-tiling"))
+    g_settings_set_boolean (mutter, "edge-tiling", TRUE);
+
+  /* Comfortable invisible border for SSD resize grabs (X11 / non-CSD). */
+  if (g_settings_schema_has_key (schema, "draggable-border-width"))
+    g_settings_set_int (mutter, "draggable-border-width", 12);
+
+  g_settings_sync ();
+
+  g_print ("MyPlugin: edge-tiling pref=%s settings=%s draggable-border-width=%d\n",
+           meta_prefs_get_edge_tiling () ? "on" : "off",
+           g_settings_get_boolean (mutter, "edge-tiling") ? "on" : "off",
+           g_settings_schema_has_key (schema, "draggable-border-width")
+             ? g_settings_get_int (mutter, "draggable-border-width") : -1);
+}
+
+static void
+my_plugin_show_tile_preview (MetaPlugin   *plugin,
+                             MetaWindow   *window G_GNUC_UNUSED,
+                             MtkRectangle *tile_rect,
+                             int           tile_monitor_number G_GNUC_UNUSED)
+{
+  MyPlugin *self = MY_PLUGIN (plugin);
+  MetaDisplay *display;
+  MetaBackend *backend;
+  ClutterActor *stage;
+  CoglColor color;
+
+  if (!tile_rect || tile_rect->width < 1 || tile_rect->height < 1)
+    return;
+
+  display = meta_plugin_get_display (plugin);
+  backend = meta_context_get_backend (meta_display_get_context (display));
+  stage = CLUTTER_ACTOR (meta_backend_get_stage (backend));
+
+  if (!self->tile_preview)
+    {
+      self->tile_preview = clutter_actor_new ();
+      clutter_actor_set_reactive (self->tile_preview, FALSE);
+      cogl_color_init_from_4f (&color, 0.20f, 0.45f, 0.95f, 0.28f);
+      clutter_actor_set_background_color (self->tile_preview, &color);
+      clutter_actor_add_child (stage, self->tile_preview);
+    }
+
+  clutter_actor_set_position (self->tile_preview,
+                              (gfloat) tile_rect->x,
+                              (gfloat) tile_rect->y);
+  clutter_actor_set_size (self->tile_preview,
+                          (gfloat) tile_rect->width,
+                          (gfloat) tile_rect->height);
+  clutter_actor_set_child_above_sibling (stage, self->tile_preview, NULL);
+  clutter_actor_show (self->tile_preview);
+}
+
+static void
+my_plugin_hide_tile_preview (MetaPlugin *plugin)
+{
+  MyPlugin *self = MY_PLUGIN (plugin);
+
+  if (self->tile_preview)
+    clutter_actor_hide (self->tile_preview);
+}
+
+static void
 my_plugin_start (MetaPlugin *plugin)
 {
   MyPlugin *self = MY_PLUGIN (plugin);
@@ -1792,6 +2134,7 @@ my_plugin_start (MetaPlugin *plugin)
 
   g_print ("MyPlugin: compositor plugin started successfully\n");
 
+  my_plugin_apply_wm_preferences ();
   my_plugin_init_ui (self);
 
   display = meta_plugin_get_display (plugin);
@@ -1829,6 +2172,17 @@ my_plugin_dispose (GObject *object)
       plugin->monitors_changed_handler = 0;
     }
 
+  if (plugin->workspace_added_handler)
+    {
+      MetaDisplay *display = meta_plugin_get_display (META_PLUGIN (plugin));
+      MetaWorkspaceManager *wm = display
+        ? meta_display_get_workspace_manager (display) : NULL;
+
+      if (wm)
+        g_signal_handler_disconnect (wm, plugin->workspace_added_handler);
+      plugin->workspace_added_handler = 0;
+    }
+
   if (plugin->stage_key_handler)
     {
       MetaDisplay *display;
@@ -1854,6 +2208,7 @@ my_plugin_dispose (GObject *object)
   g_clear_pointer (&plugin->aqua_dock, clutter_actor_destroy);
   plugin->aqua_dock_plate = NULL;
   plugin->aqua_dock_icons = NULL;
+  g_clear_pointer (&plugin->tile_preview, clutter_actor_destroy);
   g_clear_pointer (&plugin->background_group, clutter_actor_destroy);
   g_clear_object (&plugin->context);
 
@@ -1872,6 +2227,10 @@ my_plugin_class_init (MyPluginClass *klass)
   plugin_class->map = my_plugin_map;
   plugin_class->destroy = my_plugin_destroy;
   plugin_class->size_change = my_plugin_size_change;
+  plugin_class->minimize = my_plugin_minimize;
+  plugin_class->unminimize = my_plugin_unminimize;
+  plugin_class->show_tile_preview = my_plugin_show_tile_preview;
+  plugin_class->hide_tile_preview = my_plugin_hide_tile_preview;
 }
 
 static void
@@ -1885,10 +2244,12 @@ my_plugin_init (MyPlugin *plugin)
   plugin->aqua_dock = NULL;
   plugin->aqua_dock_plate = NULL;
   plugin->aqua_dock_icons = NULL;
+  plugin->tile_preview = NULL;
   plugin->monitor_manager = NULL;
   plugin->context = NULL;
   plugin->menu_popup = NULL;
   plugin->monitors_changed_handler = 0;
+  plugin->workspace_added_handler = 0;
   plugin->clock_timer = 0;
   plugin->stage_key_handler = 0;
   plugin->last_panel_width = 0;

@@ -2,6 +2,7 @@
 #include "my-theme.h"
 
 #include "../common/aqua-chrome.h"
+#include "../common/ooze-font.h"
 
 #define __COGL_H_INSIDE__
 #include "cogl/cogl-texture-2d.h"
@@ -538,7 +539,7 @@ my_aqua_traffic_light_content (ClutterActor *ref_actor,
   return content;
 }
 
-#define OOZE_BUTTON_LABEL "🫟 Oooze"
+#define OOZE_BUTTON_LABEL "🫟 Ooze"
 
 ClutterContent *
 my_aqua_ooze_button_content (ClutterActor *ref_actor,
@@ -560,7 +561,7 @@ my_aqua_ooze_button_content (ClutterActor *ref_actor,
   gdouble text_x;
   gdouble text_y;
 
-  font = pango_font_description_from_string ("Sans Bold 11");
+  font = pango_font_description_from_string (OOZE_UI_FONT);
 
   surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, 1, 1);
   cr = cairo_create (surface);
@@ -713,7 +714,7 @@ my_aqua_text_content (ClutterActor *ref_actor,
 
   font = pango_font_description_from_string (font_desc ?
                                              font_desc :
-                                             "Sans 11");
+                                             OOZE_UI_FONT);
 
   surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, 1, 1);
   cr = cairo_create (surface);

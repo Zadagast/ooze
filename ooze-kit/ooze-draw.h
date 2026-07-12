@@ -46,9 +46,10 @@ void ooze_draw_surface   (cairo_t          *cr,
                           const OozePalette *p);
 
 /*
- * ooze_draw_separator – 1 px hairline on one edge.
+ * ooze_draw_separator – Aqua pinline (dark groove + light highlight).
  *
- * Colour is always (0, 0, 0) × p->sep_alpha.
+ * Drawn just inside the edge so header/toolbar/sidebar joins read as one
+ * continuous chrome band instead of stacked cards with a hard drop.
  */
 void ooze_draw_separator (cairo_t          *cr,
                           int               w,

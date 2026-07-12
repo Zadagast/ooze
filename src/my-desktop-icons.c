@@ -2,6 +2,7 @@
 
 #include "my-aqua-draw.h"
 #include "my-dock.h"
+#include "../common/ooze-font.h"
 
 #include <meta/window.h>
 
@@ -158,7 +159,7 @@ my_desktop_icon_create (ClutterActor       *ref_actor,
     }
 
   label_content = my_aqua_text_content (ref_actor,
-                                        "Sans Bold 9",
+                                        OOZE_UI_FONT,
                                         label,
                                         1.0f,
                                         1.0f,

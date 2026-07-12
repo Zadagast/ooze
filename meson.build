@@ -78,6 +78,7 @@ executable('my-desktop',
   'src/my-aqua-menu.c',
   'src/my-theme.c',
   'src/my-window.c',
+  'src/my-magic-lamp.c',
   'common/aqua-traffic.c',
   c_args: c_args,
   include_directories: [inc_common, inc_src],
@@ -93,6 +94,7 @@ executable('my-desktop',
     cairo_dep,
     dependency('pango'),
     dependency('pangocairo'),
+    cc.find_library('m', required: true),
   ],
   build_rpath: mutter_typelibdir,
   install: true,
@@ -121,6 +123,9 @@ ooze_kit_sources = [
   'ooze-kit/ooze-draw.c',
   'ooze-kit/ooze-surface.c',
   'ooze-kit/ooze-button.c',
+  'ooze-kit/ooze-icons.c',
+  'ooze-kit/ooze-toolbar.c',
+  'ooze-kit/ooze-theme.c',
 ]
 
 # Shared source list for ooze-ui widgets (header bar, traffic lights, chrome)
@@ -158,6 +163,39 @@ if gtk4_dep.found() and adw_dep.found()
     install_dir: get_option('datadir') / 'applications',
   )
 
+  executable('ooze-pak',
+    'ooze-pak/main.c',
+    'ooze-pak/ooze-pak-window.c',
+    'ooze-pak/ooze-pak-flatpak.c',
+    'src/my-icons.c',
+    'src/my-icons-gtk.c',
+    ooze_ui_sources,
+    ooze_kit_sources,
+    include_directories: ooze_app_inc + [include_directories('ooze-pak')],
+    dependencies: [
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.Pak.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
+  install_data('data/pak-logo.svg',
+    install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps',
+    rename: 'org.ooze.Pak.svg',
+  )
+
+  install_data('data/pak-logo.svg',
+    install_dir: ooze_data_dir,
+  )
+
   if vte_dep.found()
     executable('ooze-command',
       'ooze-command/main.c',
@@ -181,6 +219,67 @@ if gtk4_dep.found() and adw_dep.found()
     )
   else
     warning('Ooze Command skipped: install libvte-2.91-gtk4-dev')
+  endif
+
+  pipewire_dep = dependency('libpipewire-0.3', required: false)
+  if pipewire_dep.found()
+    ooze_sound_sources = [
+      'ooze-ear/ooze-sound-pane.c',
+      'ooze-ear/ooze-ear-pw.c',
+    ]
+    ooze_ear_inc = ooze_app_inc + [include_directories('ooze-ear')]
+
+    executable('ooze-ear',
+      'ooze-ear/main.c',
+      'ooze-ear/ooze-ear-window.c',
+      ooze_sound_sources,
+      'src/my-icons.c',
+      'src/my-icons-gtk.c',
+      ooze_ui_sources,
+      ooze_kit_sources,
+      include_directories: ooze_ear_inc,
+      dependencies: [
+        gtk4_dep,
+        adw_dep,
+        gio_dep,
+        cairo_dep,
+        pipewire_dep,
+        cc.find_library('m'),
+      ],
+      c_args: ooze_app_c_args,
+      install: true,
+    )
+
+    install_data('data/org.ooze.Ear.desktop',
+      install_dir: get_option('datadir') / 'applications',
+    )
+
+    executable('ooze-king',
+      'ooze-king/main.c',
+      'ooze-king/ooze-king-window.c',
+      ooze_sound_sources,
+      'src/my-icons.c',
+      'src/my-icons-gtk.c',
+      ooze_ui_sources,
+      ooze_kit_sources,
+      include_directories: ooze_ear_inc,
+      dependencies: [
+        gtk4_dep,
+        adw_dep,
+        gio_dep,
+        cairo_dep,
+        pipewire_dep,
+        cc.find_library('m'),
+      ],
+      c_args: ooze_app_c_args,
+      install: true,
+    )
+
+    install_data('data/org.ooze.King.desktop',
+      install_dir: get_option('datadir') / 'applications',
+    )
+  else
+    warning('Ooze Ear / Ooze King skipped: install libpipewire-0.3-dev')
   endif
 
 else

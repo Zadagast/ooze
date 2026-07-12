@@ -1,6 +1,7 @@
 #include "spot-window.h"
 
 #include "my-icons.h"
+#include "ooze-theme.h"
 
 #include <adwaita.h>
 
@@ -9,6 +10,7 @@ on_startup (AdwApplication *app G_GNUC_UNUSED,
             gpointer        user_data G_GNUC_UNUSED)
 {
   my_icons_configure_gtk ();
+  ooze_theme_ensure ();
 }
 
 static void

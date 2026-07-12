@@ -9,3 +9,4 @@
 - [x] Implement Spot file manager (GTK4/libadwaita)
 - [ ] Add remaining keyboard shortcuts (e.g., spawn a terminal)
 - [x] Implement window dragging and resizing
+- [x] Ooze Pak — Flatpak grid installer (drop to install, drag to trash strip to remove)

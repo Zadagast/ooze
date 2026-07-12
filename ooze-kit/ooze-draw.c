@@ -59,15 +59,51 @@ ooze_draw_separator (cairo_t          *cr,
                      OozeSide          side,
                      const OozePalette *p)
 {
-  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, p->sep_alpha);
+  double hi_r = p->dark ? 1.0 : 1.0;
+  double hi_g = p->dark ? 1.0 : 1.0;
+  double hi_b = p->dark ? 1.0 : 1.0;
+  double lo_a = p->sep_alpha;
+  double hi_a = p->sep_highlight_alpha;
+
   switch (side)
     {
-    case OOZE_SIDE_TOP:    cairo_rectangle (cr, 0,     0,     w, 1); break;
-    case OOZE_SIDE_BOTTOM: cairo_rectangle (cr, 0,     h - 1, w, 1); break;
-    case OOZE_SIDE_LEFT:   cairo_rectangle (cr, 0,     0,     1, h); break;
-    case OOZE_SIDE_RIGHT:  cairo_rectangle (cr, w - 1, 0,     1, h); break;
+    case OOZE_SIDE_BOTTOM:
+      /* Groove sits on the bottom edge; highlight just above it. */
+      cairo_set_source_rgba (cr, hi_r, hi_g, hi_b, hi_a);
+      cairo_rectangle (cr, 0, h - 2, w, 1);
+      cairo_fill (cr);
+      cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, lo_a);
+      cairo_rectangle (cr, 0, h - 1, w, 1);
+      cairo_fill (cr);
+      break;
+
+    case OOZE_SIDE_TOP:
+      cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, lo_a);
+      cairo_rectangle (cr, 0, 0, w, 1);
+      cairo_fill (cr);
+      cairo_set_source_rgba (cr, hi_r, hi_g, hi_b, hi_a);
+      cairo_rectangle (cr, 0, 1, w, 1);
+      cairo_fill (cr);
+      break;
+
+    case OOZE_SIDE_RIGHT:
+      cairo_set_source_rgba (cr, hi_r, hi_g, hi_b, hi_a);
+      cairo_rectangle (cr, w - 2, 0, 1, h);
+      cairo_fill (cr);
+      cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, lo_a);
+      cairo_rectangle (cr, w - 1, 0, 1, h);
+      cairo_fill (cr);
+      break;
+
+    case OOZE_SIDE_LEFT:
+      cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, lo_a);
+      cairo_rectangle (cr, 0, 0, 1, h);
+      cairo_fill (cr);
+      cairo_set_source_rgba (cr, hi_r, hi_g, hi_b, hi_a);
+      cairo_rectangle (cr, 1, 0, 1, h);
+      cairo_fill (cr);
+      break;
     }
-  cairo_fill (cr);
 }
 
 void

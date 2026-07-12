@@ -1,4 +1,4 @@
-#include "ooze-command-window.h"
+#include "ooze-king-window.h"
 
 #include "my-icons.h"
 #include "ooze-theme.h"
@@ -17,7 +17,17 @@ static void
 on_activate (AdwApplication *app,
              gpointer        user_data G_GNUC_UNUSED)
 {
-  GtkWidget *win = ooze_command_window_new (GTK_APPLICATION (app));
+  GtkWindow *existing;
+  GtkWidget *win;
+
+  existing = gtk_application_get_active_window (GTK_APPLICATION (app));
+  if (existing)
+    {
+      gtk_window_present (existing);
+      return;
+    }
+
+  win = ooze_king_window_new (GTK_APPLICATION (app));
   gtk_application_add_window (GTK_APPLICATION (app), GTK_WINDOW (win));
   gtk_window_present (GTK_WINDOW (win));
 }
@@ -29,8 +39,8 @@ main (int argc, char **argv)
 
   my_icons_apply ();
 
-  app = adw_application_new ("org.ooze.Command", G_APPLICATION_DEFAULT_FLAGS);
-  g_signal_connect (app, "startup",  G_CALLBACK (on_startup),  NULL);
+  app = adw_application_new ("org.ooze.King", G_APPLICATION_DEFAULT_FLAGS);
+  g_signal_connect (app, "startup", G_CALLBACK (on_startup), NULL);
   g_signal_connect (app, "activate", G_CALLBACK (on_activate), NULL);
 
   return g_application_run (G_APPLICATION (app), argc, argv);

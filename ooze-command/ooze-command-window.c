@@ -417,6 +417,17 @@ ooze_command_window_init (OozeCommandWindow *self)
   oc_apply_colors (VTE_TERMINAL (self->terminal));
   oc_apply_font (self);
 
+  {
+    GMenu *ctx = g_menu_new ();
+
+    g_menu_append (ctx, "Copy", "win.copy");
+    g_menu_append (ctx, "Paste", "win.paste");
+    g_menu_append (ctx, "Select All", "win.select-all");
+    vte_terminal_set_context_menu_model (VTE_TERMINAL (self->terminal),
+                                         G_MENU_MODEL (ctx));
+    g_object_unref (ctx);
+  }
+
   /* Redraw header when dark/light mode changes (OozeHeaderBar is dark-aware) */
   g_signal_connect_swapped (adw_style_manager_get_default (), "notify::dark",
                              G_CALLBACK (gtk_widget_queue_draw), self);

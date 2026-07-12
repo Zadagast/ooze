@@ -9,6 +9,7 @@
 #include "ooze-draw.h"
 #include "ooze-palette.h"
 #include "ooze-surface.h"   /* for the CSS class name constant */
+#include "ooze-theme.h"
 
 #include <adwaita.h>
 
@@ -34,6 +35,8 @@ ooze_header_bar_ensure_css (void)
   if (loaded)
     return;
 
+  ooze_theme_ensure ();
+
   display = gdk_display_get_default ();
   if (!display)
     return;
@@ -53,11 +56,10 @@ ooze_header_bar_ensure_css (void)
     "  min-height: 22px;"
     "  background: transparent;"
     "}"
-    /* Title colour follows Adwaita so it adapts to light/dark automatically. */
+    /* Title colour follows Adwaita so it adapts to light/dark automatically.
+     * Weight/size come from ooze_theme_ensure() (Inter 11 regular). */
     ".ooze-header-title {"
     "  color: @window_fg_color;"
-    "  font-size: 11px;"
-    "  font-weight: 600;"
     "}");
   gtk_style_context_add_provider_for_display (display,
     GTK_STYLE_PROVIDER (provider),
@@ -174,6 +176,16 @@ ooze_header_bar_attach_window (OozeHeaderBar *self,
   self->window = window;
   ooze_traffic_lights_attach_window (OOZE_TRAFFIC_LIGHTS (self->traffic), window);
   ooze_window_install_drag (GTK_WIDGET (self), window);
+
+  /* Install mid-edge resize grips once the window content exists. */
+  if (gtk_window_get_child (window))
+    ooze_window_install_edge_resize (window);
+  else if (!g_object_get_data (G_OBJECT (window), "ooze-edge-resize-watch"))
+    {
+      g_object_set_data (G_OBJECT (window), "ooze-edge-resize-watch", GINT_TO_POINTER (1));
+      g_signal_connect (window, "notify::child",
+                        G_CALLBACK (ooze_window_install_edge_resize), NULL);
+    }
 }
 
 void

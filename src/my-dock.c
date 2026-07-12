@@ -17,6 +17,7 @@
 #include <meta/meta-background.h>
 #include <meta/meta-wayland-client.h>
 #include <meta/window.h>
+#include <mtk/mtk.h>
 
 #define DOCK_HEIGHT       48.0f
 #define LAUNCHER_SIZE     40.0f
@@ -58,6 +59,12 @@ static const MyDockIconAlias dock_icon_aliases[] = {
   { "org.ooze.Spot-symbolic",   "system-file-manager"  },
   { "org.ooze.Command",         "utilities-terminal"   },
   { "org.ooze.Command-symbolic","utilities-terminal"   },
+  { "org.ooze.King",            "preferences-system"   },
+  { "org.ooze.King-symbolic",   "preferences-system"   },
+  { "org.ooze.Ear",             "audio-volume-high"    },
+  { "org.ooze.Ear-symbolic",    "audio-volume-high"    },
+  { "org.ooze.Pak",             "package-x-generic"    },
+  { "org.ooze.Pak-symbolic",    "package-x-generic"    },
   { NULL, NULL },
 };
 
@@ -81,7 +88,14 @@ my_dock_icon_alias (const char *icon_name)
 static gboolean  my_dock_window_is_visible    (MetaWindow *window);
 static MetaWindow *my_dock_get_most_recent_window (GList *windows);
 static gboolean  my_dock_window_matches_app   (MetaWindow *window, GDesktopAppInfo *app_info);
+static gboolean  my_dock_window_matches_app_id (MetaWindow *window, const char *app_id);
 static void      my_dock_attach_indicator     (ClutterActor *launcher, float launcher_w);
+
+typedef void (*MyDockLaunchFn) (MetaContext *context);
+static void      my_dock_wire_app_launcher    (ClutterActor  *button,
+                                               MetaDisplay   *display,
+                                               const char    *app_id,
+                                               MyDockLaunchFn launch);
 
 void
 my_dock_launch_spot_path (MetaContext *context,
@@ -172,10 +186,272 @@ my_dock_launch_command (MetaContext *context)
     g_print ("MyDock: launched ooze-command\n");
 }
 
+static ClutterActor *
+my_dock_create_command_launcher (ClutterActor *stage,
+                                 MetaDisplay  *display)
+{
+  ClutterActor *button;
+  g_autoptr (ClutterContent) content = NULL;
+  int logical = 48;
+  int texture = my_aqua_icon_texture_size (display, logical);
+
+  button = clutter_actor_new ();
+  clutter_actor_set_size (button, (gfloat) logical, (gfloat) logical);
+  clutter_actor_set_reactive (button, TRUE);
+
+  content = my_dock_themed_icon_content (stage,
+                                         display,
+                                         command_dock_icon_names,
+                                         logical);
+  /* Fallback: a dark blue pill so it looks like a terminal even without icon */
+  if (!content)
+    content = my_aqua_dock_icon_content (stage, texture, 0.10f, 0.18f, 0.35f);
+
+  if (content)
+    my_aqua_actor_set_scaled_content (button,
+                                      g_steal_pointer (&content),
+                                      logical, logical,
+                                      texture, texture);
+
+  my_dock_wire_app_launcher (button, display, "org.ooze.Command",
+                             my_dock_launch_command);
+  return button;
+}
+
+/* ── Ooze King (System Settings) launcher ───────────────────────────────── */
+
+static const char *king_dock_icon_names[] = {
+  "org.ooze.King",
+  "preferences-system",
+  "preferences-desktop",
+  NULL,
+};
+
+static void
+my_dock_launch_king (MetaContext *context)
+{
+  g_autoptr (GSubprocessLauncher) launcher = NULL;
+  g_autoptr (GError)              error    = NULL;
+  g_autofree char *cmd = g_find_program_in_path ("ooze-king");
+  const char *argv[2]  = { NULL, NULL };
+
+  if (!context)
+    {
+      g_warning ("MyDock: no compositor context for launching ooze-king");
+      return;
+    }
+
+  if (!cmd)
+    {
+      g_warning ("MyDock: ooze-king not found in PATH");
+      return;
+    }
+
+  argv[0] = cmd;
+  launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_SEARCH_PATH_FROM_ENVP);
+  my_icons_apply_to_launcher (launcher);
+
+  if (!meta_wayland_client_new_subprocess (context, launcher, argv, &error))
+    g_warning ("MyDock: failed to launch ooze-king: %s", error->message);
+  else
+    g_print ("MyDock: launched ooze-king\n");
+}
+
+static ClutterActor *
+my_dock_create_king_launcher (ClutterActor *stage,
+                              MetaDisplay  *display)
+{
+  ClutterActor *button;
+  g_autoptr (ClutterContent) content = NULL;
+  int logical = 48;
+  int texture = my_aqua_icon_texture_size (display, logical);
+
+  button = clutter_actor_new ();
+  clutter_actor_set_size (button, (gfloat) logical, (gfloat) logical);
+  clutter_actor_set_reactive (button, TRUE);
+
+  content = my_dock_themed_icon_content (stage,
+                                         display,
+                                         king_dock_icon_names,
+                                         logical);
+  if (!content)
+    content = my_aqua_dock_icon_content (stage, texture, 0.35f, 0.45f, 0.70f);
+
+  if (content)
+    my_aqua_actor_set_scaled_content (button,
+                                      g_steal_pointer (&content),
+                                      logical, logical,
+                                      texture, texture);
+
+  my_dock_wire_app_launcher (button, display, "org.ooze.King",
+                             my_dock_launch_king);
+  return button;
+}
+
+/* ── Ooze Ear (PipeWire mixer) launcher ─────────────────────────────────── */
+
+static const char *ear_dock_icon_names[] = {
+  "org.ooze.Ear",
+  "audio-volume-high",
+  "multimedia-volume-control",
+  NULL,
+};
+
+static void
+my_dock_launch_ear (MetaContext *context)
+{
+  g_autoptr (GSubprocessLauncher) launcher = NULL;
+  g_autoptr (GError)              error    = NULL;
+  g_autofree char *cmd = g_find_program_in_path ("ooze-ear");
+  const char *argv[2]  = { NULL, NULL };
+
+  if (!context)
+    {
+      g_warning ("MyDock: no compositor context for launching ooze-ear");
+      return;
+    }
+
+  if (!cmd)
+    {
+      g_warning ("MyDock: ooze-ear not found in PATH");
+      return;
+    }
+
+  argv[0] = cmd;
+  launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_SEARCH_PATH_FROM_ENVP);
+  my_icons_apply_to_launcher (launcher);
+
+  if (!meta_wayland_client_new_subprocess (context, launcher, argv, &error))
+    g_warning ("MyDock: failed to launch ooze-ear: %s", error->message);
+  else
+    g_print ("MyDock: launched ooze-ear\n");
+}
+
+static ClutterActor *
+my_dock_create_ear_launcher (ClutterActor *stage,
+                             MetaDisplay  *display)
+{
+  ClutterActor *button;
+  g_autoptr (ClutterContent) content = NULL;
+  int logical = 48;
+  int texture = my_aqua_icon_texture_size (display, logical);
+
+  button = clutter_actor_new ();
+  clutter_actor_set_size (button, (gfloat) logical, (gfloat) logical);
+  clutter_actor_set_reactive (button, TRUE);
+
+  content = my_dock_themed_icon_content (stage,
+                                         display,
+                                         ear_dock_icon_names,
+                                         logical);
+  if (!content)
+    content = my_aqua_dock_icon_content (stage, texture, 0.20f, 0.55f, 0.35f);
+
+  if (content)
+    my_aqua_actor_set_scaled_content (button,
+                                      g_steal_pointer (&content),
+                                      logical, logical,
+                                      texture, texture);
+
+  my_dock_wire_app_launcher (button, display, "org.ooze.Ear",
+                             my_dock_launch_ear);
+  return button;
+}
+
+/* ── Ooze Pak (Flatpak manager) launcher ────────────────────────────────── */
+
+static const char *pak_dock_icon_names[] = {
+  "org.ooze.Pak",
+  "package-x-generic",
+  "system-software-install",
+  NULL,
+};
+
+static void
+my_dock_launch_pak (MetaContext *context)
+{
+  g_autoptr (GSubprocessLauncher) launcher = NULL;
+  g_autoptr (GError)              error    = NULL;
+  g_autofree char *cmd = g_find_program_in_path ("ooze-pak");
+  const char *argv[2]  = { NULL, NULL };
+
+  if (!context)
+    {
+      g_warning ("MyDock: no compositor context for launching ooze-pak");
+      return;
+    }
+
+  if (!cmd)
+    {
+      g_warning ("MyDock: ooze-pak not found in PATH");
+      return;
+    }
+
+  argv[0] = cmd;
+  launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_SEARCH_PATH_FROM_ENVP);
+  my_icons_apply_to_launcher (launcher);
+
+  if (!meta_wayland_client_new_subprocess (context, launcher, argv, &error))
+    g_warning ("MyDock: failed to launch ooze-pak: %s", error->message);
+  else
+    g_print ("MyDock: launched ooze-pak\n");
+}
+
+static ClutterActor *
+my_dock_create_pak_launcher (ClutterActor *stage,
+                             MetaDisplay  *display)
+{
+  ClutterActor *button;
+  g_autoptr (ClutterContent) content = NULL;
+  int logical = 48;
+  int texture = my_aqua_icon_texture_size (display, logical);
+
+  button = clutter_actor_new ();
+  clutter_actor_set_size (button, (gfloat) logical, (gfloat) logical);
+  clutter_actor_set_reactive (button, TRUE);
+
+  content = my_dock_themed_icon_content (stage,
+                                         display,
+                                         pak_dock_icon_names,
+                                         logical);
+  if (!content)
+    content = my_aqua_dock_icon_content (stage, texture, 0.25f, 0.55f, 0.85f);
+
+  if (content)
+    my_aqua_actor_set_scaled_content (button,
+                                      g_steal_pointer (&content),
+                                      logical, logical,
+                                      texture, texture);
+
+  my_dock_wire_app_launcher (button, display, "org.ooze.Pak",
+                             my_dock_launch_pak);
+  return button;
+}
+
+/* ── Trash can — open Trash in Spot; Pak uninstall uses in-app trash strip ─ */
+
+static const char *trash_dock_icon_names[] = {
+  "user-trash-full",
+  "user-trash",
+  "edit-delete",
+  NULL,
+};
+
+static void
+my_dock_launch_trash (MetaContext *context)
+{
+  g_autofree char *trash_files = NULL;
+
+  trash_files = g_build_filename (g_get_user_data_dir (),
+                                  "Trash", "files", NULL);
+  g_mkdir_with_parents (trash_files, 0700);
+  my_dock_launch_spot_path (context, trash_files);
+}
+
 static gboolean
-on_command_launcher_pressed (ClutterActor *actor G_GNUC_UNUSED,
-                             ClutterEvent *event,
-                             gpointer      user_data G_GNUC_UNUSED)
+on_trash_launcher_pressed (ClutterActor *actor G_GNUC_UNUSED,
+                           ClutterEvent *event,
+                           gpointer      user_data G_GNUC_UNUSED)
 {
   MetaContext *context;
 
@@ -183,13 +459,13 @@ on_command_launcher_pressed (ClutterActor *actor G_GNUC_UNUSED,
     return CLUTTER_EVENT_PROPAGATE;
 
   context = g_object_get_data (G_OBJECT (actor), "launch-context");
-  my_dock_launch_command (context);
+  my_dock_launch_trash (context);
   return CLUTTER_EVENT_STOP;
 }
 
 static ClutterActor *
-my_dock_create_command_launcher (ClutterActor *stage,
-                                 MetaDisplay  *display)
+my_dock_create_trash_launcher (ClutterActor *stage,
+                               MetaDisplay  *display)
 {
   ClutterActor *button;
   g_autoptr (ClutterContent) content = NULL;
@@ -209,11 +485,10 @@ my_dock_create_command_launcher (ClutterActor *stage,
 
   content = my_dock_themed_icon_content (stage,
                                          display,
-                                         command_dock_icon_names,
+                                         trash_dock_icon_names,
                                          logical);
-  /* Fallback: a dark blue pill so it looks like a terminal even without icon */
   if (!content)
-    content = my_aqua_dock_icon_content (stage, texture, 0.10f, 0.18f, 0.35f);
+    content = my_aqua_dock_icon_content (stage, texture, 0.45f, 0.45f, 0.48f);
 
   if (content)
     my_aqua_actor_set_scaled_content (button,
@@ -222,10 +497,10 @@ my_dock_create_command_launcher (ClutterActor *stage,
                                       texture, texture);
 
   g_signal_connect (button, "button-press-event",
-                    G_CALLBACK (on_command_launcher_pressed), NULL);
+                    G_CALLBACK (on_trash_launcher_pressed), NULL);
 
-  my_dock_attach_indicator (button, (float) logical);
-  g_object_set_data (G_OBJECT (button), "app-id", "org.ooze.Command");
+  /* No running-app indicator for Trash. */
+  g_object_set_data (G_OBJECT (button), "app-id", "org.ooze.Trash");
 
   return button;
 }
@@ -288,13 +563,8 @@ my_dock_check_by_id (MetaDisplay *display, const char *app_id)
   all = meta_display_list_all_windows (display);
   for (l = all; l && !found; l = l->next)
     {
-      MetaWindow *win = l->data;
-      if (meta_window_get_window_type (win) == META_WINDOW_NORMAL)
-        {
-          const char *id = meta_window_get_gtk_application_id (win);
-          if (g_strcmp0 (id, app_id) == 0)
-            found = TRUE;
-        }
+      if (my_dock_window_matches_app_id (l->data, app_id))
+        found = TRUE;
     }
   g_list_free (all);
   return found;
@@ -315,6 +585,90 @@ my_dock_check_by_info (MetaDisplay *display, GDesktopAppInfo *app_info)
     }
   g_list_free (all);
   return found;
+}
+
+static void
+my_dock_set_geometry_for_app_id (MetaDisplay  *display,
+                                 const char   *app_id,
+                                 MtkRectangle *rect)
+{
+  GList *all;
+  GList *l;
+
+  if (!app_id || !rect)
+    return;
+
+  all = meta_display_list_all_windows (display);
+  for (l = all; l != NULL; l = l->next)
+    {
+      MetaWindow *win = l->data;
+
+      if (my_dock_window_matches_app_id (win, app_id))
+        meta_window_set_icon_geometry (win, rect);
+    }
+  g_list_free (all);
+}
+
+static void
+my_dock_set_geometry_for_app_info (MetaDisplay     *display,
+                                   GDesktopAppInfo *app_info,
+                                   MtkRectangle    *rect)
+{
+  GList *all;
+  GList *l;
+
+  if (!app_info || !rect)
+    return;
+
+  all = meta_display_list_all_windows (display);
+  for (l = all; l != NULL; l = l->next)
+    {
+      MetaWindow *win = l->data;
+
+      if (my_dock_window_matches_app (win, app_info))
+        meta_window_set_icon_geometry (win, rect);
+    }
+  g_list_free (all);
+}
+
+void
+my_dock_update_icon_geometries (MetaDisplay  *display,
+                                ClutterActor *icons_container)
+{
+  ClutterActor *child;
+  graphene_point3d_t origin;
+
+  if (!display || !icons_container)
+    return;
+
+  for (child = clutter_actor_get_first_child (icons_container);
+       child != NULL;
+       child = clutter_actor_get_next_sibling (child))
+    {
+      const char *app_id;
+      GDesktopAppInfo *app_info;
+      MtkRectangle rect;
+      gfloat w, h;
+
+      w = clutter_actor_get_width (child);
+      h = clutter_actor_get_height (child);
+      clutter_actor_apply_transform_to_point (child,
+                                             &GRAPHENE_POINT3D_INIT (0.f, 0.f, 0.f),
+                                             &origin);
+
+      rect.x = (int) origin.x;
+      rect.y = (int) origin.y;
+      rect.width = MAX (1, (int) w);
+      rect.height = MAX (1, (int) h);
+
+      app_id = g_object_get_data (G_OBJECT (child), "app-id");
+      if (app_id)
+        my_dock_set_geometry_for_app_id (display, app_id, &rect);
+
+      app_info = g_object_get_data (G_OBJECT (child), "app-info");
+      if (app_info)
+        my_dock_set_geometry_for_app_info (display, app_info, &rect);
+    }
 }
 
 static gboolean
@@ -352,23 +706,42 @@ my_dock_update_indicators_cb (gpointer user_data)
       clutter_actor_set_opacity (indicator, running ? 255 : 0);
     }
 
+  my_dock_update_icon_geometries (ctx->display, ctx->container);
+
   return G_SOURCE_CONTINUE;
 }
 
 static gboolean
-my_dock_window_is_spot (MetaWindow *window)
+my_dock_window_matches_app_id (MetaWindow *window,
+                               const char *app_id)
 {
   const char *gtk_app_id;
+  const char *wm_class;
+  const char *wm_instance;
+
+  if (!window || !app_id || !*app_id)
+    return FALSE;
 
   if (meta_window_get_window_type (window) != META_WINDOW_NORMAL)
     return FALSE;
 
   gtk_app_id = meta_window_get_gtk_application_id (window);
-  return gtk_app_id && g_strcmp0 (gtk_app_id, "org.ooze.Spot") == 0;
+  if (gtk_app_id && g_strcmp0 (gtk_app_id, app_id) == 0)
+    return TRUE;
+
+  /* GTK4 often exposes the same id as WM_CLASS when app-id props lag. */
+  wm_class = meta_window_get_wm_class (window);
+  wm_instance = meta_window_get_wm_class_instance (window);
+  if ((wm_class && g_strcmp0 (wm_class, app_id) == 0) ||
+      (wm_instance && g_strcmp0 (wm_instance, app_id) == 0))
+    return TRUE;
+
+  return FALSE;
 }
 
 static GList *
-my_dock_get_spot_windows (MetaDisplay *display)
+my_dock_get_app_windows (MetaDisplay *display,
+                         const char  *app_id)
 {
   GList *all_windows;
   GList *l;
@@ -379,7 +752,7 @@ my_dock_get_spot_windows (MetaDisplay *display)
     {
       MetaWindow *window = l->data;
 
-      if (my_dock_window_is_spot (window))
+      if (my_dock_window_matches_app_id (window, app_id))
         matches = g_list_prepend (matches, window);
     }
 
@@ -388,18 +761,25 @@ my_dock_get_spot_windows (MetaDisplay *display)
 }
 
 static void
-my_dock_handle_spot_click (MetaDisplay *display,
-                           MetaContext *context G_GNUC_UNUSED)
+my_dock_handle_app_click (MetaDisplay   *display,
+                          MetaContext   *context,
+                          const char    *app_id,
+                          MyDockLaunchFn launch)
 {
   g_autoptr (GList) windows = NULL;
   GList *l;
   gboolean any_visible = FALSE;
   MetaWindow *focus_window;
+  MetaWindow *target;
+  gboolean app_is_focused;
 
-  windows = my_dock_get_spot_windows (display);
+  if (!display || !app_id || !launch)
+    return;
+
+  windows = my_dock_get_app_windows (display, app_id);
   if (!windows)
     {
-      my_dock_launch_spot (context);
+      launch (context);
       return;
     }
 
@@ -412,45 +792,91 @@ my_dock_handle_spot_click (MetaDisplay *display,
         }
     }
 
-  if (any_visible)
+  focus_window = meta_display_get_focus_window (display);
+  app_is_focused = my_dock_window_matches_app_id (focus_window, app_id);
+
+  /* Frontmost → minimize. Otherwise raise existing. Never spawn a duplicate. */
+  if (any_visible && app_is_focused)
     {
       for (l = windows; l != NULL; l = l->next)
         {
           MetaWindow *window = l->data;
 
-          if (my_dock_window_is_visible (window))
+          if (my_dock_window_is_visible (window) &&
+              meta_window_can_minimize (window))
             meta_window_minimize (window);
         }
       return;
     }
 
-  focus_window = my_dock_get_most_recent_window (windows);
-  if (focus_window)
+  if (any_visible)
     {
-      meta_window_unminimize (focus_window);
-      meta_window_activate (focus_window, clutter_get_current_event_time ());
+      GList *visible = NULL;
+
+      for (l = windows; l != NULL; l = l->next)
+        {
+          if (my_dock_window_is_visible (l->data))
+            visible = g_list_prepend (visible, l->data);
+        }
+
+      target = my_dock_get_most_recent_window (visible);
+      g_list_free (visible);
+      if (target)
+        meta_window_activate (target, clutter_get_current_event_time ());
+      return;
+    }
+
+  target = my_dock_get_most_recent_window (windows);
+  if (target)
+    {
+      meta_window_unminimize (target);
+      meta_window_activate (target, clutter_get_current_event_time ());
     }
 }
 
 static gboolean
-on_spot_launcher_pressed (ClutterActor *actor G_GNUC_UNUSED,
-                          ClutterEvent *event,
-                          gpointer      user_data G_GNUC_UNUSED)
+on_app_launcher_pressed (ClutterActor *actor,
+                         ClutterEvent *event,
+                         gpointer      user_data G_GNUC_UNUSED)
 {
   MetaDisplay *display;
   MetaContext *context;
+  const char *app_id;
+  MyDockLaunchFn launch;
 
   if (clutter_event_get_button (event) != CLUTTER_BUTTON_PRIMARY)
     return CLUTTER_EVENT_PROPAGATE;
 
   display = g_object_get_data (G_OBJECT (actor), "launch-display");
   context = g_object_get_data (G_OBJECT (actor), "launch-context");
-  if (display)
-    my_dock_handle_spot_click (display, context);
-  else
-    my_dock_launch_spot (context);
+  app_id = g_object_get_data (G_OBJECT (actor), "app-id");
+  launch = g_object_get_data (G_OBJECT (actor), "launch-fn");
+
+  if (display && context && app_id && launch)
+    my_dock_handle_app_click (display, context, app_id, launch);
 
   return CLUTTER_EVENT_STOP;
+}
+
+static void
+my_dock_wire_app_launcher (ClutterActor  *button,
+                           MetaDisplay   *display,
+                           const char    *app_id,
+                           MyDockLaunchFn launch)
+{
+  MetaContext *context;
+
+  context = meta_display_get_context (display);
+  g_object_set_data (G_OBJECT (button), "launch-display", display);
+  g_object_set_data_full (G_OBJECT (button),
+                          "launch-context",
+                          g_object_ref (context),
+                          g_object_unref);
+  g_object_set_data (G_OBJECT (button), "app-id", (gpointer) app_id);
+  g_object_set_data (G_OBJECT (button), "launch-fn", launch);
+  g_signal_connect (button, "button-press-event",
+                    G_CALLBACK (on_app_launcher_pressed), NULL);
+  my_dock_attach_indicator (button, clutter_actor_get_width (button));
 }
 
 ClutterActor *
@@ -461,18 +887,10 @@ my_dock_create_spot_launcher (ClutterActor *stage,
   g_autoptr (ClutterContent) content = NULL;
   int logical = 48;
   int texture = my_aqua_icon_texture_size (display, logical);
-  MetaContext *context;
 
   button = clutter_actor_new ();
   clutter_actor_set_size (button, (gfloat) logical, (gfloat) logical);
   clutter_actor_set_reactive (button, TRUE);
-
-  context = meta_display_get_context (display);
-  g_object_set_data (G_OBJECT (button), "launch-display", display);
-  g_object_set_data_full (G_OBJECT (button),
-                          "launch-context",
-                          g_object_ref (context),
-                          g_object_unref);
 
   content = my_dock_themed_icon_content (stage,
                                          display,
@@ -490,14 +908,8 @@ my_dock_create_spot_launcher (ClutterActor *stage,
                                       texture,
                                       texture);
 
-  g_signal_connect (button,
-                    "button-press-event",
-                    G_CALLBACK (on_spot_launcher_pressed),
-                    NULL);
-
-  my_dock_attach_indicator (button, (float) logical);
-  g_object_set_data (G_OBJECT (button), "app-id", "org.ooze.Spot");
-
+  my_dock_wire_app_launcher (button, display, "org.ooze.Spot",
+                             my_dock_launch_spot);
   return button;
 }
 
@@ -1151,6 +1563,10 @@ my_dock_populate_container (MetaContext   *context G_GNUC_UNUSED,
   {
     ClutterActor *spot_launcher;
     ClutterActor *command_launcher;
+    ClutterActor *ear_launcher;
+    ClutterActor *king_launcher;
+    ClutterActor *pak_launcher;
+    ClutterActor *trash_launcher;
 
     spot_launcher = my_dock_create_spot_launcher (stage, display);
     clutter_actor_set_y_align (spot_launcher, CLUTTER_ACTOR_ALIGN_CENTER);
@@ -1161,6 +1577,26 @@ my_dock_populate_container (MetaContext   *context G_GNUC_UNUSED,
     clutter_actor_set_y_align (command_launcher, CLUTTER_ACTOR_ALIGN_CENTER);
     clutter_actor_add_child (container, command_launcher);
     clutter_actor_show (command_launcher);
+
+    ear_launcher = my_dock_create_ear_launcher (stage, display);
+    clutter_actor_set_y_align (ear_launcher, CLUTTER_ACTOR_ALIGN_CENTER);
+    clutter_actor_add_child (container, ear_launcher);
+    clutter_actor_show (ear_launcher);
+
+    king_launcher = my_dock_create_king_launcher (stage, display);
+    clutter_actor_set_y_align (king_launcher, CLUTTER_ACTOR_ALIGN_CENTER);
+    clutter_actor_add_child (container, king_launcher);
+    clutter_actor_show (king_launcher);
+
+    pak_launcher = my_dock_create_pak_launcher (stage, display);
+    clutter_actor_set_y_align (pak_launcher, CLUTTER_ACTOR_ALIGN_CENTER);
+    clutter_actor_add_child (container, pak_launcher);
+    clutter_actor_show (pak_launcher);
+
+    trash_launcher = my_dock_create_trash_launcher (stage, display);
+    clutter_actor_set_y_align (trash_launcher, CLUTTER_ACTOR_ALIGN_CENTER);
+    clutter_actor_add_child (container, trash_launcher);
+    clutter_actor_show (trash_launcher);
   }
 
   /* Kick off the running-app indicator timer (600 ms). */

@@ -30,6 +30,13 @@ G_DECLARE_FINAL_TYPE (OozeSurface, ooze_surface, OOZE, SURFACE, GtkBox)
 /*
  * Create a new OozeSurface.
  * `orientation` controls the GtkBox layout direction for children.
+ *
+ * STATUSBAR surfaces get corner-safe padding so labels clear the CSD
+ * window radius (see OOZE_CHROME_CORNER_INSET).
  */
 GtkWidget *ooze_surface_new (OozeSurfaceVariant variant,
                              GtkOrientation     orientation);
+
+/* Match window.csd decoration border-radius so chrome clears the curve. */
+#define OOZE_CHROME_CORNER_INSET 10
+

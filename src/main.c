@@ -2,18 +2,56 @@
 
 #include "my-icons.h"
 
+#include <gio/gio.h>
 #include <stdlib.h>
 
 #include <meta/meta-context.h>
 #include <meta/meta-plugin.h>
+#include <meta/prefs.h>
 
 #define WM_NAME "My Desktop"
+
+static void
+ooze_apply_wm_settings_early (void)
+{
+  g_autoptr (GSettings) mutter = NULL;
+  g_autoptr (GSettings) mouse = NULL;
+  GSettingsSchemaSource *source;
+  g_autoptr (GSettingsSchema) mouse_schema = NULL;
+
+  /*
+   * Must run before meta_context_setup() so Mutter's prefs bind to
+   * edge-tiling=true. Schema default is false; without this, drag-to-edge
+   * snap never arms (see mutter meta-window-drag.c).
+   */
+  mutter = g_settings_new ("org.gnome.mutter");
+  if (mutter)
+    {
+      g_settings_set_boolean (mutter, "edge-tiling", TRUE);
+      g_settings_set_int (mutter, "draggable-border-width", 12);
+    }
+
+  /* Wider edge hit-zone: mutter uses drag_threshold * 6 for tile strips. */
+  source = g_settings_schema_source_get_default ();
+  if (source)
+    mouse_schema = g_settings_schema_source_lookup (
+        source, "org.gnome.desktop.peripherals.mouse", TRUE);
+  if (mouse_schema && g_settings_schema_has_key (mouse_schema, "drag-threshold"))
+    {
+      mouse = g_settings_new_full (mouse_schema, NULL, NULL);
+      g_settings_set_int (mouse, "drag-threshold", 16);
+    }
+
+  g_settings_sync ();
+}
 
 static MetaContext *
 meta_init (int *argc, char **argv[])
 {
   g_autoptr (GError) error = NULL;
   MetaContext *context;
+
+  ooze_apply_wm_settings_early ();
 
   /*
    * Register our plugin GType with Mutter. In libmutter-18 this is done via
@@ -44,6 +82,9 @@ meta_init (int *argc, char **argv[])
       g_object_unref (context);
       return NULL;
     }
+
+  g_print ("MyDesktop: meta_prefs edge-tiling=%s\n",
+           meta_prefs_get_edge_tiling () ? "on" : "off");
 
   return context;
 }
