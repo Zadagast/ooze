@@ -1,9 +1,13 @@
 #pragma once
 
+#include <cairo/cairo.h>
 #include <clutter/clutter.h>
 #include <meta/display.h>
 
 G_BEGIN_DECLS
+
+ClutterContent *my_aqua_content_from_surface (ClutterActor    *ref_actor,
+                                              cairo_surface_t *surface);
 
 ClutterContent *my_aqua_pinstripe_content (ClutterActor *ref_actor,
                                            int           width,
@@ -29,6 +33,18 @@ ClutterContent *my_aqua_traffic_light_content (ClutterActor *ref_actor,
                                                gfloat        g,
                                                gfloat        b);
 
+
+ClutterContent *my_aqua_menu_feather_content (ClutterActor *ref_actor,
+                                             int           width,
+                                             int           height);
+
+ClutterContent *my_aqua_ooze_button_content (ClutterActor *ref_actor,
+                                             int          *width_out,
+                                             int          *height_out);
+
+ClutterContent *my_aqua_spot_icon_content (ClutterActor *ref_actor,
+                                           MetaDisplay  *display,
+                                           int           logical_size);
 
 ClutterContent *my_aqua_apple_logo_content (ClutterActor *ref_actor,
                                             int           size);

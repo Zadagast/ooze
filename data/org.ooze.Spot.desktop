@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Spot
+GenericName=File Manager
+Comment=Browse files on Ooze
+Exec=spot %U
+Icon=org.ooze.Spot
+Terminal=false
+Type=Application
+Categories=Utility;FileManager;
+StartupNotify=true
+StartupWMClass=org.ooze.Spot
+MimeType=inode/directory;
+SingleMainWindow=false

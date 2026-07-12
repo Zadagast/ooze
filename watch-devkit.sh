@@ -10,12 +10,14 @@ if ! command -v entr >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Watching src/ — save a file to rebuild and restart devkit (Ctrl+C to stop)."
-find "$ROOT/src" -type f \( -name '*.c' -o -name '*.h' \) | entr -r bash -c "
+echo "Watching src/ and spot/ — save a file to rebuild and restart devkit (Ctrl+C to stop)."
+find "$ROOT/src" "$ROOT/spot" -type f \( -name '*.c' -o -name '*.h' \) | entr -r bash -c "
   set -euo pipefail
   cd '$ROOT'
   ninja -C build
   export GSETTINGS_BACKEND=memory
   export MUTTER_DEBUG_DUMMY_MODE_SPECS=1920x1080
+  export PATH='$ROOT/build:'\"$PATH\"
+  export OOZE_DATA_DIR='$ROOT/data'
   exec dbus-run-session '$ROOT/build/my-desktop' --wayland --devkit --no-x11
 "

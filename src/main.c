@@ -1,5 +1,7 @@
 #include "my-plugin.h"
 
+#include "my-icons.h"
+
 #include <stdlib.h>
 
 #include <meta/meta-context.h>
@@ -65,6 +67,8 @@ main (int argc, char **argv)
 {
   g_autoptr (MetaContext) context = NULL;
   int status;
+
+  my_icons_apply ();
 
   context = meta_init (&argc, &argv);
   if (!context)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clutter/clutter.h>
 #include <meta/compositor.h>
 #include <meta/display.h>
 #include <meta/meta-context.h>
@@ -25,7 +26,15 @@ void my_dock_populate_container (MetaContext    *context,
 ClutterActor *my_dock_create_spot_launcher (ClutterActor *stage,
                                             MetaDisplay  *display);
 
-void my_dock_launch_spot (void);
+void my_dock_launch_spot (MetaContext *context);
+
+void my_dock_launch_spot_path (MetaContext *context,
+                               const char *path);
+
+ClutterContent *my_dock_themed_icon_content (ClutterActor       *ref_actor,
+                                             MetaDisplay        *display,
+                                             const char * const *icon_names,
+                                             int                 logical_size);
 
 void my_dock_free (MyDock *dock);
 
