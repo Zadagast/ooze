@@ -1119,7 +1119,7 @@ my_plugin_apply_window_chrome (MyPlugin         *plugin,
     return;
 
   /*
-   * Ooze apps (org.ooze.*) draw their own GTK window chrome via ooze-ui,
+   * Ooze apps (org.ooze.*) draw their own GTK window dressing via Ooze Gel,
    * so we must not add a second compositor-level titlebar on top.
    * All other apps – including CSD Wayland clients like Inkscape – get
    * the Aqua traffic-light overlay drawn by the compositor.

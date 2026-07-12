@@ -262,7 +262,7 @@ create_app_cell (OozePakWindow *self, OozePakApp *app)
   GtkWidget *label;
   GtkDragSource *drag;
   GtkGestureClick *click;
-  const char *icons[] = { app->app_id, "package-x-generic", "application-x-addon", NULL };
+  const char *icons[] = { app->app_id, "system-software-install", "package-x-generic", NULL };
 
   box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
   gtk_widget_add_css_class (box, "pak-grid-cell");
@@ -565,6 +565,7 @@ ooze_pak_window_init (OozePakWindow *self)
 
   gtk_window_set_default_size (GTK_WINDOW (self), 720, 520);
   gtk_window_set_title (GTK_WINDOW (self), "Ooze Pak");
+  gtk_window_set_icon_name (GTK_WINDOW (self), "system-software-install");
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-pak");
   gtk_widget_add_css_class (GTK_WIDGET (self), "spot-finder");
 

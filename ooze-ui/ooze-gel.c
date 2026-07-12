@@ -1,4 +1,4 @@
-#include "ooze-window-chrome.h"
+#include "ooze-gel.h"
 
 #include <adwaita.h>
 #include <cairo/cairo.h>
@@ -175,7 +175,7 @@ ooze_shadow_bin_new (void)
 }
 
 static gboolean
-ooze_window_begin_move (GtkWindow *window,
+ooze_gel_begin_move (GtkWindow *window,
                         GdkDevice *device,
                         guint      button,
                         gdouble    x,
@@ -227,7 +227,7 @@ ooze_drag_handle_begin (GtkGestureDrag *gesture,
 
   gdk_event_get_position (event, &x, &y);
   time = gdk_event_get_time (event);
-  return ooze_window_begin_move (handle->window, device, button, x, y, time);
+  return ooze_gel_begin_move (handle->window, device, button, x, y, time);
 }
 
 static gboolean
@@ -316,7 +316,7 @@ ooze_resize_edge_new (GtkWindow      *window,
 }
 
 static void
-ooze_window_chrome_ensure_css (void)
+ooze_gel_ensure_css (void)
 {
   static gboolean loaded = FALSE;
   GtkCssProvider *provider;
@@ -432,7 +432,7 @@ ooze_edge_grip_new (GtkWindow      *window,
 }
 
 void
-ooze_window_install_edge_resize (GtkWindow *window)
+ooze_gel_install_edge_resize (GtkWindow *window)
 {
   GtkWidget *child;
   GtkWidget *overlay;
@@ -454,7 +454,7 @@ ooze_window_install_edge_resize (GtkWindow *window)
   /* Mark early so notify::child from reparenting does not re-enter. */
   g_object_set_data (G_OBJECT (window), "ooze-edge-resize-installed", GINT_TO_POINTER (1));
 
-  ooze_window_chrome_ensure_css ();
+  ooze_gel_ensure_css ();
 
   g_object_ref (child);
   gtk_window_set_child (window, NULL);
@@ -499,7 +499,7 @@ ooze_window_install_edge_resize (GtkWindow *window)
 }
 
 void
-ooze_window_install_resize_handles (GtkWindow *window,
+ooze_gel_install_resize_handles (GtkWindow *window,
                                     GtkWidget *root)
 {
   GtkWidget *overlay;
@@ -511,7 +511,7 @@ ooze_window_install_resize_handles (GtkWindow *window,
   g_return_if_fail (GTK_IS_WINDOW (window));
   g_return_if_fail (GTK_IS_WIDGET (root));
 
-  ooze_window_chrome_ensure_css ();
+  ooze_gel_ensure_css ();
 
   if (g_object_get_data (G_OBJECT (window), "ooze-resize-installed"))
     return;
@@ -562,7 +562,7 @@ ooze_window_install_resize_handles (GtkWindow *window,
 }
 
 void
-ooze_window_install_drag (GtkWidget *widget,
+ooze_gel_install_drag (GtkWidget *widget,
                           GtkWindow *window)
 {
   OozeDragHandle *handle;

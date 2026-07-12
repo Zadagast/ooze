@@ -61,10 +61,10 @@ static const MyDockIconAlias dock_icon_aliases[] = {
   { "org.ooze.Command-symbolic","utilities-terminal"   },
   { "org.ooze.King",            "preferences-system"   },
   { "org.ooze.King-symbolic",   "preferences-system"   },
-  { "org.ooze.Ear",             "audio-volume-high"    },
-  { "org.ooze.Ear-symbolic",    "audio-volume-high"    },
-  { "org.ooze.Pak",             "package-x-generic"    },
-  { "org.ooze.Pak-symbolic",    "package-x-generic"    },
+  { "org.ooze.Ear",             "audio-headphones"     },
+  { "org.ooze.Ear-symbolic",    "audio-headphones-symbolic" },
+  { "org.ooze.Pak",             "system-software-install" },
+  { "org.ooze.Pak-symbolic",    "system-software-install-symbolic" },
   { NULL, NULL },
 };
 
@@ -292,8 +292,9 @@ my_dock_create_king_launcher (ClutterActor *stage,
 
 static const char *ear_dock_icon_names[] = {
   "org.ooze.Ear",
-  "audio-volume-high",
+  "audio-headphones",
   "multimedia-volume-control",
+  "preferences-desktop-sound",
   NULL,
 };
 
@@ -362,8 +363,8 @@ my_dock_create_ear_launcher (ClutterActor *stage,
 
 static const char *pak_dock_icon_names[] = {
   "org.ooze.Pak",
-  "package-x-generic",
   "system-software-install",
+  "package-x-generic",
   NULL,
 };
 

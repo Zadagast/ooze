@@ -2,7 +2,7 @@
 Name=Ooze Ear
 Comment=PipeWire volume and device mixer for Ooze
 Exec=ooze-ear
-Icon=audio-volume-high
+Icon=audio-headphones
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;Mixer;

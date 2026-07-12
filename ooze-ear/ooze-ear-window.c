@@ -25,6 +25,7 @@ ooze_ear_window_init (OozeEarWindow *self)
 
   gtk_window_set_default_size (GTK_WINDOW (self), 560, 480);
   gtk_window_set_title (GTK_WINDOW (self), "Sound");
+  gtk_window_set_icon_name (GTK_WINDOW (self), "audio-headphones");
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-ear");
 
   self->header = GTK_WIDGET (ooze_header_bar_new ());

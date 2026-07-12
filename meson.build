@@ -128,11 +128,11 @@ ooze_kit_sources = [
   'ooze-kit/ooze-theme.c',
 ]
 
-# Shared source list for ooze-ui widgets (header bar, traffic lights, chrome)
+# Shared source list for ooze-ui widgets (header bar, traffic lights, Ooze Gel)
 ooze_ui_sources = [
   'ooze-ui/ooze-traffic-lights.c',
   'ooze-ui/ooze-header-bar.c',
-  'ooze-ui/ooze-window-chrome.c',
+  'ooze-ui/ooze-gel.c',
   'common/aqua-traffic.c',
 ]
 
@@ -252,6 +252,15 @@ if gtk4_dep.found() and adw_dep.found()
 
     install_data('data/org.ooze.Ear.desktop',
       install_dir: get_option('datadir') / 'applications',
+    )
+
+    install_data('data/ear-logo.svg',
+      install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps',
+      rename: 'org.ooze.Ear.svg',
+    )
+
+    install_data('data/ear-logo.svg',
+      install_dir: ooze_data_dir,
     )
 
     executable('ooze-king',

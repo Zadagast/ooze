@@ -1,7 +1,7 @@
 #include "ooze-header-bar.h"
 
 #include "ooze-traffic-lights.h"
-#include "ooze-window-chrome.h"
+#include "ooze-gel.h"
 
 #include "aqua-chrome.h"
 
@@ -175,16 +175,16 @@ ooze_header_bar_attach_window (OozeHeaderBar *self,
 
   self->window = window;
   ooze_traffic_lights_attach_window (OOZE_TRAFFIC_LIGHTS (self->traffic), window);
-  ooze_window_install_drag (GTK_WIDGET (self), window);
+  ooze_gel_install_drag (GTK_WIDGET (self), window);
 
   /* Install mid-edge resize grips once the window content exists. */
   if (gtk_window_get_child (window))
-    ooze_window_install_edge_resize (window);
+    ooze_gel_install_edge_resize (window);
   else if (!g_object_get_data (G_OBJECT (window), "ooze-edge-resize-watch"))
     {
       g_object_set_data (G_OBJECT (window), "ooze-edge-resize-watch", GINT_TO_POINTER (1));
       g_signal_connect (window, "notify::child",
-                        G_CALLBACK (ooze_window_install_edge_resize), NULL);
+                        G_CALLBACK (ooze_gel_install_edge_resize), NULL);
     }
 }
 

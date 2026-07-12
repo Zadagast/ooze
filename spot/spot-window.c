@@ -3,7 +3,7 @@
 #include "my-icons.h"
 
 #include "ooze-header-bar.h"
-#include "ooze-window-chrome.h"
+#include "ooze-gel.h"
 
 /* OozeKit — shared surface + button widgets */
 #include "ooze-surface.h"
@@ -2359,7 +2359,7 @@ spot_window_constructed (GObject *object)
   shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
   self->toolbar = spot_create_toolbar (self);
-  /* ooze_window_install_drag not needed for the toolbar: GTK4 CSD
+  /* ooze_gel_install_drag not needed for the toolbar: GTK4 CSD
    * handles window-move via the titlebar widget above. */
 
   content_paned = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
