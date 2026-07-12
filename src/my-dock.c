@@ -398,6 +398,36 @@ my_dock_launch_pak (MetaContext *context)
     g_print ("MyDock: launched ooze-pak\n");
 }
 
+void
+my_dock_launch_about (MetaContext *context)
+{
+  g_autoptr (GSubprocessLauncher) launcher = NULL;
+  g_autoptr (GError)              error    = NULL;
+  g_autofree char *cmd = g_find_program_in_path ("ooze-about");
+  const char *argv[2]  = { NULL, NULL };
+
+  if (!context)
+    {
+      g_warning ("MyDock: no compositor context for launching ooze-about");
+      return;
+    }
+
+  if (!cmd)
+    {
+      g_warning ("MyDock: ooze-about not found in PATH");
+      return;
+    }
+
+  argv[0] = cmd;
+  launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_SEARCH_PATH_FROM_ENVP);
+  my_icons_apply_to_launcher (launcher);
+
+  if (!meta_wayland_client_new_subprocess (context, launcher, argv, &error))
+    g_warning ("MyDock: failed to launch ooze-about: %s", error->message);
+  else
+    g_print ("MyDock: launched ooze-about\n");
+}
+
 static ClutterActor *
 my_dock_create_pak_launcher (ClutterActor *stage,
                              MetaDisplay  *display)

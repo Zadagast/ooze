@@ -5,6 +5,7 @@
 #include "my-desktop-icons.h"
 #include "my-dock.h"
 #include "my-magic-lamp.h"
+#include "my-screen-transition.h"
 #include "my-theme.h"
 #include "my-window.h"
 
@@ -32,8 +33,9 @@
 #include <string.h>
 #include <time.h>
 
-#define PANEL_HEIGHT          22.0f
+#define PANEL_HEIGHT          26.0f  /* room for Ooze button + vertical pad */
 #define OOZE_BUTTON_MARGIN    4.0f
+#define OOZE_BUTTON_PAD_Y     2.0f   /* air above/below the Ooze pill */
 #define MENU_ITEM_GAP         18.0f
 #define MENU_BAR_HIT_HEIGHT   PANEL_HEIGHT
 
@@ -41,7 +43,9 @@
 #define AQUA_DOCK_ITEM_SIZE   48.0f
 #define AQUA_DOCK_PADDING     14.0f
 #define AQUA_DOCK_ITEM_GAP    6.0f
-#define AQUA_DOCK_BOTTOM_GAP  8.0f
+#define AQUA_DOCK_REFLECT_H   26.0f  /* faded mirror under shelf (may clip at screen edge) */
+#define AQUA_DOCK_BOTTOM_GAP  8.0f   /* plate sits this far above the screen bottom */
+#define AQUA_DOCK_STRUT_GAP   8.0f   /* reserved screen edge for maximized windows */
 
 typedef struct
 {
@@ -66,6 +70,7 @@ struct _MyPlugin
   ClutterActor *aqua_dock;
   ClutterActor *aqua_dock_plate;
   ClutterActor *aqua_dock_icons;
+  ClutterActor *aqua_dock_reflections;
   ClutterActor *tile_preview;
   MetaMonitorManager *monitor_manager;
   MetaContext *context;
@@ -278,7 +283,7 @@ my_plugin_menu_action (gpointer user_data,
       break;
 
     case MY_MENU_HELP_ABOUT:
-      g_print ("Ooze Desktop — a macOS-inspired Wayland compositor\n");
+      my_dock_launch_about (plugin->context);
       break;
 
     default:
@@ -353,6 +358,8 @@ on_ooze_button_pressed (ClutterActor *actor,
    * Ooze menu layout:
    *   Switch to Dark / Light Mode
    *   ──────────────────────────
+   *   About Ooze...
+   *   ──────────────────────────
    *   Restart...
    *   Shut Down...
    *   ──────────────────────────
@@ -361,10 +368,12 @@ on_ooze_button_pressed (ClutterActor *actor,
   MyAquaMenuEntry entries[] = {
     { NULL,            MY_MENU_OOZE_APPEARANCE, TRUE  }, /* [0] filled below */
     { NULL,            0,                       FALSE }, /* [1] separator    */
-    { "Restart...",    MY_MENU_OOZE_RESTART,    TRUE  }, /* [2]              */
-    { "Shut Down...",  MY_MENU_OOZE_SHUTDOWN,   TRUE  }, /* [3]              */
-    { NULL,            0,                       FALSE }, /* [4] separator    */
-    { NULL,            MY_MENU_OOZE_LOGOUT,     TRUE  }, /* [5] filled below */
+    { "About Ooze...", MY_MENU_HELP_ABOUT,      TRUE  }, /* [2]              */
+    { NULL,            0,                       FALSE }, /* [3] separator    */
+    { "Restart...",    MY_MENU_OOZE_RESTART,    TRUE  }, /* [4]              */
+    { "Shut Down...",  MY_MENU_OOZE_SHUTDOWN,   TRUE  }, /* [5]              */
+    { NULL,            0,                       FALSE }, /* [6] separator    */
+    { NULL,            MY_MENU_OOZE_LOGOUT,     TRUE  }, /* [7] filled below */
   };
 
   if (clutter_event_get_button (event) != CLUTTER_BUTTON_PRIMARY)
@@ -374,7 +383,7 @@ on_ooze_button_pressed (ClutterActor *actor,
   entries[0].label = dark ? "Switch to Light Mode" : "Switch to Dark Mode";
 
   logout_label = g_strdup_printf ("Log Out %s...", g_get_user_name ());
-  entries[5].label = logout_label;
+  entries[7].label = logout_label;
 
   my_aqua_menu_toggle_for_anchor (plugin->menu_popup,
                                   actor,
@@ -480,53 +489,57 @@ my_plugin_show_bar_menu (MyPlugin     *plugin,
         MetaDisplay *display;
         GList *windows;
         GList *l;
-        g_autoptr (GPtrArray) entries = g_ptr_array_new ();
-        MyAquaMenuEntry header[] = {
-          { "Minimize", MY_MENU_WINDOW_MINIMIZE, has_focus },
-          { "Zoom", MY_MENU_WINDOW_ZOOM, has_focus },
-          { "Bring All to Front", MY_MENU_WINDOW_BRING_ALL, TRUE },
-        };
+        g_autoptr (GArray) entries = g_array_new (FALSE, FALSE,
+                                                  sizeof (MyAquaMenuEntry));
+        MyAquaMenuEntry row;
         int focus_index = MY_MENU_WINDOW_FOCUS_BASE;
+        gboolean added_window = FALSE;
 
-        for (gsize i = 0; i < G_N_ELEMENTS (header); i++)
-          g_ptr_array_add (entries, &header[i]);
+        row = (MyAquaMenuEntry){
+          "Minimize", MY_MENU_WINDOW_MINIMIZE, has_focus
+        };
+        g_array_append_val (entries, row);
+        row = (MyAquaMenuEntry){
+          "Zoom", MY_MENU_WINDOW_ZOOM, has_focus
+        };
+        g_array_append_val (entries, row);
+        row = (MyAquaMenuEntry){
+          "Bring All to Front", MY_MENU_WINDOW_BRING_ALL, TRUE
+        };
+        g_array_append_val (entries, row);
 
         display = meta_plugin_get_display (META_PLUGIN (plugin));
         windows = meta_display_list_all_windows (display);
-        if (windows)
-          {
-            MyAquaMenuEntry separator = { NULL, 0, FALSE };
-            g_ptr_array_add (entries, &separator);
-          }
-
         for (l = windows; l != NULL; l = l->next)
           {
             MetaWindow *w = l->data;
             const char *title;
-            MyAquaMenuEntry *item;
 
             if (meta_window_get_window_type (w) != META_WINDOW_NORMAL)
               continue;
+
+            if (!added_window)
+              {
+                row = (MyAquaMenuEntry){ NULL, 0, FALSE };
+                g_array_append_val (entries, row);
+                added_window = TRUE;
+              }
 
             title = meta_window_get_title (w);
             if (!title || title[0] == '\0')
               title = "Untitled";
 
-            item = g_new0 (MyAquaMenuEntry, 1);
-            item->label = title;
-            item->action_id = focus_index++;
-            item->sensitive = TRUE;
-            g_ptr_array_add (entries, item);
+            row = (MyAquaMenuEntry){
+              title, focus_index++, TRUE
+            };
+            g_array_append_val (entries, row);
           }
         g_list_free (windows);
 
         my_aqua_menu_toggle_for_anchor (plugin->menu_popup,
                                         anchor,
-                                        (MyAquaMenuEntry *) entries->pdata,
+                                        (MyAquaMenuEntry *) entries->data,
                                         entries->len);
-
-        for (guint i = G_N_ELEMENTS (header) + 1; i < entries->len; i++)
-          g_free (entries->pdata[i]);
       }
       break;
 
@@ -559,6 +572,7 @@ static void my_plugin_refresh_ooze_button (MyPlugin *plugin);
 static void my_plugin_layout_menu_labels (MyPlugin *plugin);
 static void my_plugin_set_chrome_visible (MetaWindowActor *actor, gboolean visible);
 static gboolean my_plugin_window_is_minimized (MetaWindow *window);
+static void my_plugin_sync_dock_reflections (MyPlugin *plugin);
 
 static ClutterActor *
 my_plugin_create_text_label (ClutterActor *ref_actor,
@@ -687,6 +701,7 @@ my_plugin_refresh_theme (MyPlugin *plugin)
 
   my_plugin_update_clock (plugin);
   my_plugin_update_layout (plugin, display);
+  my_plugin_sync_dock_reflections (plugin);
 
   if (plugin->monitor_manager)
     my_plugin_on_monitors_changed (plugin->monitor_manager, plugin);
@@ -711,6 +726,12 @@ my_plugin_refresh_theme (MyPlugin *plugin)
       my_plugin_schedule_window_chrome_sync (actor);
     }
   g_list_free (windows);
+}
+
+static void
+my_plugin_on_theme_will_change (gpointer user_data)
+{
+  my_screen_transition_run (META_PLUGIN (user_data));
 }
 
 static void
@@ -919,9 +940,11 @@ my_plugin_refresh_ooze_button (MyPlugin *plugin)
                              width,
                              height);
   clutter_actor_set_size (plugin->menu_icon, (gfloat) width, (gfloat) height);
+  clutter_actor_set_content_gravity (plugin->menu_icon,
+                                     CLUTTER_CONTENT_GRAVITY_CENTER);
   clutter_actor_set_position (plugin->menu_icon,
                               OOZE_BUTTON_MARGIN,
-                              my_plugin_vertical_center (PANEL_HEIGHT, (gfloat) height));
+                              OOZE_BUTTON_PAD_Y);
 }
 
 static void
@@ -1377,6 +1400,104 @@ my_plugin_count_dock_icons (MyPlugin *plugin)
 }
 
 static void
+my_plugin_clear_dock_reflections (MyPlugin *plugin)
+{
+  ClutterActor *child;
+
+  if (!plugin->aqua_dock_reflections)
+    return;
+
+  while ((child = clutter_actor_get_first_child (plugin->aqua_dock_reflections)))
+    clutter_actor_destroy (child);
+}
+
+static void
+my_plugin_sync_dock_reflections (MyPlugin *plugin)
+{
+  ClutterActor *icon;
+  int reflect_h;
+  int logical;
+
+  if (!plugin->aqua_dock_icons || !plugin->aqua_dock_reflections)
+    return;
+
+  my_plugin_clear_dock_reflections (plugin);
+
+  logical = (int) AQUA_DOCK_ITEM_SIZE;
+  reflect_h = (int) AQUA_DOCK_REFLECT_H;
+  if (reflect_h < 1)
+    return;
+
+  for (icon = clutter_actor_get_first_child (plugin->aqua_dock_icons);
+       icon != NULL;
+       icon = clutter_actor_get_next_sibling (icon))
+    {
+      ClutterActor *mirror;
+      ClutterContent *source;
+      g_autoptr (ClutterContent) reflected = NULL;
+      int texture_w = logical;
+      int texture_h = logical;
+
+      source = clutter_actor_get_content (icon);
+      if (!source)
+        {
+          /* Keep spacing even if an icon has no content yet. */
+          mirror = clutter_actor_new ();
+          clutter_actor_set_size (mirror, (gfloat) logical, (gfloat) reflect_h);
+          clutter_actor_set_reactive (mirror, FALSE);
+          clutter_actor_add_child (plugin->aqua_dock_reflections, mirror);
+          continue;
+        }
+
+      if (CLUTTER_IS_TEXTURE_CONTENT (source))
+        {
+          CoglTexture *tex;
+
+          tex = clutter_texture_content_get_texture (CLUTTER_TEXTURE_CONTENT (source));
+          if (tex)
+            {
+              texture_w = cogl_texture_get_width (tex);
+              texture_h = cogl_texture_get_height (tex);
+            }
+        }
+
+      {
+        int tex_reflect_h;
+
+        tex_reflect_h = (int) (AQUA_DOCK_REFLECT_H * (gfloat) texture_h /
+                               (gfloat) MAX (logical, 1) + 0.5f);
+        if (tex_reflect_h < 1)
+          tex_reflect_h = 1;
+
+        reflected = my_aqua_dock_reflection_content (icon, source, tex_reflect_h);
+        mirror = clutter_actor_new ();
+        clutter_actor_set_reactive (mirror, FALSE);
+        if (reflected)
+          {
+            my_aqua_actor_set_scaled_content (mirror,
+                                              g_steal_pointer (&reflected),
+                                              logical,
+                                              reflect_h,
+                                              texture_w,
+                                              tex_reflect_h);
+          }
+        else
+          {
+            clutter_actor_set_size (mirror, (gfloat) logical, (gfloat) reflect_h);
+            clutter_actor_set_content (mirror, source);
+            clutter_actor_set_pivot_point (mirror, 0.5f, 0.0f);
+            clutter_actor_set_scale (mirror, 1.0f, -1.0f);
+            clutter_actor_set_opacity (mirror, 90);
+            clutter_actor_set_clip (mirror, 0.0f, 0.0f,
+                                    (gfloat) logical, (gfloat) reflect_h);
+          }
+      }
+
+      clutter_actor_add_child (plugin->aqua_dock_reflections, mirror);
+    }
+}
+
+static void
 my_plugin_update_aqua_dock_layout (MyPlugin    *plugin,
                                    MetaDisplay *display)
 {
@@ -1398,7 +1519,8 @@ my_plugin_update_aqua_dock_layout (MyPlugin    *plugin,
   plate_width = (gfloat) icon_count * AQUA_DOCK_ITEM_SIZE +
                 ((gfloat) icon_count - 1.0f) * AQUA_DOCK_ITEM_GAP +
                 2.0f * AQUA_DOCK_PADDING;
-  dock_height = AQUA_DOCK_PLATE_H + AQUA_DOCK_BOTTOM_GAP;
+  /* Plate hugs the bottom; reflections hang below and may clip off-screen. */
+  dock_height = AQUA_DOCK_PLATE_H + AQUA_DOCK_REFLECT_H;
 
   x = ((gfloat) width - plate_width) / 2.0f;
 
@@ -1407,7 +1529,7 @@ my_plugin_update_aqua_dock_layout (MyPlugin    *plugin,
   clutter_actor_set_size (plugin->aqua_dock, plate_width, dock_height);
   clutter_actor_set_position (plugin->aqua_dock,
                               x,
-                              (gfloat) height - dock_height);
+                              (gfloat) height - AQUA_DOCK_PLATE_H - AQUA_DOCK_BOTTOM_GAP);
 
   if (plugin->aqua_dock_plate)
     {
@@ -1431,6 +1553,19 @@ my_plugin_update_aqua_dock_layout (MyPlugin    *plugin,
       clutter_actor_set_position (plugin->aqua_dock_icons,
                                   AQUA_DOCK_PADDING,
                                   icons_y);
+    }
+
+  if (plugin->aqua_dock_reflections)
+    {
+      gfloat icons_width;
+
+      icons_width = plate_width - 2.0f * AQUA_DOCK_PADDING;
+      clutter_actor_set_size (plugin->aqua_dock_reflections,
+                              icons_width,
+                              AQUA_DOCK_REFLECT_H);
+      clutter_actor_set_position (plugin->aqua_dock_reflections,
+                                  AQUA_DOCK_PADDING,
+                                  AQUA_DOCK_PLATE_H);
     }
 }
 
@@ -1519,7 +1654,7 @@ my_plugin_update_builtin_struts (MyPlugin    *plugin G_GNUC_UNUSED,
     return;
 
   panel_h = (int) PANEL_HEIGHT;
-  dock_h = (int) (AQUA_DOCK_PLATE_H + AQUA_DOCK_BOTTOM_GAP);
+  dock_h = (int) (AQUA_DOCK_PLATE_H + AQUA_DOCK_STRUT_GAP);
   if (panel_h + dock_h >= height)
     return;
 
@@ -1586,6 +1721,13 @@ my_plugin_update_layout (MyPlugin     *plugin,
 
   my_plugin_layout_menu_labels (plugin);
 
+  if (plugin->menu_icon)
+    {
+      clutter_actor_set_position (plugin->menu_icon,
+                                  OOZE_BUTTON_MARGIN,
+                                  OOZE_BUTTON_PAD_Y);
+    }
+
   my_plugin_update_aqua_dock_layout (plugin, display);
   my_plugin_update_builtin_struts (plugin, display);
 }
@@ -1616,7 +1758,7 @@ my_plugin_setup_panel (MyPlugin       *plugin,
   plugin->menu_icon = clutter_actor_new ();
   my_plugin_make_click_target (plugin->menu_icon,
                                (gfloat) ooze_width,
-                               PANEL_HEIGHT);
+                               (gfloat) ooze_height);
   if (ooze_content)
     my_aqua_actor_set_content (plugin->menu_icon,
                                g_steal_pointer (&ooze_content),
@@ -1625,9 +1767,11 @@ my_plugin_setup_panel (MyPlugin       *plugin,
   clutter_actor_set_size (plugin->menu_icon,
                           (gfloat) ooze_width,
                           (gfloat) ooze_height);
+  clutter_actor_set_content_gravity (plugin->menu_icon,
+                                     CLUTTER_CONTENT_GRAVITY_CENTER);
   clutter_actor_set_position (plugin->menu_icon,
                               OOZE_BUTTON_MARGIN,
-                              0.0f);
+                              OOZE_BUTTON_PAD_Y);
   clutter_actor_add_child (plugin->panel, plugin->menu_icon);
 
   if (!plugin->menu_popup)
@@ -1764,6 +1908,22 @@ my_plugin_setup_aqua_dock (MyPlugin       *plugin,
   clutter_box_layout_set_homogeneous (CLUTTER_BOX_LAYOUT (layout), FALSE);
   clutter_actor_set_layout_manager (plugin->aqua_dock_icons, layout);
 
+  plugin->aqua_dock_reflections = clutter_actor_new ();
+  clutter_actor_set_reactive (plugin->aqua_dock_reflections, FALSE);
+  {
+    ClutterLayoutManager *reflect_layout;
+
+    reflect_layout = clutter_box_layout_new ();
+    clutter_box_layout_set_orientation (CLUTTER_BOX_LAYOUT (reflect_layout),
+                                        CLUTTER_ORIENTATION_HORIZONTAL);
+    clutter_box_layout_set_spacing (CLUTTER_BOX_LAYOUT (reflect_layout),
+                                    AQUA_DOCK_ITEM_GAP);
+    clutter_box_layout_set_homogeneous (CLUTTER_BOX_LAYOUT (reflect_layout),
+                                        FALSE);
+    clutter_actor_set_layout_manager (plugin->aqua_dock_reflections,
+                                      reflect_layout);
+  }
+
   if (plugin->context)
     {
       my_dock_populate_container (plugin->context,
@@ -1777,6 +1937,8 @@ my_plugin_setup_aqua_dock (MyPlugin       *plugin,
     my_plugin_add_dock_placeholders (plugin, display, stage);
 
   clutter_actor_add_child (plugin->aqua_dock, plugin->aqua_dock_icons);
+  clutter_actor_add_child (plugin->aqua_dock, plugin->aqua_dock_reflections);
+  my_plugin_sync_dock_reflections (plugin);
 
   clutter_actor_add_child (stage, plugin->aqua_dock);
   clutter_actor_set_child_above_sibling (stage, plugin->aqua_dock, window_group);
@@ -1908,6 +2070,7 @@ my_plugin_init_ui (MyPlugin *plugin)
   }
 
   my_theme_get_default ();
+  my_theme_watch_will_change (NULL, my_plugin_on_theme_will_change, plugin);
   my_theme_watch (NULL, my_plugin_on_theme_changed, plugin);
 
   if (!plugin->global_menu)
@@ -1977,15 +2140,16 @@ my_plugin_get_lamp_icon_rect (MetaPlugin      *plugin,
 
   if (self->aqua_dock)
     {
+      /* Target the glass plate / icon row, not the reflection overhang. */
       *out_x = clutter_actor_get_x (self->aqua_dock);
       *out_y = clutter_actor_get_y (self->aqua_dock);
       *out_w = clutter_actor_get_width (self->aqua_dock);
-      *out_h = clutter_actor_get_height (self->aqua_dock);
+      *out_h = AQUA_DOCK_PLATE_H;
       return;
     }
 
   *out_x = (gfloat) screen_w / 2.0f - 24.f;
-  *out_y = (gfloat) screen_h - AQUA_DOCK_PLATE_H;
+  *out_y = (gfloat) screen_h - AQUA_DOCK_PLATE_H - AQUA_DOCK_BOTTOM_GAP;
   *out_w = 48.f;
   *out_h = AQUA_DOCK_PLATE_H;
 }
@@ -2285,6 +2449,7 @@ my_plugin_dispose (GObject *object)
       plugin->stage_key_handler = 0;
     }
 
+  my_theme_unwatch_will_change (NULL, my_plugin_on_theme_will_change, plugin);
   my_theme_unwatch (NULL, my_plugin_on_theme_changed, plugin);
 
   my_aqua_menu_destroy (plugin->menu_popup);
@@ -2302,6 +2467,7 @@ my_plugin_dispose (GObject *object)
   g_clear_pointer (&plugin->aqua_dock, clutter_actor_destroy);
   plugin->aqua_dock_plate = NULL;
   plugin->aqua_dock_icons = NULL;
+  plugin->aqua_dock_reflections = NULL;
   g_clear_pointer (&plugin->tile_preview, clutter_actor_destroy);
   g_clear_pointer (&plugin->background_group, clutter_actor_destroy);
   g_clear_object (&plugin->context);
@@ -2338,6 +2504,7 @@ my_plugin_init (MyPlugin *plugin)
   plugin->aqua_dock = NULL;
   plugin->aqua_dock_plate = NULL;
   plugin->aqua_dock_icons = NULL;
+  plugin->aqua_dock_reflections = NULL;
   plugin->tile_preview = NULL;
   plugin->monitor_manager = NULL;
   plugin->context = NULL;

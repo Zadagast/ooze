@@ -38,6 +38,8 @@ struct _MyGlobalMenu
 static void my_global_menu_clear_proxy (MyGlobalMenu *menu);
 static void my_global_menu_clear_entries (MyGlobalMenu *menu);
 static void my_global_menu_emit_changed (MyGlobalMenu *menu);
+static gboolean my_global_menu_action_sensitive (MyGlobalMenu *menu,
+                                                 const char   *action);
 
 static void
 my_global_menu_emit_changed (MyGlobalMenu *menu)
@@ -242,6 +244,15 @@ my_global_menu_sync_focus (MyGlobalMenu *menu)
   g_return_if_fail (menu != NULL);
 
   focus = meta_display_get_focus_window (menu->display);
+
+  /*
+   * Clicking the panel often clears window focus. Keep the last app's
+   * menubar/actions bound so Edit → Copy etc. still reach that app.
+   * Only rebind when another window becomes focused.
+   */
+  if (!focus)
+    return;
+
   my_global_menu_bind_window (menu, focus);
 }
 
@@ -350,7 +361,7 @@ my_global_menu_fill_entries (MyGlobalMenu     *menu,
       one = g_new0 (MyAquaMenuEntry, 1);
       one->label = label;
       one->action_id = my_global_menu_push_action (menu, action, NULL);
-      one->sensitive = TRUE;
+      one->sensitive = my_global_menu_action_sensitive (menu, action);
       menu->entries = one;
       menu->n_entries = 1;
       *entries_out = menu->entries;
@@ -411,7 +422,7 @@ my_global_menu_fill_entries (MyGlobalMenu     *menu,
                   starget = g_menu_model_get_item_attribute_value (
                       nested, si, G_MENU_ATTRIBUTE_TARGET, NULL);
                   row->action_id = my_global_menu_push_action (menu, saction, starget);
-                  row->sensitive = TRUE;
+                  row->sensitive = my_global_menu_action_sensitive (menu, saction);
                 }
               else
                 {
@@ -446,7 +457,7 @@ my_global_menu_fill_entries (MyGlobalMenu     *menu,
                                                           G_MENU_ATTRIBUTE_TARGET,
                                                           NULL);
           row->action_id = my_global_menu_push_action (menu, action, target);
-          row->sensitive = TRUE;
+          row->sensitive = my_global_menu_action_sensitive (menu, action);
         }
       else
         {
@@ -476,6 +487,31 @@ my_global_menu_fill_entries (MyGlobalMenu     *menu,
   *entries_out = menu->entries;
   *n_entries_out = menu->n_entries;
   return TRUE;
+}
+
+static GActionGroup *
+my_global_menu_resolve_group (MyGlobalMenu *menu,
+                              const char   *action,
+                              const char  **bare_name);
+
+static gboolean
+my_global_menu_action_sensitive (MyGlobalMenu *menu,
+                                 const char   *action)
+{
+  GActionGroup *group;
+  const char *bare;
+
+  if (!action || !*action)
+    return FALSE;
+
+  group = my_global_menu_resolve_group (menu, action, &bare);
+  if (!group || !bare || !*bare)
+    return TRUE; /* still allow activate attempt */
+
+  if (!g_action_group_has_action (group, bare))
+    return TRUE;
+
+  return g_action_group_get_action_enabled (group, bare);
 }
 
 static GActionGroup *

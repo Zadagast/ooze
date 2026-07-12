@@ -44,7 +44,7 @@ ooze_header_bar_ensure_css (void)
   gtk_css_provider_load_from_string (provider,
     /* The gradient is drawn in Cairo; GTK must not paint a background here. */
     ".ooze-header-bar {"
-    "  min-height: 28px;"
+    "  min-height: 32px;"
     "  padding: 0;"
     "  border-radius: 0;"
     "  background: none;"
@@ -79,7 +79,8 @@ ooze_header_bar_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
              &GRAPHENE_RECT_INIT (0.f, 0.f, (float) w, (float) h));
 
       ooze_draw_surface   (cr, w, h,
-                           pal->header_r, pal->header_g, pal->header_b, pal);
+                           pal->header_r, pal->header_g, pal->header_b,
+                           ooze_stripe_origin_y (widget), pal);
       ooze_draw_separator (cr, w, h, OOZE_SIDE_BOTTOM, pal);
 
       cairo_destroy (cr);

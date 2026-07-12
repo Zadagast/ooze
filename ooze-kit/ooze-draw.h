@@ -3,6 +3,7 @@
 #include "ooze-palette.h"
 
 #include <cairo/cairo.h>
+#include <gtk/gtk.h>
 
 /*
  * ooze-draw — stateless Cairo primitives for OozeKit surfaces and buttons.
@@ -35,15 +36,25 @@ typedef enum
  *
  * Fills the rectangle [0, 0, w, h] with the given RGB colour and then
  * overlays one bright 1 px stripe every palette->pinstripe_stride rows.
+ *
+ * stripe_origin_y is the widget’s top on the Ooze Gel pinline grid:
+ *   titlebar → 0
+ *   window child → AQUA_TITLEBAR_HEIGHT + y relative to gtk_window_get_child()
+ * Use ooze_stripe_origin_y(). Pass 0 only for isolated previews.
+ *
  * No separator is drawn; call ooze_draw_separator() separately.
  */
-void ooze_draw_surface   (cairo_t          *cr,
-                          int               w,
-                          int               h,
-                          double            r,
-                          double            g,
-                          double            b,
-                          const OozePalette *p);
+void ooze_draw_surface (cairo_t           *cr,
+                        int                w,
+                        int                h,
+                        double             r,
+                        double             g,
+                        double             b,
+                        int                stripe_origin_y,
+                        const OozePalette *p);
+
+/* Resolve stripe_origin_y on the Ooze Gel pinline grid (CSD-aware). */
+int ooze_stripe_origin_y (GtkWidget *widget);
 
 /*
  * ooze_draw_separator – Aqua pinline (dark groove + light highlight).
@@ -61,8 +72,8 @@ void ooze_draw_separator (cairo_t          *cr,
  * ooze_draw_button_bg – rounded glass / hover fill at an explicit rect.
  *
  * Callers pass the plate rectangle in widget coordinates. OozeButton passes
- * its allocation inset by a fixed edge so the glass always frames the full
- * control. OOZE_BTN_NORMAL is a no-op.
+ * the icon rect outset by a fixed rim (icon-only plate); captions sit outside.
+ * OOZE_BTN_NORMAL is a no-op.
  */
 void ooze_draw_button_bg (cairo_t          *cr,
                           double            x,

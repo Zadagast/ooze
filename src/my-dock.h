@@ -33,6 +33,8 @@ void my_dock_launch_spot_path (MetaContext *context,
 
 void my_dock_launch_pak (MetaContext *context);
 
+void my_dock_launch_about (MetaContext *context);
+
 /* Push dock-icon rectangles into MetaWindow icon geometry (minimize target). */
 void my_dock_update_icon_geometries (MetaDisplay  *display,
                                      ClutterActor *icons_container);

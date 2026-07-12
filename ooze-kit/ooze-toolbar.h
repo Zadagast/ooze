@@ -5,13 +5,27 @@
 G_BEGIN_DECLS
 
 /*
- * OozeToolbar — Spot-style chrome strip used by Spot, System Settings, etc.
+ * OozeToolbar — MAIN BAR (OozeKit strip directly under the Ooze Gel title bar).
  *
- * Returns an OozeSurface (TOOLBAR) with shared CSS. Append buttons created
- * with ooze_button_new_toolbar() / ooze_button_new_labeled() only — always
- * full-color icon + caption underneath (never symbolic icon-only pills).
+ * Shares the Ooze Gel pinline cloth. Layout metrics live in ooze-toolbar.c /
+ * ooze-button.c / aqua-chrome.h so every app shares one rhythm:
  *
- * Prefer the helpers below so group spacing stays consistent across apps.
+ *   • TOOLBAR icons: OOZE_ICON_SIZE_TOOLBAR (40)
+ *   • Height:        content-driven (no forced height); OOZE_TOOLBAR_HEIGHT
+ *                     is a nominal reference (~96) for docs, not enforced
+ *   • Padding:       Adwaita .toolbar rhythm — padding 6px, border-spacing 6px
+ *                     (libadwaita stylesheet); glass rim needs OOZE_BTN_PAD_* ≥ 6
+ *   • Glass outset / inset: OOZE_BTN_ICON_OUTSET / OOZE_BTN_PAD_* (in button.c)
+ *   • Equal tile min-width; spacer before trailing search
+ *   • Flush joins — no outer margins (pinlines must continue)
+ *   • Stripe phase via ooze_stripe_origin_y() on the Ooze Gel grid
+ *
+ * Compose with:
+ *   ooze_toolbar_new ()
+ *   ooze_toolbar_add_group () + ooze_button_new_toolbar ()
+ *   ooze_toolbar_add_separator ()
+ *   ooze_toolbar_add_spacer ()
+ *   trailing widget + CSS class "ooze-toolbar-search" when appropriate
  */
 
 GtkWidget *ooze_toolbar_new (void);

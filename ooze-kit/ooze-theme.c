@@ -1,9 +1,28 @@
 #include "ooze-theme.h"
 
 #include "ooze-font.h"
+#include "ooze-popover.h"
 #include "ooze-scroll.h"
 
 #include <gtk/gtk.h>
+
+static gboolean
+ooze_theme_popover_map_hook (GSignalInvocationHint *ihint G_GNUC_UNUSED,
+                             guint                  n_param_values,
+                             const GValue          *param_values,
+                             gpointer               data G_GNUC_UNUSED)
+{
+  GObject *obj;
+
+  if (n_param_values < 1)
+    return TRUE;
+
+  obj = g_value_get_object (&param_values[0]);
+  if (GTK_IS_POPOVER_MENU (obj))
+    ooze_popover_fit_screen (GTK_POPOVER (obj));
+
+  return TRUE;
+}
 
 void
 ooze_theme_ensure (void)
@@ -12,6 +31,7 @@ ooze_theme_ensure (void)
   GdkDisplay *display;
   GtkSettings *settings;
   GtkCssProvider *p;
+  guint map_signal;
 
   if (loaded)
     return;
@@ -52,6 +72,12 @@ ooze_theme_ensure (void)
 
   /* Aqua sliding-window scrollbars (always-visible proportional thumbs). */
   ooze_scroll_ensure_css ();
+
+  /* Let GtkPopoverMenu grow to monitor height; scroll only when needed. */
+  map_signal = g_signal_lookup ("map", GTK_TYPE_POPOVER_MENU);
+  if (map_signal != 0)
+    g_signal_add_emission_hook (map_signal, 0,
+                                ooze_theme_popover_map_hook, NULL, NULL);
 
   loaded = TRUE;
 }

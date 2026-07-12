@@ -14,6 +14,8 @@
 #include "ooze-about.h"
 #include "ooze-pinline.h"
 #include "ooze-scroll.h"
+#include "ooze-popover.h"
+#include "ooze-window-actions.h"
 
 #include <string.h>
 
@@ -169,9 +171,8 @@ spot_ensure_css (void)
 
                                      /* Search shape only — strip sizing comes from OozeToolbar. */
                                      ".ooze-toolbar .spot-search {"
-                                     "  min-width: 96px;"
+                                     "  min-width: 120px;"
                                      "  border-radius: 10px;"
-                                     "  margin: 0 4px;"
                                      "}"
 
                                      /* ── Sidebar ── */
@@ -585,20 +586,13 @@ spot_paste_files_finish (GObject      *source,
     }
 
   if (!G_VALUE_HOLDS (value, GDK_TYPE_FILE_LIST))
-    {
-      g_value_unset ((GValue *) value);
-      g_free ((GValue *) value);
-      return;
-    }
+    return;
 
   file_list = g_value_get_boxed (value);
   if (!file_list || !self->current_dir)
-    {
-      g_value_unset ((GValue *) value);
-      g_free ((GValue *) value);
-      return;
-    }
+    return;
 
+  /* transfer container: free the list, not the GFiles */
   files = gdk_file_list_get_files (file_list);
   for (l = files; l != NULL; l = l->next)
     {
@@ -628,9 +622,9 @@ spot_paste_files_finish (GObject      *source,
           break;
         }
     }
+  g_slist_free (files);
 
-  g_value_unset ((GValue *) value);
-  g_free ((GValue *) value);
+  /* value is owned by the clipboard — do not free/unset it */
 
   if (cut)
     {
@@ -904,7 +898,8 @@ spot_action_about (GSimpleAction *action G_GNUC_UNUSED,
   ooze_about_present (GTK_WINDOW (user_data),
                       "Spot",
                       "org.ooze.Spot",
-                      "File manager for Ooze Desktop.");
+                      "File manager for Ooze Desktop.",
+                      OOZE_VERSION);
 }
 
 static GMenuModel *
@@ -959,6 +954,8 @@ spot_build_menubar (void)
   g_object_unref (go);
 
   window = g_menu_new ();
+  g_menu_append (window, "Minimize", "win.minimize");
+  g_menu_append (window, "Maximize", "win.maximize");
   g_menu_append (window, "New Window", "win.new-window");
   g_menu_append (window, "Close Window", "win.close-window");
   item = g_menu_item_new_submenu ("Window", G_MENU_MODEL (window));
@@ -1090,6 +1087,7 @@ spot_show_context_menu (SpotWindow *self,
   gtk_widget_set_parent (self->context_menu, GTK_WIDGET (self));
   gtk_popover_set_has_arrow (GTK_POPOVER (self->context_menu), FALSE);
   gtk_popover_set_position (GTK_POPOVER (self->context_menu), GTK_POS_BOTTOM);
+  ooze_popover_fit_screen (GTK_POPOVER (self->context_menu));
 
   graphene_point_init (&local, (float) x, (float) y);
   if (gtk_widget_compute_point (relative_to, GTK_WIDGET (self), &local, &in_window))
@@ -1196,6 +1194,7 @@ spot_install_actions (SpotWindow *self)
   g_action_map_add_action_entries (G_ACTION_MAP (self),
                                    entries, G_N_ELEMENTS (entries),
                                    self);
+  ooze_window_actions_add_chrome (GTK_APPLICATION_WINDOW (self));
 
   app = gtk_window_get_application (GTK_WINDOW (self));
   if (app)
@@ -2521,6 +2520,7 @@ spot_create_toolbar (SpotWindow *self)
 
   self->search_entry = gtk_entry_new ();
   gtk_entry_set_placeholder_text (GTK_ENTRY (self->search_entry), "Search");
+  gtk_widget_add_css_class (self->search_entry, "ooze-toolbar-search");
   gtk_widget_add_css_class (self->search_entry, "spot-search");
   gtk_widget_set_valign (self->search_entry, GTK_ALIGN_CENTER);
   gtk_widget_set_halign (self->search_entry, GTK_ALIGN_END);
@@ -2681,6 +2681,8 @@ spot_window_constructed (GObject *object)
     gtk_scrolled_window_set_propagate_natural_width (GTK_SCROLLED_WINDOW (toolbar_scroll),
                                                      FALSE);
     gtk_widget_set_hexpand (toolbar_scroll, TRUE);
+    /* Glass rims overhang into toolbar padding — don't clip the strip. */
+    gtk_widget_set_overflow (toolbar_scroll, GTK_OVERFLOW_VISIBLE);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (toolbar_scroll),
                                    self->toolbar);
     gtk_box_append (GTK_BOX (shell), toolbar_scroll);
@@ -2743,17 +2745,15 @@ spot_window_new_for_path (AdwApplication *app,
                           const char    *path)
 {
   SpotWindow *window;
-  GMenuModel *menubar;
   const char *start_path = path;
 
   window = g_object_new (SPOT_TYPE_WINDOW,
                            "application", app,
                            NULL);
 
-  /* Application is only available after construction — set menubar here. */
-  menubar = spot_build_menubar ();
-  gtk_application_set_menubar (GTK_APPLICATION (app), menubar);
-  g_object_unref (menubar);
+  /* Menubar may already be set in startup; ensure it is present. */
+  if (!gtk_application_get_menubar (GTK_APPLICATION (app)))
+    spot_application_setup_menubar (GTK_APPLICATION (app));
   gtk_application_window_set_show_menubar (GTK_APPLICATION_WINDOW (window), FALSE);
 
   if (!start_path)
@@ -2764,6 +2764,18 @@ spot_window_new_for_path (AdwApplication *app,
   spot_window_open_path (window, start_path);
 
   return window;
+}
+
+void
+spot_application_setup_menubar (GtkApplication *app)
+{
+  GMenuModel *menubar;
+
+  g_return_if_fail (GTK_IS_APPLICATION (app));
+
+  menubar = spot_build_menubar ();
+  gtk_application_set_menubar (app, menubar);
+  g_object_unref (menubar);
 }
 
 SpotWindow *

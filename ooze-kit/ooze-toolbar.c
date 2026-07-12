@@ -1,8 +1,25 @@
 #include "ooze-toolbar.h"
 #include "ooze-surface.h"
 #include "ooze-theme.h"
+#include "aqua-chrome.h"
 
 #include <gtk/gtk.h>
+
+/*
+ * MAIN BAR metrics (OozeKit strip under the Ooze Gel title bar)
+ * ─────────────────────────────────────────────────────────────
+ * Spacing matches libadwaita .toolbar:
+ *   padding: 6px; border-spacing: 6px;
+ * (verified in libadwaita-1.so / upstream _header-bar.scss).
+ *
+ * Apps compose this with ooze_toolbar_new() + add_group / separator /
+ * spacer + ooze_button_new_toolbar(). Height is NOT forced — the strip
+ * sizes to its tallest tile's natural content (icon + caption + button
+ * pad) plus the shell padding. OOZE_TOOLBAR_HEIGHT in aqua-chrome.h is
+ * a nominal reference only. Do not invent per-app padding — change the
+ * numbers here instead. Stay flush with Ooze Gel (no outer surface margin).
+ */
+#define OOZE_TOOLBAR_GROUP_SPACING 6
 
 void
 ooze_toolbar_ensure_css (void)
@@ -22,23 +39,35 @@ ooze_toolbar_ensure_css (void)
 
   p = gtk_css_provider_new ();
   gtk_css_provider_load_from_string (p,
-    ".ooze-toolbar {"
+    /*
+     * Must beat .ooze-surface { padding: 0 }. Dual class keeps MAIN BAR
+     * Adwaita .toolbar density intact.
+     */
+    ".ooze-surface.ooze-toolbar {"
     "  background: none;"
-    "  padding: 4px 8px;"
+    "  padding: 6px;"           /* libadwaita .toolbar */
+    "  border-spacing: 6px;"    /* libadwaita .toolbar */
     "}"
     ".ooze-toolbar-group {"
-    "  padding: 0 2px;"
+    "  padding: 0;"
     "}"
     ".ooze-toolbar separator {"
     "  background: @borders;"
     "  min-width: 1px;"
-    "  margin: 6px 4px;"
+    "  margin: 0 6px;"
     "}"
-    /* Width floor only — height comes from labeled tiles. */
+    /* Equal tile footprint for MAIN BAR symmetry (40px glyphs + captions). */
     ".ooze-toolbar-btn {"
-    "  min-width: 48px;"
+    "  min-width: 76px;"
     "}"
     ".ooze-toolbar-btn:active { color: #ffffff; }"
+    /* Trailing search / accessory — optical middle of the bar. */
+    ".ooze-toolbar-search {"
+    "  min-width: 120px;"
+    "  min-height: 32px;"
+    "  border-radius: 10px;"
+    "  margin: 0 4px;"
+    "}"
     ".ooze-settings-tile {"
     "  min-width: 112px;"
     "  min-height: 96px;"
@@ -81,7 +110,13 @@ ooze_toolbar_new (void)
 
   ooze_toolbar_ensure_css ();
   toolbar = ooze_surface_new (OOZE_SURFACE_TOOLBAR, GTK_ORIENTATION_HORIZONTAL);
+  /* Spacing comes from CSS border-spacing (Adwaita .toolbar). */
   gtk_box_set_spacing (GTK_BOX (toolbar), 0);
+  gtk_widget_set_valign (toolbar, GTK_ALIGN_FILL);
+  /* Let button glass rims paint into the 6px padding (not clipped). */
+  gtk_widget_set_overflow (toolbar, GTK_OVERFLOW_VISIBLE);
+  /* No forced height — size to real tile content (see header comment). */
+  /* Flush to neighbors so Ooze Gel pinlines continue (no outer margin). */
   gtk_widget_add_css_class (toolbar, "ooze-toolbar");
   return toolbar;
 }
@@ -93,9 +128,10 @@ ooze_toolbar_add_group (GtkWidget *toolbar)
 
   g_return_val_if_fail (GTK_IS_BOX (toolbar), NULL);
 
-  group = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 2);
+  group = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, OOZE_TOOLBAR_GROUP_SPACING);
   gtk_widget_add_css_class (group, "ooze-toolbar-group");
   gtk_widget_set_valign (group, GTK_ALIGN_CENTER);
+  gtk_widget_set_overflow (group, GTK_OVERFLOW_VISIBLE);
   gtk_box_append (GTK_BOX (toolbar), group);
   return group;
 }

@@ -6,11 +6,12 @@
 #include <adwaita.h>
 
 static void
-on_startup (AdwApplication *app G_GNUC_UNUSED,
+on_startup (AdwApplication *app,
             gpointer        user_data G_GNUC_UNUSED)
 {
   my_icons_configure_gtk ();
   ooze_theme_ensure ();
+  spot_application_setup_menubar (GTK_APPLICATION (app));
 }
 
 static void

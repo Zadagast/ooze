@@ -24,6 +24,8 @@ struct _OozeKitFactoryWindow
 
   GtkWidget *grid_btn;
   GtkWidget *columns_btn;
+  GtkWidget *toolbar_grid_btn;
+  GtkWidget *toolbar_columns_btn;
   GtkWidget *title_entry;
 };
 
@@ -169,6 +171,13 @@ fac_set_view_exclusive (OozeKitFactoryWindow *self, gsize active)
 }
 
 static void
+fac_set_toolbar_view_exclusive (OozeKitFactoryWindow *self, gsize active)
+{
+  GtkWidget *peers[2] = { self->toolbar_grid_btn, self->toolbar_columns_btn };
+  ooze_button_set_exclusive (peers, 2, active);
+}
+
+static void
 on_grid_clicked (GtkButton *btn G_GNUC_UNUSED, OozeKitFactoryWindow *self)
 {
   fac_set_view_exclusive (self, 0);
@@ -178,6 +187,18 @@ static void
 on_columns_clicked (GtkButton *btn G_GNUC_UNUSED, OozeKitFactoryWindow *self)
 {
   fac_set_view_exclusive (self, 1);
+}
+
+static void
+on_toolbar_grid_clicked (GtkButton *btn G_GNUC_UNUSED, OozeKitFactoryWindow *self)
+{
+  fac_set_toolbar_view_exclusive (self, 0);
+}
+
+static void
+on_toolbar_columns_clicked (GtkButton *btn G_GNUC_UNUSED, OozeKitFactoryWindow *self)
+{
+  fac_set_toolbar_view_exclusive (self, 1);
 }
 
 static GtkWidget *
@@ -196,7 +217,7 @@ fac_page_button (OozeKitFactoryWindow *self)
     "  ooze_button_set_toggled (btn, TRUE|FALSE)",
     "  ooze_button_set_exclusive (peers, n, active_index)",
     "",
-    "Glass plate = widget allocation inset by 2px.",
+    "Glass plate hugs the icon rect only (caption stays outside).",
     "Padding is owned by measure/allocate (not CSS).",
     "Exclusive peers: exactly one shows the active plate.",
     NULL
@@ -255,7 +276,9 @@ fac_page_toolbar (OozeKitFactoryWindow *self)
     "  ooze_toolbar_add_spacer (toolbar)",
     "",
     "Always pair with ooze_button_new_toolbar() tiles.",
+    "Spacing matches Adwaita .toolbar (padding/border-spacing 6px).",
     "Spacer expands so trailing widgets (Search) sit on the right.",
+    "Exclusive Grid/Columns demo the sticky glass plate on MAIN BAR.",
     NULL
   };
 
@@ -267,10 +290,18 @@ fac_page_toolbar (OozeKitFactoryWindow *self)
                   ooze_button_new_toolbar (fac_icon_home, "Home", "Home"));
   ooze_toolbar_add_separator (toolbar);
   view = ooze_toolbar_add_group (toolbar);
-  gtk_box_append (GTK_BOX (view),
-                  ooze_button_new_toolbar (fac_icon_grid, "Grid", "Grid"));
-  gtk_box_append (GTK_BOX (view),
-                  ooze_button_new_toolbar (fac_icon_column, "Columns", "Columns"));
+  self->toolbar_grid_btn = ooze_button_new_toolbar (fac_icon_grid, "Grid",
+                                                    "Grid view");
+  self->toolbar_columns_btn = ooze_button_new_toolbar (fac_icon_column,
+                                                       "Columns",
+                                                       "Columns view");
+  gtk_box_append (GTK_BOX (view), self->toolbar_grid_btn);
+  gtk_box_append (GTK_BOX (view), self->toolbar_columns_btn);
+  g_signal_connect (self->toolbar_grid_btn, "clicked",
+                    G_CALLBACK (on_toolbar_grid_clicked), self);
+  g_signal_connect (self->toolbar_columns_btn, "clicked",
+                    G_CALLBACK (on_toolbar_columns_clicked), self);
+  fac_set_toolbar_view_exclusive (self, 0);
   ooze_toolbar_add_spacer (toolbar);
   entry = gtk_entry_new ();
   gtk_entry_set_placeholder_text (GTK_ENTRY (entry), "Search");
@@ -281,7 +312,7 @@ fac_page_toolbar (OozeKitFactoryWindow *self)
       self,
       "OozeToolbar",
       "Aluminum toolbar surface with grouped tiles, hairline separators, "
-      "and an expanding spacer for trailing controls.",
+      "icon-only glass toggles, and an expanding spacer for trailing controls.",
       toolbar,
       api);
 }
@@ -316,7 +347,9 @@ fac_page_surface (OozeKitFactoryWindow *self)
     "  ooze_surface_new (OOZE_SURFACE_SIDEBAR,  orientation)",
     "  ooze_surface_new (OOZE_SURFACE_STATUSBAR, orientation)",
     "",
-    "Each variant fills from OozePalette and draws a pinline on one edge.",
+    "Each variant fills from OozePalette and draws a soft edge groove.",
+    "Pinlines use the Ooze Gel grid (OOZE_PIN_STRIDE 4; title/status 32,",
+    "MAIN BAR 96) via ooze_stripe_origin_y() so strips share one cloth.",
     NULL
   };
 
@@ -470,7 +503,7 @@ fac_page_icons (OozeKitFactoryWindow *self)
   GtkWidget *demo;
   static const char *const api[] = {
     "API",
-    "  OOZE_ICON_SIZE_TOOLBAR  24",
+    "  OOZE_ICON_SIZE_TOOLBAR  40",
     "  OOZE_ICON_SIZE_SIDEBAR  24",
     "  OOZE_ICON_SIZE_LIST     16",
     "  OOZE_ICON_SIZE_GRID     48",
@@ -487,7 +520,7 @@ fac_page_icons (OozeKitFactoryWindow *self)
   gtk_box_append (GTK_BOX (demo),
                   fac_icon_cell (fac_icon_folder, OOZE_ICON_SIZE_LIST, "LIST 16"));
   gtk_box_append (GTK_BOX (demo),
-                  fac_icon_cell (fac_icon_folder, OOZE_ICON_SIZE_TOOLBAR, "TOOLBAR 24"));
+                  fac_icon_cell (fac_icon_folder, OOZE_ICON_SIZE_TOOLBAR, "TOOLBAR 40"));
   gtk_box_append (GTK_BOX (demo),
                   fac_icon_cell (fac_icon_folder, OOZE_ICON_SIZE_GRID, "GRID 48"));
 
@@ -508,7 +541,8 @@ on_about_clicked (GtkButton *btn G_GNUC_UNUSED, OozeKitFactoryWindow *self)
   ooze_about_present (GTK_WINDOW (self),
                       "OozeKit Factory",
                       "applications-engineering",
-                      "Catalog of OozeKit and Ooze UI widgets.");
+                      "Catalog of OozeKit and Ooze UI widgets.",
+                      OOZE_VERSION);
 }
 
 static GtkWidget *
@@ -518,9 +552,10 @@ fac_page_about (OozeKitFactoryWindow *self)
   GtkWidget *btn;
   static const char *const api[] = {
     "API",
-    "  ooze_about_present (parent, brand_name, icon_name, comments)",
+    "  ooze_about_present (parent, brand_name, icon_name, comments, version)",
     "",
-    "About keeps the product brand; friendly launcher names stay elsewhere.",
+    "Opens a small Ooze Gel About window for that app's brand name.",
+    "Friendly launcher names stay elsewhere.",
     NULL
   };
 
@@ -535,8 +570,8 @@ fac_page_about (OozeKitFactoryWindow *self)
   return fac_page_shell (
       self,
       "OozeAbout",
-      "Shared About dialog helper so every Ooze app presents the same brand "
-      "identity under Help → About.",
+      "Shared About window so Help → About opens an Ooze Gel window for "
+      "that app’s brand — not the system About This Computer app.",
       demo,
       api);
 }
@@ -758,8 +793,8 @@ fac_page_traffic (OozeKitFactoryWindow *self)
   return fac_page_shell (
       self,
       "OozeTrafficLights",
-      "Classic red / yellow / green window controls sized for the shared "
-      "AQUA_TITLEBAR_HEIGHT chrome strip.",
+      "Classic red / yellow / green window controls sized for the Ooze Gel "
+      "title strip (AQUA_TITLEBAR_HEIGHT on the pinline grid).",
       demo,
       api);
 }
@@ -787,17 +822,17 @@ fac_page_gel (OozeKitFactoryWindow *self)
   gtk_widget_set_margin_bottom (demo, 20);
   gtk_widget_set_halign (demo, GTK_ALIGN_CENTER);
   label = gtk_label_new (
-      "Ooze Gel is the window-frame behavior layer:\n"
-      "mid-edge resize grips and drag-to-move helpers\n"
-      "used by OozeHeaderBar::attach_window().");
+      "Ooze Gel is the window-frame layer (title bar, traffic lights,\n"
+      "drag / resize). It shares the Ooze Gel pinline grid with OozeKit\n"
+      "surfaces: stride 4, title/status 32, MAIN BAR 96.");
   gtk_label_set_justify (GTK_LABEL (label), GTK_JUSTIFY_CENTER);
   gtk_box_append (GTK_BOX (demo), label);
 
   return fac_page_shell (
       self,
       "OozeGel",
-      "Window chrome behavior (not a painted widget): edge resize and "
-      "surface drag installed on Ooze application windows.",
+      "Ooze Gel frame behavior plus the shared pinline grid "
+      "(OOZE_PIN_STRIDE / title 32 / MAIN BAR 96).",
       demo,
       api);
 }

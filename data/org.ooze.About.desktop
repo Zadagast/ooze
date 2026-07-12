@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=About This Computer
+GenericName=About
+Comment=Ooze About — system information and Ooze app versions
+Exec=ooze-about
+Icon=help-about
+Terminal=false
+Type=Application
+Categories=System;Utility;
+StartupWMClass=org.ooze.About

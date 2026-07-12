@@ -42,6 +42,7 @@ inc_src     = include_directories('src')
 
 ooze_data_dir = get_option('prefix') / 'share' / 'ooze'
 c_args += '-DOOZE_DATA_DIR="@0@"'.format(ooze_data_dir)
+c_args += '-DOOZE_VERSION="@0@"'.format(meson.project_version())
 
 install_icons_script = meson.project_source_root() / 'scripts' / 'install-elementary-icons.sh'
 
@@ -75,6 +76,7 @@ executable('my-desktop',
   'src/my-theme.c',
   'src/my-window.c',
   'src/my-magic-lamp.c',
+  'src/my-screen-transition.c',
   'common/aqua-traffic.c',
   c_args: c_args,
   include_directories: [inc_common, inc_src],
@@ -123,8 +125,10 @@ ooze_kit_sources = [
   'ooze-kit/ooze-toolbar.c',
   'ooze-kit/ooze-theme.c',
   'ooze-kit/ooze-about.c',
+  'ooze-kit/ooze-window-actions.c',
   'ooze-kit/ooze-pinline.c',
   'ooze-kit/ooze-scroll.c',
+  'ooze-kit/ooze-popover.c',
 ]
 
 # Shared source list for ooze-ui widgets (header bar, traffic lights, Ooze Gel)
@@ -136,7 +140,10 @@ ooze_ui_sources = [
 ]
 
 ooze_app_inc = [inc_common, inc_ooze_ui, inc_ooze_kit, inc_src]
-ooze_app_c_args = ['-DOOZE_DATA_DIR="@0@"'.format(ooze_data_dir)]
+ooze_app_c_args = [
+  '-DOOZE_DATA_DIR="@0@"'.format(ooze_data_dir),
+  '-DOOZE_VERSION="@0@"'.format(meson.project_version()),
+]
 
 if gtk4_dep.found() and adw_dep.found()
   executable('spot',
@@ -244,6 +251,47 @@ if gtk4_dep.found() and adw_dep.found()
   )
 
   install_data('data/org.ooze.King.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
+  libgtop_dep = dependency('libgtop-2.0', required: false)
+  udisks_dep = dependency('udisks2', required: false)
+  ooze_about_c_args = ooze_app_c_args
+  ooze_about_deps = [
+    gtk4_dep,
+    adw_dep,
+    gio_dep,
+    cairo_dep,
+    cc.find_library('m'),
+  ]
+  if libgtop_dep.found()
+    ooze_about_c_args += '-DHAVE_LIBGTOP=1'
+    ooze_about_deps += libgtop_dep
+  else
+    warning('Ooze About: libgtop-2.0 not found; using /proc CPU/memory fallbacks')
+  endif
+  if udisks_dep.found()
+    ooze_about_c_args += '-DHAVE_UDISKS2=1'
+    ooze_about_deps += udisks_dep
+  else
+    warning('Ooze About: udisks2 not found; using root filesystem size fallback')
+  endif
+
+  executable('ooze-about',
+    'ooze-about/main.c',
+    'ooze-about/ooze-about-window.c',
+    'ooze-about/ooze-system-info.c',
+    'src/my-icons.c',
+    'src/my-icons-gtk.c',
+    ooze_ui_sources,
+    ooze_kit_sources,
+    include_directories: ooze_app_inc + [include_directories('ooze-about')],
+    dependencies: ooze_about_deps,
+    c_args: ooze_about_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.About.desktop',
     install_dir: get_option('datadir') / 'applications',
   )
 

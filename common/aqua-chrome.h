@@ -5,9 +5,23 @@
 
 G_BEGIN_DECLS
 
-/* Shared chrome strip height — title bar and status bar stay matched. */
-#define AQUA_TITLEBAR_HEIGHT      28
+/*
+ * Ooze Gel pinline grid
+ * ─────────────────────
+ * Strip heights are multiples of OOZE_PIN_STRIDE so pinlines flow as one
+ * cloth across the Ooze Gel title bar and matching OozeKit surfaces
+ * (MAIN BAR, sidebar, status bar). Do not invent off-grid heights.
+ */
+#define OOZE_PIN_STRIDE           4
+
+#define AQUA_TITLEBAR_HEIGHT      32   /* 8 × OOZE_PIN_STRIDE — Ooze Gel title */
 #define AQUA_STATUSBAR_HEIGHT     AQUA_TITLEBAR_HEIGHT
+
+/* Nominal MAIN BAR height (documentation only — NOT enforced via
+ * size_request/CSS). The strip sizes to its tallest tile's real content;
+ * this is just the typical result with 40px icons + caption + kit pad. */
+#define OOZE_TOOLBAR_HEIGHT       96
+
 #define AQUA_TRAFFIC_LIGHT_SIZE   14
 #define AQUA_TRAFFIC_LIGHT_GAP    8
 #define AQUA_TRAFFIC_LIGHT_MARGIN 10

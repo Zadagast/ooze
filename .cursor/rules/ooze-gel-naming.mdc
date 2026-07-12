@@ -9,6 +9,7 @@ alwaysApply: true
 In docs, UI copy, commit messages, and comments meant for humans:
 
 - Call the app window frame **Ooze Gel** (header bar, traffic lights, drag, resize).
+- The continuous pinline cloth across Gel title + OozeKit MAIN BAR / sidebar / status is the **Ooze Gel pinline grid** (`OOZE_PIN_STRIDE`, heights in `aqua-chrome.h`).
 - Do **not** say “window chrome”, “Gel chrome”, or “client chrome” in product language.
 - OozeKit surfaces/buttons are **OozeKit** finishes / controls — not “Ooze Gel” and not “chrome”.
 

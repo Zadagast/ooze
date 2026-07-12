@@ -6,6 +6,7 @@
 #include "ooze-icons.h"
 #include "ooze-surface.h"
 #include "ooze-toolbar.h"
+#include "ooze-window-actions.h"
 
 #include <adwaita.h>
 #include <gio/gio.h>
@@ -34,11 +35,15 @@ static const char * const king_icon_command[] = {
 static const char * const king_icon_ear[] = {
   "org.ooze.Ear", "audio-headphones", "multimedia-volume-control", NULL
 };
+static const char * const king_icon_about[] = {
+  "org.ooze.About", "help-about", "dialog-information", NULL
+};
 static const char * const king_icon_pak[] = {
   "org.ooze.Pak", "system-software-install", "package-x-generic", NULL
 };
 
 static const KingAppEntry king_apps[] = {
+  { king_icon_about,   "About This Computer", "ooze-about" },
   { king_icon_spot,    "File Manager",   "spot" },
   { king_icon_command, "Terminal",       "ooze-command" },
   { king_icon_ear,     "Sound Settings", "ooze-ear" },
@@ -53,7 +58,8 @@ king_action_about (GSimpleAction *action G_GNUC_UNUSED,
   ooze_about_present (GTK_WINDOW (user_data),
                       "Ooze King",
                       "preferences-system",
-                      "System Settings for Ooze Desktop.");
+                      "System Settings for Ooze Desktop.",
+                      OOZE_VERSION);
 }
 
 static GMenuModel *
@@ -63,6 +69,8 @@ king_build_menubar (void)
   GMenuItem *item;
 
   bar = g_menu_new ();
+  ooze_menubar_append_edit (bar);
+  ooze_menubar_append_window (bar);
   help = g_menu_new ();
   g_menu_append (help, "About Ooze King", "win.about");
   item = g_menu_item_new_submenu ("Help", G_MENU_MODEL (help));
@@ -153,6 +161,8 @@ ooze_king_window_init (OozeKingWindow *self)
   g_action_map_add_action_entries (G_ACTION_MAP (self),
                                    entries, G_N_ELEMENTS (entries),
                                    self);
+  ooze_window_actions_add_chrome (GTK_APPLICATION_WINDOW (self));
+  ooze_window_actions_add_edit (GTK_APPLICATION_WINDOW (self));
 
   self->header = GTK_WIDGET (ooze_header_bar_new ());
   ooze_header_bar_attach_window (OOZE_HEADER_BAR (self->header), GTK_WINDOW (self));

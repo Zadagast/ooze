@@ -12,6 +12,9 @@ SpotWindow *spot_window_new (AdwApplication *app);
 SpotWindow *spot_window_new_for_path (AdwApplication *app,
                                       const char    *path);
 
+/* Install the Spot menubar on the application (call from startup). */
+void spot_application_setup_menubar (GtkApplication *app);
+
 void spot_window_open_path (SpotWindow *self,
                             const char *path);
 

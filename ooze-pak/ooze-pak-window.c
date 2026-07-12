@@ -5,9 +5,11 @@
 #include "ooze-button.h"
 #include "ooze-header-bar.h"
 #include "ooze-icons.h"
+#include "ooze-popover.h"
 #include "ooze-scroll.h"
 #include "ooze-surface.h"
 #include "ooze-toolbar.h"
+#include "ooze-window-actions.h"
 
 #include <string.h>
 
@@ -253,6 +255,7 @@ on_cell_pressed (GtkGestureClick *gesture,
   g_object_unref (group);
 
   gtk_widget_set_parent (popover, GTK_WIDGET (self));
+  ooze_popover_fit_screen (GTK_POPOVER (popover));
   gtk_popover_popup (GTK_POPOVER (popover));
   g_signal_connect (popover, "closed", G_CALLBACK (gtk_widget_unparent), NULL);
 }
@@ -524,7 +527,8 @@ pak_action_about (GSimpleAction *action G_GNUC_UNUSED,
   ooze_about_present (GTK_WINDOW (user_data),
                       "Ooze Pak",
                       "system-software-install",
-                      "Software installer for Ooze Desktop.");
+                      "Software installer for Ooze Desktop.",
+                      OOZE_VERSION);
 }
 
 static GMenuModel *
@@ -534,6 +538,8 @@ pak_build_menubar (void)
   GMenuItem *item;
 
   bar = g_menu_new ();
+  ooze_menubar_append_edit (bar);
+  ooze_menubar_append_window (bar);
   help = g_menu_new ();
   g_menu_append (help, "About Ooze Pak", "win.about");
   item = g_menu_item_new_submenu ("Help", G_MENU_MODEL (help));
@@ -572,6 +578,8 @@ ooze_pak_window_init (OozePakWindow *self)
   g_action_map_add_action_entries (G_ACTION_MAP (self),
                                    entries, G_N_ELEMENTS (entries),
                                    self);
+  ooze_window_actions_add_chrome (GTK_APPLICATION_WINDOW (self));
+  ooze_window_actions_add_edit (GTK_APPLICATION_WINDOW (self));
 
   css = gtk_css_provider_new ();
   gtk_css_provider_load_from_string (

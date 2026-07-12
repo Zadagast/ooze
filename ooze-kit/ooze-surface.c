@@ -46,9 +46,9 @@ ooze_surface_ensure_css (void)
      * Status bar chrome stays edge-to-edge (connected to the window frame).
      * Only children are inset so glyphs clear the CSD corner radius.
      */
-    /* Match AQUA_STATUSBAR_HEIGHT / title-bar strip (28px). */
+    /* Match AQUA_STATUSBAR_HEIGHT / Ooze Gel title strip (32px). */
     ".ooze-surface-statusbar {"
-    "  min-height: 28px;"
+    "  min-height: 32px;"
     "  padding: 0;"
     "}"
     ".ooze-surface-statusbar > * {"
@@ -105,7 +105,8 @@ ooze_surface_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
   cr = gtk_snapshot_append_cairo (snapshot,
          &GRAPHENE_RECT_INIT (0.f, 0.f, (float) w, (float) h));
 
-  ooze_draw_surface   (cr, w, h, r, g, b, pal);
+  ooze_draw_surface   (cr, w, h, r, g, b,
+                       ooze_stripe_origin_y (widget), pal);
   ooze_draw_separator (cr, w, h, sep_side, pal);
 
   cairo_destroy (cr);

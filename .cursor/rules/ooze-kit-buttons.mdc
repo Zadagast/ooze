@@ -11,9 +11,24 @@ Toolbar / settings controls MUST follow Spot’s Computer / Home / Favorites pat
 - Full-color (non-symbolic) theme icons — prefer names without `-symbolic`
 - Caption text centered **below** the icon
 - Use `ooze_button_new_labeled()` (or `ooze_button_new_toolbar()`) — never icon-only symbolic pills for app controls
-- Icon sizes come from `ooze-icons.h`: toolbar **32**, sidebar **24**, list **16**, grid **48**. Always use those constants / `ooze_icon_image_new()`.
+- Icon sizes come from `ooze-icons.h`: toolbar **40**, sidebar **24**, list **16**, grid **48**. Always use those constants / `ooze_icon_image_new()`.
 
 Do **not** use symbolic-only icon buttons for OozeKit controls. Symbolic icons are a last-resort fallback only when no color icon exists.
+
+## MAIN BAR (under the Ooze Gel title bar)
+
+The app’s primary command strip is `ooze_toolbar_new()` — not a one-off GTK box.
+
+- Compose with `ooze_toolbar_add_group()`, `ooze_toolbar_add_separator()`, `ooze_toolbar_add_spacer()`
+- Tiles: `ooze_button_new_toolbar()` only
+- Height is content-driven (grows to fit the tallest tile) — never forced via CSS `min-height` or `size_request`; `OOZE_TOOLBAR_HEIGHT` (~96) is a nominal doc reference only
+- Glass geometry (kit-owned):
+  - **Outset** `OOZE_BTN_EDGE` — air from tile allocation to glass rim
+  - **Inset** `OOZE_BTN_PAD_*` — air from glass rim to icon + caption
+- Equal tile `min-width` for Back…Applications rhythm; spacer before Search stays
+- Chrome strips stay **flush** (no outer margin) so pinlines flow; phase via `ooze_stripe_origin_y()`
+- Trailing search / accessories: CSS class `ooze-toolbar-search`
+- Do **not** invent per-app padding or icon pixel sizes — change OozeKit / `aqua-chrome.h` instead
 
 ## Exclusive toggles
 

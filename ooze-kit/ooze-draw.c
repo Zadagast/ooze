@@ -1,5 +1,8 @@
 #include "ooze-draw.h"
+#include "aqua-chrome.h"
 
+#include <gtk/gtk.h>
+#include <math.h>
 #include <glib.h>   /* G_PI */
 
 /* ── Internal helpers ─────────────────────────────────────────────────────── */
@@ -19,15 +22,66 @@ rounded_rect (cairo_t *cr,
   cairo_close_path (cr);
 }
 
+static gboolean
+ooze_widget_in_gel_titlebar (GtkWidget *widget, GtkWindow *window)
+{
+  GtkWidget *titlebar = gtk_window_get_titlebar (window);
+  GtkWidget *w;
+
+  for (w = widget; w != NULL; w = gtk_widget_get_parent (w))
+    {
+      if (w == titlebar)
+        return TRUE;
+      if (gtk_widget_has_css_class (w, "titlebar")
+          || gtk_widget_has_css_class (w, "ooze-header-bar"))
+        return TRUE;
+    }
+
+  return FALSE;
+}
+
 /* ── Public API ─────────────────────────────────────────────────────────── */
 
+int
+ooze_stripe_origin_y (GtkWidget *widget)
+{
+  GtkRoot *root;
+  GtkWindow *window;
+  GtkWidget *content;
+  graphene_point_t out;
+
+  if (!widget)
+    return 0;
+
+  root = gtk_widget_get_root (widget);
+  if (!GTK_IS_WINDOW (root))
+    return 0;
+
+  window = GTK_WINDOW (root);
+
+  /* Ooze Gel titlebar is the cloth origin (CSD subtree). */
+  if (ooze_widget_in_gel_titlebar (widget, window))
+    return 0;
+
+  content = gtk_window_get_child (window);
+  if (!content)
+    return AQUA_TITLEBAR_HEIGHT;
+
+  if (!gtk_widget_compute_point (widget, content,
+                                 &GRAPHENE_POINT_INIT (0.f, 0.f), &out))
+    return AQUA_TITLEBAR_HEIGHT;
+
+  return AQUA_TITLEBAR_HEIGHT + (int) floor (out.y);
+}
+
 void
-ooze_draw_surface (cairo_t          *cr,
-                   int               w,
-                   int               h,
-                   double            r,
-                   double            g,
-                   double            b,
+ooze_draw_surface (cairo_t           *cr,
+                   int                w,
+                   int                h,
+                   double             r,
+                   double             g,
+                   double             b,
+                   int                stripe_origin_y,
                    const OozePalette *p)
 {
   /* Base fill */
@@ -35,17 +89,25 @@ ooze_draw_surface (cairo_t          *cr,
   cairo_rectangle (cr, 0, 0, w, h);
   cairo_fill (cr);
 
-  /* Pinstripe: one 1 px tinted line every stride rows.
-   * Dark mode → white highlights on charcoal.
-   * Light mode → dark shadows on pale gray (reversed for visibility). */
+  /* Pinstripe: one 1 px tinted line every stride rows, phase-locked to the
+   * Ooze Gel pinline grid so flush strips read as one cloth. */
   if (p->pinstripe_alpha > 0.001 && p->pinstripe_stride > 1)
     {
       double pr = p->dark ? 1.0 : 0.0;
       double pg = p->dark ? 1.0 : 0.0;
       double pb = p->dark ? 1.0 : 0.0;
+      int    stride = p->pinstripe_stride;
+      int    phase = stripe_origin_y % stride;
+      int    py;
+
+      if (phase < 0)
+        phase += stride;
+
       cairo_set_source_rgba (cr, pr, pg, pb, p->pinstripe_alpha);
-      for (int py = 0; py < h; py += p->pinstripe_stride)
+      for (py = -phase; py < h; py += stride)
         {
+          if (py < 0)
+            continue;
           cairo_rectangle (cr, 0, py, w, 1);
           cairo_fill (cr);
         }
@@ -59,19 +121,12 @@ ooze_draw_separator (cairo_t          *cr,
                      OozeSide          side,
                      const OozePalette *p)
 {
-  double hi_r = p->dark ? 1.0 : 1.0;
-  double hi_g = p->dark ? 1.0 : 1.0;
-  double hi_b = p->dark ? 1.0 : 1.0;
   double lo_a = p->sep_alpha;
-  double hi_a = p->sep_highlight_alpha;
 
   switch (side)
     {
     case OOZE_SIDE_BOTTOM:
-      /* Groove sits on the bottom edge; highlight just above it. */
-      cairo_set_source_rgba (cr, hi_r, hi_g, hi_b, hi_a);
-      cairo_rectangle (cr, 0, h - 2, w, 1);
-      cairo_fill (cr);
+      /* Single groove on the pin grid — part of the Ooze Gel cloth. */
       cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, lo_a);
       cairo_rectangle (cr, 0, h - 1, w, 1);
       cairo_fill (cr);
@@ -81,15 +136,9 @@ ooze_draw_separator (cairo_t          *cr,
       cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, lo_a);
       cairo_rectangle (cr, 0, 0, w, 1);
       cairo_fill (cr);
-      cairo_set_source_rgba (cr, hi_r, hi_g, hi_b, hi_a);
-      cairo_rectangle (cr, 0, 1, w, 1);
-      cairo_fill (cr);
       break;
 
     case OOZE_SIDE_RIGHT:
-      cairo_set_source_rgba (cr, hi_r, hi_g, hi_b, hi_a);
-      cairo_rectangle (cr, w - 2, 0, 1, h);
-      cairo_fill (cr);
       cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, lo_a);
       cairo_rectangle (cr, w - 1, 0, 1, h);
       cairo_fill (cr);
@@ -99,9 +148,9 @@ ooze_draw_separator (cairo_t          *cr,
       cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, lo_a);
       cairo_rectangle (cr, 0, 0, 1, h);
       cairo_fill (cr);
-      cairo_set_source_rgba (cr, hi_r, hi_g, hi_b, hi_a);
-      cairo_rectangle (cr, 1, 0, 1, h);
-      cairo_fill (cr);
+      break;
+
+    default:
       break;
     }
 }
@@ -115,8 +164,8 @@ ooze_draw_button_bg (cairo_t          *cr,
                      OozeBtnState      state,
                      const OozePalette *p)
 {
-  /* Radius scales slightly with height so compact tiles stay round. */
-  const double R = CLAMP (MIN (8.0, h * 0.28), 5.0, 8.0);
+  /* Radius scales with taller MAIN BAR plates (40px icons + inset pad). */
+  const double R = CLAMP (h * 0.22, 6.0, 11.0);
 
   if (state == OOZE_BTN_NORMAL)
     return;
@@ -136,16 +185,16 @@ ooze_draw_button_bg (cairo_t          *cr,
         const double glass_g = p->dark ? 0.16 : 0.93;
         const double glass_b = p->dark ? 0.18 : 0.96;
         const double smoke_a_top = pressed
-          ? (p->dark ? 0.58 : 0.22)
-          : (p->dark ? 0.42 : 0.16);
+          ? (p->dark ? 0.58 : 0.26)
+          : (p->dark ? 0.42 : 0.20);
         const double smoke_a_mid = pressed
-          ? (p->dark ? 0.44 : 0.16)
-          : (p->dark ? 0.30 : 0.11);
+          ? (p->dark ? 0.44 : 0.18)
+          : (p->dark ? 0.30 : 0.14);
         const double smoke_a_bot = pressed
-          ? (p->dark ? 0.34 : 0.12)
-          : (p->dark ? 0.22 : 0.08);
-        const double border_hi = p->dark ? 0.34 : 0.72;
-        const double border_lo = p->dark ? 0.28 : 0.30;
+          ? (p->dark ? 0.34 : 0.14)
+          : (p->dark ? 0.22 : 0.10);
+        const double border_hi = p->dark ? 0.38 : 0.82;
+        const double border_lo = p->dark ? 0.32 : 0.36;
         cairo_pattern_t *grad;
 
         rounded_rect (cr, x, y, w, h, R);
@@ -169,16 +218,16 @@ ooze_draw_button_bg (cairo_t          *cr,
             /* Soft translucent white plate + faint smoke so it lifts off #f0f0f0. */
             grad = cairo_pattern_create_linear (0, y, 0, y + h);
             cairo_pattern_add_color_stop_rgba (grad, 0.0,
-                                               1.0, 1.0, 1.0, smoke_a_top + 0.28);
+                                               1.0, 1.0, 1.0, smoke_a_top + 0.30);
             cairo_pattern_add_color_stop_rgba (grad, 0.5,
-                                               glass_r, glass_g, glass_b, smoke_a_mid + 0.18);
+                                               glass_r, glass_g, glass_b, smoke_a_mid + 0.20);
             cairo_pattern_add_color_stop_rgba (grad, 1.0,
-                                               0.78, 0.80, 0.84, smoke_a_bot + 0.14);
+                                               0.78, 0.80, 0.84, smoke_a_bot + 0.16);
             cairo_set_source (cr, grad);
             cairo_fill_preserve (cr);
             cairo_pattern_destroy (grad);
 
-            cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, pressed ? 0.10 : 0.07);
+            cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, pressed ? 0.11 : 0.08);
             cairo_fill_preserve (cr);
           }
 
@@ -194,10 +243,10 @@ ooze_draw_button_bg (cairo_t          *cr,
         cairo_stroke (cr);
 
         /* Top gloss */
-        rounded_rect (cr, x + 2.0, y + 2.0,
-                      w - 4.0, h * 0.40,
+        rounded_rect (cr, x + 2.5, y + 2.5,
+                      w - 5.0, h * 0.38,
                       MAX (R - 2.5, 2.0));
-        cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, p->dark ? 0.16 : 0.45);
+        cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, p->dark ? 0.18 : 0.50);
         cairo_fill (cr);
       }
       break;

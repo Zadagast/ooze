@@ -540,6 +540,27 @@ action_close (GSimpleAction *a G_GNUC_UNUSED,
 }
 
 static void
+action_minimize (GSimpleAction *a G_GNUC_UNUSED,
+                 GVariant      *p G_GNUC_UNUSED,
+                 gpointer       ud)
+{
+  gtk_window_minimize (GTK_WINDOW (ud));
+}
+
+static void
+action_maximize (GSimpleAction *a G_GNUC_UNUSED,
+                 GVariant      *p G_GNUC_UNUSED,
+                 gpointer       ud)
+{
+  GtkWindow *win = GTK_WINDOW (ud);
+
+  if (gtk_window_is_maximized (win))
+    gtk_window_unmaximize (win);
+  else
+    gtk_window_maximize (win);
+}
+
+static void
 action_about (GSimpleAction *a G_GNUC_UNUSED,
               GVariant      *p G_GNUC_UNUSED,
               gpointer       user_data)
@@ -547,7 +568,8 @@ action_about (GSimpleAction *a G_GNUC_UNUSED,
   ooze_about_present (GTK_WINDOW (user_data),
                       "Ooze Command",
                       "utilities-terminal",
-                      "Terminal emulator for Ooze Desktop.");
+                      "Terminal emulator for Ooze Desktop.",
+                      OOZE_VERSION);
 }
 
 static const GActionEntry win_actions[] = {
@@ -561,6 +583,8 @@ static const GActionEntry win_actions[] = {
   { "new-window",  action_new_window, NULL, NULL, NULL },
   { "new-tab",     action_new_tab,    NULL, NULL, NULL },
   { "close",       action_close,      NULL, NULL, NULL },
+  { "minimize",    action_minimize,   NULL, NULL, NULL },
+  { "maximize",    action_maximize,   NULL, NULL, NULL },
   { "about",       action_about,      NULL, NULL, NULL },
 };
 

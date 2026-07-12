@@ -13,7 +13,7 @@ G_BEGIN_DECLS
  *   LIST     – column / compact rows
  *   GRID     – icon-view folder / file tiles
  */
-#define OOZE_ICON_SIZE_TOOLBAR 24
+#define OOZE_ICON_SIZE_TOOLBAR 40
 #define OOZE_ICON_SIZE_SIDEBAR 24
 #define OOZE_ICON_SIZE_LIST    16
 #define OOZE_ICON_SIZE_GRID    48

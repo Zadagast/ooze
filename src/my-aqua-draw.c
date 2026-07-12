@@ -508,6 +508,85 @@ my_aqua_dock_icon_content (ClutterActor *ref_actor,
 }
 
 ClutterContent *
+my_aqua_dock_reflection_content (ClutterActor   *ref_actor,
+                                 ClutterContent *source,
+                                 int             reflect_h)
+{
+  CoglTexture *texture;
+  cairo_surface_t *src_surface;
+  cairo_surface_t *dst_surface;
+  cairo_t *cr;
+  cairo_pattern_t *pat;
+  cairo_pattern_t *fade;
+  cairo_matrix_t matrix;
+  ClutterContent *content;
+  g_autofree uint8_t *pixels = NULL;
+  int width;
+  int height;
+  int stride;
+  int nbytes;
+
+  if (!source || !CLUTTER_IS_TEXTURE_CONTENT (source) || reflect_h < 1)
+    return NULL;
+
+  texture = clutter_texture_content_get_texture (CLUTTER_TEXTURE_CONTENT (source));
+  if (!texture)
+    return NULL;
+
+  width = cogl_texture_get_width (texture);
+  height = cogl_texture_get_height (texture);
+  if (width < 1 || height < 1)
+    return NULL;
+
+  if (reflect_h > height)
+    reflect_h = height;
+
+  stride = cairo_format_stride_for_width (CAIRO_FORMAT_ARGB32, width);
+  nbytes = stride * height;
+  pixels = g_malloc0 ((gsize) nbytes);
+  if (cogl_texture_get_data (texture,
+                             COGL_PIXEL_FORMAT_BGRA_8888_PRE,
+                             (unsigned int) stride,
+                             pixels) <= 0)
+    return NULL;
+
+  src_surface = cairo_image_surface_create_for_data (pixels,
+                                                     CAIRO_FORMAT_ARGB32,
+                                                     width,
+                                                     height,
+                                                     stride);
+  dst_surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, reflect_h);
+  cr = cairo_create (dst_surface);
+
+  /* Flip so dest y=0 samples the icon's bottom edge. */
+  pat = cairo_pattern_create_for_surface (src_surface);
+  cairo_matrix_init (&matrix, 1.0, 0.0, 0.0, -1.0, 0.0, (double) height);
+  cairo_pattern_set_matrix (pat, &matrix);
+  cairo_set_source (cr, pat);
+  cairo_rectangle (cr, 0.0, 0.0, (double) width, (double) reflect_h);
+  cairo_fill (cr);
+  cairo_pattern_destroy (pat);
+
+  /* Soft dissolve away from the shelf. */
+  cairo_set_operator (cr, CAIRO_OPERATOR_DEST_IN);
+  fade = cairo_pattern_create_linear (0.0, 0.0, 0.0, (double) reflect_h);
+  cairo_pattern_add_color_stop_rgba (fade, 0.0, 0.0, 0.0, 0.0, 0.42);
+  cairo_pattern_add_color_stop_rgba (fade, 0.45, 0.0, 0.0, 0.0, 0.18);
+  cairo_pattern_add_color_stop_rgba (fade, 1.0, 0.0, 0.0, 0.0, 0.0);
+  cairo_set_source (cr, fade);
+  cairo_paint (cr);
+  cairo_pattern_destroy (fade);
+
+  cairo_destroy (cr);
+  cairo_surface_destroy (src_surface);
+
+  content = my_aqua_content_from_surface (ref_actor, dst_surface);
+  cairo_surface_destroy (dst_surface);
+
+  return content;
+}
+
+ClutterContent *
 my_aqua_traffic_light_content (ClutterActor *ref_actor,
                                int           size,
                                gfloat        r,
@@ -539,7 +618,9 @@ my_aqua_traffic_light_content (ClutterActor *ref_actor,
   return content;
 }
 
-#define OOZE_BUTTON_LABEL "🫟 Ooze"
+#define OOZE_BUTTON_EMOJI "🫟"
+#define OOZE_BUTTON_TEXT  " Ooze"
+#define OOZE_BUTTON_LABEL OOZE_BUTTON_EMOJI OOZE_BUTTON_TEXT
 
 ClutterContent *
 my_aqua_ooze_button_content (ClutterActor *ref_actor,
@@ -547,21 +628,39 @@ my_aqua_ooze_button_content (ClutterActor *ref_actor,
                              int          *height_out)
 {
   cairo_surface_t *surface;
+  cairo_surface_t *emoji_surf;
   cairo_t *cr;
+  cairo_t *emoji_cr;
   ClutterContent *content;
   PangoLayout *layout;
+  PangoLayout *emoji_layout;
+  PangoLayout *text_layout;
   PangoFontDescription *font;
   PangoRectangle ink;
   PangoRectangle logical;
+  PangoRectangle emoji_ink;
+  PangoRectangle emoji_logical;
+  PangoRectangle text_ink;
+  PangoRectangle text_logical;
   cairo_pattern_t *gradient;
   gdouble radius;
-  gdouble pad_x = 8.0;
-  gdouble height = 18.0;
+  gdouble pad_x = 12.0;
+  gdouble height = 22.0;  /* PANEL_HEIGHT 26 − 2×2 pad */
   gdouble width;
   gdouble text_x;
-  gdouble text_y;
+  gdouble word_x;
+  gdouble word_y;
+  gdouble emoji_x;
+  gdouble emoji_y;
+  int emoji_pad = 2;
+  int emoji_sw;
+  int emoji_sh;
+  /* 1 px cardinal offsets — thin, sharp silhouette */
+  static const gdouble outline_dx[] = { -1.0, 0.0, 0.0, 1.0 };
+  static const gdouble outline_dy[] = {  0.0,-1.0, 1.0, 0.0 };
+  guint i;
 
-  font = pango_font_description_from_string (OOZE_UI_FONT);
+  font = pango_font_description_from_string (OOZE_UI_FONT_EMPHASIS);
 
   surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, 1, 1);
   cr = cairo_create (surface);
@@ -574,50 +673,94 @@ my_aqua_ooze_button_content (ClutterActor *ref_actor,
   cairo_surface_destroy (surface);
 
   width = logical.width + pad_x * 2.0;
-  if (width < 64.0)
-    width = 64.0;
+  if (width < 80.0)
+    width = 80.0;
 
   surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32,
                                         (int) ceil (width),
                                         (int) ceil (height));
   cr = cairo_create (surface);
 
-  radius = 4.0;
+  radius = 5.0;  /* squircle corner — rounded but not a pill */
   my_aqua_rounded_rect (cr, 0.5, 0.5, width - 1.0, height - 1.0, radius);
 
+  /* XP-style gradient: slightly darker lime top so white text reads cleanly */
   gradient = cairo_pattern_create_linear (0, 0, 0, height);
-  cairo_pattern_add_color_stop_rgb (gradient, 0.0, 0.38, 0.78, 0.36);
-  cairo_pattern_add_color_stop_rgb (gradient, 0.45, 0.22, 0.62, 0.20);
-  cairo_pattern_add_color_stop_rgb (gradient, 1.0, 0.08, 0.42, 0.10);
+  cairo_pattern_add_color_stop_rgb (gradient, 0.00, 0.42, 0.78, 0.22);
+  cairo_pattern_add_color_stop_rgb (gradient, 0.40, 0.22, 0.68, 0.12);
+  cairo_pattern_add_color_stop_rgb (gradient, 0.70, 0.10, 0.50, 0.08);
+  cairo_pattern_add_color_stop_rgb (gradient, 1.00, 0.05, 0.32, 0.04);
   cairo_set_source (cr, gradient);
   cairo_fill_preserve (cr);
   cairo_pattern_destroy (gradient);
 
-  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.28);
+  /* Outer border */
+  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.40);
   cairo_set_line_width (cr, 1.0);
   cairo_stroke (cr);
 
-  cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 0.35);
-  my_aqua_rounded_rect (cr, 1.5, 1.5, width - 3.0, (height - 3.0) * 0.45, radius - 1.0);
+  /* Top gloss rim — only top 28% so it doesn't wash over the label */
+  my_aqua_rounded_rect (cr, 1.5, 1.5, width - 3.0, (height - 3.0) * 0.28, radius - 1.0);
+  cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 0.42);
   cairo_fill (cr);
 
-  layout = pango_cairo_create_layout (cr);
-  pango_layout_set_font_description (layout, font);
-  pango_layout_set_text (layout, OOZE_BUTTON_LABEL, -1);
-  pango_layout_get_pixel_extents (layout, &ink, &logical);
+  /* Measure pieces separately so each can be optically centered */
+  emoji_layout = pango_cairo_create_layout (cr);
+  pango_layout_set_font_description (emoji_layout, font);
+  pango_layout_set_text (emoji_layout, OOZE_BUTTON_EMOJI, -1);
+  pango_layout_get_pixel_extents (emoji_layout, &emoji_ink, &emoji_logical);
 
-  text_x = (width - logical.width) / 2.0;
-  text_y = (height - logical.height) / 2.0 - ink.y;
+  text_layout = pango_cairo_create_layout (cr);
+  pango_layout_set_font_description (text_layout, font);
+  pango_layout_set_text (text_layout, OOZE_BUTTON_TEXT, -1);
+  pango_layout_get_pixel_extents (text_layout, &text_ink, &text_logical);
 
-  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.35);
-  cairo_move_to (cr, text_x + 0.5, text_y + 0.5);
-  pango_cairo_show_layout (cr, layout);
+  text_x = (width - (emoji_logical.width + text_logical.width)) / 2.0;
+  word_x = text_x + emoji_logical.width;
+  /* Center each piece on the button midline using its own ink box */
+  word_y = (height - text_ink.height) / 2.0 - text_ink.y;
+  emoji_sw = emoji_logical.width + emoji_pad * 2;
+  emoji_sh = MAX (emoji_logical.height, emoji_ink.height) + emoji_pad * 2;
+  if (emoji_sw < 1) emoji_sw = 1;
+  if (emoji_sh < 1) emoji_sh = 1;
 
+  emoji_surf = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, emoji_sw, emoji_sh);
+  emoji_cr = cairo_create (emoji_surf);
+  cairo_move_to (emoji_cr,
+                 emoji_pad - emoji_ink.x,
+                 emoji_pad - emoji_ink.y);
+  pango_cairo_show_layout (emoji_cr, emoji_layout);
+  cairo_destroy (emoji_cr);
+  g_object_unref (emoji_layout);
+
+  /* Ink sits at (emoji_pad, emoji_pad) in the surface — center that ink box */
+  emoji_x = text_x - emoji_pad + emoji_ink.x;
+  emoji_y = (height - emoji_ink.height) / 2.0 - emoji_pad;
+
+  /* Thin black silhouette following the splat shape (mask uses glyph alpha) */
+  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.85);
+  for (i = 0; i < G_N_ELEMENTS (outline_dx); i++)
+    cairo_mask_surface (cr, emoji_surf,
+                        emoji_x + outline_dx[i],
+                        emoji_y + outline_dy[i]);
+
+  /* Color emoji on top */
+  cairo_set_source_surface (cr, emoji_surf, emoji_x, emoji_y);
+  cairo_paint (cr);
+  cairo_surface_destroy (emoji_surf);
+
+  /* " Ooze" word — white with drop shadow */
+  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.55);
+  cairo_move_to (cr, word_x + 1.0, word_y + 1.0);
+  pango_cairo_show_layout (cr, text_layout);
+  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.30);
+  cairo_move_to (cr, word_x + 0.5, word_y + 0.5);
+  pango_cairo_show_layout (cr, text_layout);
   cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
-  cairo_move_to (cr, text_x, text_y);
-  pango_cairo_show_layout (cr, layout);
+  cairo_move_to (cr, word_x, word_y);
+  pango_cairo_show_layout (cr, text_layout);
 
-  g_object_unref (layout);
+  g_object_unref (text_layout);
   pango_font_description_free (font);
   cairo_destroy (cr);
 
@@ -711,6 +854,8 @@ my_aqua_text_content (ClutterActor *ref_actor,
 
   if (!text || text[0] == '\0')
     text = " ";
+  else if (!g_utf8_validate (text, -1, NULL))
+    text = "�";
 
   font = pango_font_description_from_string (font_desc ?
                                              font_desc :

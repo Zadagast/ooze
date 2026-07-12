@@ -44,6 +44,7 @@ struct _MyTheme
   gulong gtk_theme_handler;
   gboolean dark;
   GSList *watchers;
+  GSList *will_change_watchers;
 };
 
 static MyTheme *default_theme;
@@ -77,6 +78,17 @@ my_theme_read_dark (GSettings *settings)
 }
 
 static void
+my_theme_emit_watchers (GSList *watchers)
+{
+  for (GSList *l = watchers; l != NULL; l = l->next)
+    {
+      MyThemeWatcher *w = l->data;
+
+      w->cb (w->data);
+    }
+}
+
+static void
 my_theme_apply (MyTheme *theme)
 {
   gboolean dark;
@@ -85,14 +97,12 @@ my_theme_apply (MyTheme *theme)
   if (dark == theme->dark)
     return;
 
+  /* Snapshot / transition hooks still see the old palette. */
+  my_theme_emit_watchers (theme->will_change_watchers);
+
   theme->dark = dark;
 
-  for (GSList *l = theme->watchers; l != NULL; l = l->next)
-    {
-      MyThemeWatcher *w = l->data;
-
-      w->cb (w->data);
-    }
+  my_theme_emit_watchers (theme->watchers);
 }
 
 static void
@@ -185,27 +195,64 @@ my_theme_watch (MyTheme               *theme,
   theme->watchers = g_slist_append (theme->watchers, w);
 }
 
-void
-my_theme_unwatch (MyTheme               *theme,
-                  MyThemeChangedCallback callback,
-                  gpointer               user_data)
+static void
+my_theme_remove_watcher (GSList                **list,
+                         MyThemeChangedCallback  callback,
+                         gpointer                user_data)
 {
   GSList *l;
 
-  if (!theme)
-    theme = my_theme_get_default ();
-
-  for (l = theme->watchers; l != NULL; l = l->next)
+  for (l = *list; l != NULL; l = l->next)
     {
       MyThemeWatcher *w = l->data;
 
       if (w->cb == callback && w->data == user_data)
         {
-          theme->watchers = g_slist_delete_link (theme->watchers, l);
+          *list = g_slist_delete_link (*list, l);
           g_free (w);
           return;
         }
     }
+}
+
+void
+my_theme_unwatch (MyTheme               *theme,
+                  MyThemeChangedCallback callback,
+                  gpointer               user_data)
+{
+  if (!theme)
+    theme = my_theme_get_default ();
+
+  my_theme_remove_watcher (&theme->watchers, callback, user_data);
+}
+
+void
+my_theme_watch_will_change (MyTheme               *theme,
+                            MyThemeChangedCallback callback,
+                            gpointer               user_data)
+{
+  MyThemeWatcher *w;
+
+  if (!theme)
+    theme = my_theme_get_default ();
+  if (!callback)
+    return;
+
+  w = g_new (MyThemeWatcher, 1);
+  w->cb = callback;
+  w->data = user_data;
+  theme->will_change_watchers = g_slist_append (theme->will_change_watchers, w);
+}
+
+void
+my_theme_unwatch_will_change (MyTheme               *theme,
+                              MyThemeChangedCallback callback,
+                              gpointer               user_data)
+{
+  if (!theme)
+    theme = my_theme_get_default ();
+
+  my_theme_remove_watcher (&theme->will_change_watchers, callback, user_data);
 }
 
 void
@@ -224,5 +271,6 @@ my_theme_free (MyTheme *theme)
 
   g_clear_object (&theme->settings);
   g_slist_free_full (theme->watchers, g_free);
+  g_slist_free_full (theme->will_change_watchers, g_free);
   g_free (theme);
 }

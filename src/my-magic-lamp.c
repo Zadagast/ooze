@@ -211,8 +211,10 @@ my_magic_lamp_effect_init_geometry (MyMagicLampEffect *self,
       self->icon_h = 0.f;
     }
 
-  /* Prefer bottom dock (Aqua), otherwise nearest screen edge. */
-  if (self->icon_y + self->icon_h >= self->monitor_h - MAGIC_LAMP_EPSILON)
+  /* Prefer bottom dock (Aqua). Icons slightly above the edge still count —
+   * otherwise a raised shelf falls through to TOP and minimizes upward. */
+  if (self->icon_y + self->icon_h >= self->monitor_h - MAGIC_LAMP_EPSILON ||
+      self->icon_y + self->icon_h * 0.5f >= self->monitor_h * 0.55f)
     {
       self->icon_side = MY_LAMP_SIDE_BOTTOM;
       self->icon_y = self->monitor_h;
@@ -230,10 +232,17 @@ my_magic_lamp_effect_init_geometry (MyMagicLampEffect *self,
       self->icon_x = self->monitor_w;
       self->icon_w = 0.f;
     }
-  else
+  else if (self->icon_y <= MAGIC_LAMP_EPSILON)
     {
       self->icon_side = MY_LAMP_SIDE_TOP;
       self->icon_y = 0.f;
+      self->icon_h = 0.f;
+    }
+  else
+    {
+      /* Default Aqua: suck toward the bottom shelf. */
+      self->icon_side = MY_LAMP_SIDE_BOTTOM;
+      self->icon_y = self->monitor_h;
       self->icon_h = 0.f;
     }
 }

@@ -15,11 +15,15 @@ G_BEGIN_DECLS
  *   • caption label centered under the icon
  * Do not ship icon-only symbolic toolbar pills for app controls.
  *
+ * Glass plate (OozeKit finish): hover / active / pressed draw a frosted plate
+ * that hugs the icon rect only — captions stay outside the plate at full
+ * contrast. Apps get this via ooze_button_new_toolbar(); no extra draw calls.
+ *
  *   OOZE_BUTTON_TOOLBAR  – toolbar / nav / settings grid controls
  *   OOZE_BUTTON_PUSH     – dialogs and other push buttons
  *
  * Exclusive toggles (e.g. Spot Grid / Columns): prefer
- * ooze_button_set_exclusive() so exactly one peer shows the glass plate.
+ * ooze_button_set_exclusive() so exactly one peer shows the active plate.
  */
 typedef enum
 {
@@ -35,7 +39,7 @@ GtkWidget *ooze_button_new (OozeButtonKind kind);
 
 /*
  * Canonical chrome button: color icon + label underneath.
- * icon_px <= 0 defaults to OOZE_ICON_SIZE_TOOLBAR (24).
+ * icon_px <= 0 defaults to OOZE_ICON_SIZE_TOOLBAR (40).
  * Symbolic icon names are used only when no color icon exists.
  */
 GtkWidget *ooze_button_new_labeled (OozeButtonKind      kind,
@@ -44,7 +48,7 @@ GtkWidget *ooze_button_new_labeled (OozeButtonKind      kind,
                                     const char         *label,
                                     const char         *tooltip);
 
-/* Same as ooze_button_new_labeled() with OOZE_BUTTON_TOOLBAR + 24px icons. */
+/* Same as ooze_button_new_labeled() with OOZE_BUTTON_TOOLBAR + 40px icons. */
 GtkWidget *ooze_button_new_toolbar (const char * const *icon_names,
                                     const char         *label,
                                     const char         *tooltip);

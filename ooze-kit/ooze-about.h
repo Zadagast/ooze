@@ -5,12 +5,14 @@
 G_BEGIN_DECLS
 
 /*
- * Present an About dialog with the Ooze brand name as the application name.
+ * Present a small Ooze Gel About window for the given app brand.
  * Friendly launcher names stay elsewhere; About keeps the product identity.
+ * version may be NULL to omit the version line.
  */
 void ooze_about_present (GtkWindow  *parent,
                          const char *brand_name,
                          const char *icon_name,
-                         const char *comments);
+                         const char *comments,
+                         const char *version);
 
 G_END_DECLS

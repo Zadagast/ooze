@@ -24,6 +24,8 @@ typedef struct _MyAquaMenu
   MyAquaMenuActionFunc callback;
   gpointer user_data;
   gboolean open;
+  gfloat content_height; /* full unclipped menu height */
+  gfloat scroll_y;       /* 0 … max(0, content - visible) */
 } MyAquaMenu;
 
 static void my_aqua_menu_do_close (MyAquaMenu *menu);
@@ -263,9 +265,10 @@ my_aqua_menu_set_hover (MyAquaMenu   *menu,
                                g_steal_pointer (&highlight),
                                (int) AQUA_MENU_WIDTH,
                                (int) AQUA_MENU_ROW_HEIGHT);
+  /* Highlight is a popup sibling of rows; subtract scroll offset. */
   clutter_actor_set_position (menu->highlight,
                               0.0f,
-                              clutter_actor_get_y (row));
+                              clutter_actor_get_y (row) - menu->scroll_y);
   clutter_actor_show (menu->highlight);
 
   label = g_object_get_data (G_OBJECT (row), "menu-label");
@@ -456,16 +459,97 @@ my_aqua_menu_reposition (MyAquaMenu *menu)
   gfloat anchor_x;
   gfloat anchor_y;
   gfloat anchor_h;
+  gfloat stage_h;
+  gfloat below;
+  gfloat above;
+  gfloat visible;
+  gfloat x;
+  gfloat y;
+  const gfloat margin = 8.0f;
 
-  if (!menu->anchor)
+  if (!menu->anchor || !menu->stage)
     return;
 
   clutter_actor_get_transformed_position (menu->anchor, &anchor_x, &anchor_y);
   anchor_h = clutter_actor_get_height (menu->anchor);
+  stage_h = clutter_actor_get_height (menu->stage);
+  if (stage_h < 1.0f)
+    stage_h = clutter_actor_get_height (clutter_actor_get_stage (menu->stage));
 
-  clutter_actor_set_position (menu->popup,
-                              anchor_x,
-                              anchor_y + anchor_h + 2.0f);
+  below = stage_h - (anchor_y + anchor_h + 2.0f) - margin;
+  above = anchor_y - margin;
+  if (below < 0.0f)
+    below = 0.0f;
+  if (above < 0.0f)
+    above = 0.0f;
+
+  /* Prefer below the anchor; flip above if that fits more of the menu. */
+  if (menu->content_height <= below || below >= above)
+    {
+      visible = MIN (menu->content_height, below);
+      if (visible < AQUA_MENU_ROW_HEIGHT + AQUA_MENU_PAD * 2.0f)
+        visible = MIN (menu->content_height, MAX (below, above));
+      y = anchor_y + anchor_h + 2.0f;
+    }
+  else
+    {
+      visible = MIN (menu->content_height, above);
+      y = anchor_y - 2.0f - visible;
+    }
+
+  if (visible < 1.0f)
+    visible = menu->content_height;
+
+  x = anchor_x;
+  if (x + AQUA_MENU_WIDTH > clutter_actor_get_width (menu->stage) - margin)
+    x = clutter_actor_get_width (menu->stage) - AQUA_MENU_WIDTH - margin;
+  if (x < margin)
+    x = margin;
+
+  menu->scroll_y = 0.0f;
+  clutter_actor_set_position (menu->rows, 0.0f, 0.0f);
+  my_aqua_menu_resize (menu, visible);
+  clutter_actor_set_clip_to_allocation (menu->popup,
+                                        menu->content_height > visible + 0.5f);
+  clutter_actor_set_position (menu->popup, x, y);
+}
+
+static gboolean
+my_aqua_menu_on_scroll (ClutterActor *actor G_GNUC_UNUSED,
+                        ClutterEvent *event,
+                        MyAquaMenu   *menu)
+{
+  gfloat visible;
+  gfloat max_scroll;
+  gdouble dx = 0.0, dy = 0.0;
+  ClutterScrollDirection dir;
+
+  if (!menu->open)
+    return CLUTTER_EVENT_PROPAGATE;
+
+  visible = clutter_actor_get_height (menu->popup);
+  max_scroll = menu->content_height - visible;
+  if (max_scroll <= 0.5f)
+    return CLUTTER_EVENT_PROPAGATE;
+
+  dir = clutter_event_get_scroll_direction (event);
+  if (dir == CLUTTER_SCROLL_SMOOTH)
+    clutter_event_get_scroll_delta (event, &dx, &dy);
+  else if (dir == CLUTTER_SCROLL_UP)
+    dy = -1.0;
+  else if (dir == CLUTTER_SCROLL_DOWN)
+    dy = 1.0;
+  else
+    return CLUTTER_EVENT_PROPAGATE;
+
+  menu->scroll_y += (gfloat) dy * AQUA_MENU_ROW_HEIGHT;
+  if (menu->scroll_y < 0.0f)
+    menu->scroll_y = 0.0f;
+  if (menu->scroll_y > max_scroll)
+    menu->scroll_y = max_scroll;
+
+  clutter_actor_set_position (menu->rows, 0.0f, -menu->scroll_y);
+  return CLUTTER_EVENT_STOP;
 }
 
 static void
@@ -538,8 +622,10 @@ my_aqua_menu_new (MetaContext          *context,
   clutter_actor_add_child (stage, menu->backdrop);
 
   menu->popup = clutter_actor_new ();
-  clutter_actor_set_reactive (menu->popup, FALSE);
+  clutter_actor_set_reactive (menu->popup, TRUE);
   clutter_actor_hide (menu->popup);
+  g_signal_connect (menu->popup, "scroll-event",
+                    G_CALLBACK (my_aqua_menu_on_scroll), menu);
 
   menu->rows = clutter_actor_new ();
   clutter_actor_set_reactive (menu->rows, FALSE);
@@ -585,6 +671,10 @@ my_aqua_menu_show_for_anchor (MyAquaMenu            *menu,
 
   menu->anchor = anchor;
   height = my_aqua_menu_rebuild (menu, entries, n_entries);
+  menu->content_height = height;
+  menu->scroll_y = 0.0f;
+  clutter_actor_set_position (menu->rows, 0.0f, 0.0f);
+  /* Temporary size; open/reposition clamps to available screen space. */
   my_aqua_menu_resize (menu, height);
   my_aqua_menu_open (menu);
 }

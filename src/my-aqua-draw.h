@@ -27,6 +27,15 @@ ClutterContent *my_aqua_dock_icon_content (ClutterActor *ref_actor,
                                            gfloat        g,
                                            gfloat        b);
 
+/*
+ * Build a vertically flipped, bottom-faded reflection from an icon's content.
+ * @reflect_h is the output height in pixels (typically ~0.55 × icon size).
+ * Returns NULL if @source cannot be sampled.
+ */
+ClutterContent *my_aqua_dock_reflection_content (ClutterActor   *ref_actor,
+                                                 ClutterContent *source,
+                                                 int             reflect_h);
+
 ClutterContent *my_aqua_traffic_light_content (ClutterActor *ref_actor,
                                                int           size,
                                                gfloat        r,

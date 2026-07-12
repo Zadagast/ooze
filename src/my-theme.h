@@ -41,8 +41,16 @@ MyTheme *my_theme_get_default (void);
 gboolean my_theme_is_dark (MyTheme *theme);
 const MyAquaPalette *my_theme_get_palette (MyTheme *theme);
 void my_theme_toggle (MyTheme *theme);
+/* Fires after the palette has flipped (repaint shell chrome). */
 void my_theme_watch (MyTheme *theme, MyThemeChangedCallback callback, gpointer user_data);
 void my_theme_unwatch (MyTheme *theme, MyThemeChangedCallback callback, gpointer user_data);
+/* Fires before the palette flips (snapshot the old frame for transitions). */
+void my_theme_watch_will_change (MyTheme               *theme,
+                                 MyThemeChangedCallback callback,
+                                 gpointer               user_data);
+void my_theme_unwatch_will_change (MyTheme               *theme,
+                                   MyThemeChangedCallback callback,
+                                   gpointer               user_data);
 void my_theme_free (MyTheme *theme);
 
 G_END_DECLS
