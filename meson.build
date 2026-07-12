@@ -7,8 +7,6 @@ project('my-desktop', 'c',
   ],
 )
 
-fs = import('fs')
-
 mutter_api_version = '18'
 
 libmutter_pc = 'libmutter-' + mutter_api_version
@@ -45,10 +43,9 @@ inc_src     = include_directories('src')
 ooze_data_dir = get_option('prefix') / 'share' / 'ooze'
 c_args += '-DOOZE_DATA_DIR="@0@"'.format(ooze_data_dir)
 
-elementary_icons = meson.project_source_root() / 'data' / 'icons' / 'elementary' / 'index.theme'
 install_icons_script = meson.project_source_root() / 'scripts' / 'install-elementary-icons.sh'
 
-# Elementary icons are fetched on demand by the custom target, not at configure time.
+# Elementary icons are fetched only by an explicit target or install.
 
 custom_target(
   'elementary-icons',
@@ -57,12 +54,12 @@ custom_target(
   build_by_default: false,
 )
 
-if fs.exists(elementary_icons)
-  install_subdir(
-    'data/icons/elementary',
-    install_dir: ooze_data_dir / 'icons',
-  )
-endif
+# The install script fetches missing icons and copies them under the install prefix.
+meson.add_install_script(
+  install_icons_script,
+  '--install',
+  'share/ooze/icons/elementary',
+)
 
 mutter_typelibdir = mutter_dep.get_variable('typelibdir')
 
