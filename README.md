@@ -115,6 +115,11 @@ Build a single-file nested demo (binaries + icons; **host Mutter 18** still requ
 ./dist/Ooze-*-x86_64.AppImage
 ```
 
+Or let **GitHub Actions** build it in an Ubuntu 26.04 container:
+
+- **Manual:** Actions → **AppImage** → Run workflow (downloads as a workflow artifact)
+- **Release:** `git push origin v0.1.0` — CI builds and attaches the AppImage to that GitHub Release
+
 The AppImage puts Spot, Command, King, Ear, and Pak on `PATH` inside the nested session. It does not replace your login desktop.
 
 ---
@@ -132,6 +137,7 @@ common/        Shared Gel / traffic-light constants
 data/          Icons, desktop entries, branding
 docs/          Screenshots and demo media
 packaging/     AppImage AppRun and desktop entry
+.github/       CI (AppImage build on Ubuntu 26.04)
 scripts/       Install helpers and AppImage builder
 ```
 

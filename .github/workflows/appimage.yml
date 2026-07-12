@@ -1,0 +1,92 @@
+# Build the nested Ooze AppImage inside Ubuntu 26.04 (Mutter 18).
+#
+# Triggers:
+#   - Manual: Actions → AppImage → Run workflow
+#   - Tag push: v*  (also attaches the AppImage to that GitHub Release)
+#
+# Stock GitHub runners are still 22.04/24.04; the job uses an Ubuntu 26.04
+# container so libmutter-18-dev is available.
+
+name: AppImage
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    name: Build AppImage (Ubuntu 26.04)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:26.04
+      env:
+        DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            git \
+            python3
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            meson \
+            ninja-build \
+            pkg-config \
+            libmutter-18-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libcairo2-dev \
+            libvte-2.91-gtk4-dev \
+            libgdk-pixbuf-2.0-dev \
+            libpng-dev \
+            libpipewire-0.3-dev \
+            librsvg2-bin \
+            x11-apps \
+            appstream \
+            desktop-file-utils \
+            file \
+            squashfs-tools \
+            zsync
+
+      - name: Build AppImage
+        env:
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+        run: |
+          chmod +x scripts/build-appimage.sh packaging/appimage/AppRun
+          ./scripts/build-appimage.sh
+          ls -lh dist/*.AppImage
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ooze-appimage
+          path: dist/Ooze-*.AppImage
+          if-no-files-found: error
+
+      - name: Attach AppImage to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Ooze-*.AppImage
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
