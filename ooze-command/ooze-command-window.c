@@ -3,8 +3,10 @@
 #include "ooze-button.h"
 #include "ooze-header-bar.h"
 #include "ooze-icons.h"
+#include "ooze-scroll.h"
 #include "ooze-surface.h"
 #include "ooze-toolbar.h"
+#include "ooze-about.h"
 
 #include <adwaita.h>
 #include <vte/vte.h>
@@ -118,7 +120,7 @@ oc_apply_font (OozeCommandWindow *self)
 static void
 oc_update_window_title (OozeCommandWindow *self)
 {
-  const char *title = "Ooze Command";
+  const char *title = "Terminal";
 
   if (self->active_tab)
     {
@@ -137,16 +139,26 @@ oc_update_window_title (OozeCommandWindow *self)
 static void
 oc_refresh_tab_chips (OozeCommandWindow *self)
 {
+  gsize n;
+  gsize i;
+  gsize active = G_MAXSIZE;
   GList *l;
+  g_autofree GtkWidget **peers = NULL;
 
-  for (l = self->tabs; l != NULL; l = l->next)
+  n = g_list_length (self->tabs);
+  if (n == 0)
+    return;
+
+  peers = g_new0 (GtkWidget *, n);
+  for (l = self->tabs, i = 0; l != NULL; l = l->next, i++)
     {
       OozeCommandTab *tab = l->data;
+      peers[i] = tab->chip;
       if (tab == self->active_tab)
-        gtk_widget_add_css_class (tab->chip, "active");
-      else
-        gtk_widget_remove_css_class (tab->chip, "active");
+        active = i;
     }
+
+  ooze_button_set_exclusive (peers, n, active);
 }
 
 static void
@@ -177,18 +189,17 @@ oc_tab_free (OozeCommandTab *tab)
 }
 
 static void
-on_tab_close_clicked (GtkButton *btn, gpointer user_data G_GNUC_UNUSED)
+on_title_changed (GObject        *object,
+                  GParamSpec     *pspec G_GNUC_UNUSED,
+                  OozeCommandTab *tab)
 {
-  OozeCommandTab *tab = g_object_get_data (G_OBJECT (btn), "tab");
-  if (tab && tab->window)
-    oc_close_tab (tab->window, tab);
-}
+  VteTerminal *vte = VTE_TERMINAL (object);
+  const char *title;
 
-static void
-on_title_changed (VteTerminal *vte, OozeCommandTab *tab)
-{
-  const char *title = vte_terminal_get_window_title (vte);
+  if (!tab || !GTK_IS_LABEL (tab->title_label))
+    return;
 
+  title = vte_terminal_get_window_title (vte);
   if (title && *title)
     gtk_label_set_text (GTK_LABEL (tab->title_label), title);
   else
@@ -249,12 +260,21 @@ oc_spawn_shell (VteTerminal *vte)
 }
 
 static void
-on_tab_chip_pressed (GtkGestureClick *gesture G_GNUC_UNUSED,
-                     int              n_press G_GNUC_UNUSED,
-                     double           x G_GNUC_UNUSED,
-                     double           y G_GNUC_UNUSED,
-                     OozeCommandTab  *tab)
+on_tab_close_pressed (GtkGestureClick *gesture,
+                      int              n_press G_GNUC_UNUSED,
+                      double           x G_GNUC_UNUSED,
+                      double           y G_GNUC_UNUSED,
+                      OozeCommandTab  *tab)
 {
+  gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+  if (tab && tab->window)
+    oc_close_tab (tab->window, tab);
+}
+
+static void
+on_tab_chip_clicked (GtkButton *btn, gpointer user_data G_GNUC_UNUSED)
+{
+  OozeCommandTab *tab = g_object_get_data (G_OBJECT (btn), "tab");
   if (tab && tab->window)
     oc_select_tab (tab->window, tab);
 }
@@ -263,40 +283,43 @@ static GtkWidget *
 oc_make_tab_chip (OozeCommandTab *tab)
 {
   GtkWidget *chip;
-  GtkWidget *close_btn;
+  GtkWidget *box;
   GtkWidget *close_img;
-  GtkGesture *click;
+  GtkGesture *close_click;
 
-  /* Box + gesture (not a button) so the close control can be a real button. */
-  chip = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+  /* Real OozeButton so the active glass plate is painted by the kit. */
+  chip = ooze_button_new (OOZE_BUTTON_TOOLBAR);
   gtk_widget_add_css_class (chip, "ooze-command-tab");
-  gtk_widget_add_css_class (chip, "ooze-button");
-  gtk_widget_add_css_class (chip, "ooze-toolbar-btn");
-  gtk_widget_set_halign (chip, GTK_ALIGN_CENTER);
   g_object_set_data (G_OBJECT (chip), "tab", tab);
+
+  box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+  gtk_widget_set_halign (box, GTK_ALIGN_FILL);
+  gtk_widget_set_valign (box, GTK_ALIGN_CENTER);
 
   tab->title_label = gtk_label_new ("Terminal");
   gtk_label_set_ellipsize (GTK_LABEL (tab->title_label), PANGO_ELLIPSIZE_END);
   gtk_label_set_max_width_chars (GTK_LABEL (tab->title_label), 18);
   gtk_widget_add_css_class (tab->title_label, "ooze-button-label");
   gtk_widget_set_hexpand (tab->title_label, TRUE);
-  gtk_box_append (GTK_BOX (chip), tab->title_label);
+  gtk_label_set_xalign (GTK_LABEL (tab->title_label), 0.0);
+  gtk_box_append (GTK_BOX (box), tab->title_label);
 
-  close_btn = gtk_button_new ();
-  gtk_widget_add_css_class (close_btn, "ooze-command-tab-close");
-  gtk_widget_set_valign (close_btn, GTK_ALIGN_CENTER);
+  /* Image + gesture — not a nested GtkButton (illegal inside GtkButton). */
   close_img = gtk_image_new_from_icon_name ("window-close-symbolic");
   gtk_image_set_pixel_size (GTK_IMAGE (close_img), 12);
-  gtk_button_set_child (GTK_BUTTON (close_btn), close_img);
-  g_object_set_data (G_OBJECT (close_btn), "tab", tab);
-  g_signal_connect (close_btn, "clicked", G_CALLBACK (on_tab_close_clicked), NULL);
-  gtk_box_append (GTK_BOX (chip), close_btn);
+  gtk_widget_add_css_class (close_img, "ooze-command-tab-close");
+  gtk_widget_set_valign (close_img, GTK_ALIGN_CENTER);
+  gtk_widget_set_can_target (close_img, TRUE);
+  gtk_widget_set_cursor_from_name (close_img, "pointer");
+  close_click = gtk_gesture_click_new ();
+  gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (close_click),
+                                              GTK_PHASE_CAPTURE);
+  g_signal_connect (close_click, "pressed", G_CALLBACK (on_tab_close_pressed), tab);
+  gtk_widget_add_controller (close_img, GTK_EVENT_CONTROLLER (close_click));
+  gtk_box_append (GTK_BOX (box), close_img);
 
-  click = gtk_gesture_click_new ();
-  gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click),
-                                              GTK_PHASE_BUBBLE);
-  g_signal_connect (click, "pressed", G_CALLBACK (on_tab_chip_pressed), tab);
-  gtk_widget_add_controller (chip, GTK_EVENT_CONTROLLER (click));
+  gtk_button_set_child (GTK_BUTTON (chip), box);
+  g_signal_connect (chip, "clicked", G_CALLBACK (on_tab_chip_clicked), NULL);
 
   return chip;
 }
@@ -341,7 +364,7 @@ oc_add_tab (OozeCommandWindow *self, gboolean select)
   g_signal_connect (tab->terminal, "child-exited",
                     G_CALLBACK (on_child_exited), tab);
 
-  scrolled = gtk_scrolled_window_new ();
+  scrolled = ooze_scrolled_window_new ();
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
   gtk_widget_set_hexpand (tab->terminal, TRUE);
@@ -516,6 +539,17 @@ action_close (GSimpleAction *a G_GNUC_UNUSED,
     gtk_window_destroy (GTK_WINDOW (self));
 }
 
+static void
+action_about (GSimpleAction *a G_GNUC_UNUSED,
+              GVariant      *p G_GNUC_UNUSED,
+              gpointer       user_data)
+{
+  ooze_about_present (GTK_WINDOW (user_data),
+                      "Ooze Command",
+                      "utilities-terminal",
+                      "Terminal emulator for Ooze Desktop.");
+}
+
 static const GActionEntry win_actions[] = {
   { "copy",        action_copy,       NULL, NULL, NULL },
   { "paste",       action_paste,      NULL, NULL, NULL },
@@ -527,6 +561,7 @@ static const GActionEntry win_actions[] = {
   { "new-window",  action_new_window, NULL, NULL, NULL },
   { "new-tab",     action_new_tab,    NULL, NULL, NULL },
   { "close",       action_close,      NULL, NULL, NULL },
+  { "about",       action_about,      NULL, NULL, NULL },
 };
 
 static void
@@ -555,7 +590,7 @@ oc_add_shortcuts (OozeCommandWindow *self)
 static GMenuModel *
 oc_build_menubar (void)
 {
-  GMenu *bar, *file, *edit, *view, *window;
+  GMenu *bar, *file, *edit, *view, *window, *help;
   GMenuItem *item;
 
   bar = g_menu_new ();
@@ -596,6 +631,13 @@ oc_build_menubar (void)
   g_object_unref (item);
   g_object_unref (window);
 
+  help = g_menu_new ();
+  g_menu_append (help, "About Ooze Command", "win.about");
+  item = g_menu_item_new_submenu ("Help", G_MENU_MODEL (help));
+  g_menu_append_item (bar, item);
+  g_object_unref (item);
+  g_object_unref (help);
+
   return G_MENU_MODEL (bar);
 }
 
@@ -631,23 +673,15 @@ oc_ensure_css (void)
     "  min-height: 52px;"
     "}"
     ".ooze-command-tab-strip {"
-    "  spacing: 4px;"
+    "  /* spacing set via gtk_box_set_spacing */"
     "}"
     ".ooze-command-tab {"
     "  min-width: 96px;"
-    "  padding: 4px 8px;"
     "  margin: 0 1px;"
-    "}"
-    ".ooze-command-tab.active {"
-    "  /* OozeButton paints active tint via CSS class */"
     "}"
     ".ooze-command-tab-close {"
     "  min-width: 18px;"
     "  min-height: 18px;"
-    "  padding: 0;"
-    "  background: transparent;"
-    "  border: none;"
-    "  box-shadow: none;"
     "  opacity: 0.65;"
     "}"
     ".ooze-command-tab-close:hover { opacity: 1.0; }"
@@ -692,9 +726,8 @@ ooze_command_window_class_init (OozeCommandWindowClass *klass)
 static void
 ooze_command_window_init (OozeCommandWindow *self)
 {
-  GMenuModel *menubar;
-  GtkWidget  *shell;
-  GtkWidget  *spacer;
+  GtkWidget *shell;
+  GtkWidget *spacer;
 
   self->font_scale = 1.0;
   self->next_tab_id = 1;
@@ -702,7 +735,7 @@ ooze_command_window_init (OozeCommandWindow *self)
   oc_ensure_css ();
   ooze_toolbar_ensure_css ();
 
-  gtk_window_set_title (GTK_WINDOW (self), "Ooze Command");
+  gtk_window_set_title (GTK_WINDOW (self), "Terminal");
   gtk_window_set_icon_name (GTK_WINDOW (self), "org.ooze.Command");
   gtk_window_set_default_size (GTK_WINDOW (self), 800, 520);
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-command");
@@ -714,7 +747,7 @@ ooze_command_window_init (OozeCommandWindow *self)
   self->header = GTK_WIDGET (ooze_header_bar_new ());
   ooze_header_bar_attach_window (OOZE_HEADER_BAR (self->header),
                                  GTK_WINDOW (self));
-  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->header), "Ooze Command");
+  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->header), "Terminal");
   gtk_window_set_titlebar (GTK_WINDOW (self), self->header);
 
   shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -755,11 +788,6 @@ ooze_command_window_init (OozeCommandWindow *self)
   g_signal_connect_swapped (adw_style_manager_get_default (), "notify::dark",
                             G_CALLBACK (gtk_widget_queue_draw), self);
 
-  menubar = oc_build_menubar ();
-  gtk_application_set_menubar (gtk_window_get_application (GTK_WINDOW (self)),
-                               menubar);
-  g_object_unref (menubar);
-
   oc_add_tab (self, TRUE);
 }
 
@@ -767,10 +795,18 @@ GtkWidget *
 ooze_command_window_new (GtkApplication *app)
 {
   OozeCommandWindow *win;
+  GMenuModel *menubar;
 
   win = g_object_new (OOZE_TYPE_COMMAND_WINDOW,
                       "application", app,
                       NULL);
+
+  /* Application is only available after construction — set menubar here. */
+  menubar = oc_build_menubar ();
+  gtk_application_set_menubar (app, menubar);
+  g_object_unref (menubar);
+  gtk_application_window_set_show_menubar (GTK_APPLICATION_WINDOW (win), FALSE);
+
   oc_add_shortcuts (win);
   return GTK_WIDGET (win);
 }

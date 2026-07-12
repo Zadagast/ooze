@@ -1,0 +1,15 @@
+---
+description: Call window frame / decorations Ooze Gel, not chrome
+globs: README.md,ooze-ui/**,ooze-kit/**,spot/**,ooze-command/**,ooze-king/**
+alwaysApply: true
+---
+
+# Ooze Gel naming
+
+In docs, UI copy, commit messages, and comments meant for humans:
+
+- Call the app window frame **Ooze Gel** (header bar, traffic lights, drag, resize).
+- Do **not** say “window chrome”, “Gel chrome”, or “client chrome” in product language.
+- OozeKit surfaces/buttons are **OozeKit** finishes / controls — not “Ooze Gel” and not “chrome”.
+
+Internal compositor identifiers for *foreign*-window decorations (e.g. `MyWindowChrome`) may keep the old code names until renamed; new public wording still uses Ooze Gel for Ooze apps.

@@ -1,6 +1,6 @@
 # Ooze
 
-**Ooze** is a Wayland desktop environment built on [Mutter](https://gitlab.gnome.org/GNOME/mutter). It pairs a cohesive Aqua-inspired shell — menu bar, dock, and **Ooze Gel** window dressing — with first-party GTK4 applications that share one visual system.
+**Ooze** is a Wayland desktop environment built on [Mutter](https://gitlab.gnome.org/GNOME/mutter). It pairs a cohesive Aqua-inspired shell — menu bar, dock, and **Ooze Gel** — with first-party GTK4 applications that share one visual system.
 
 ![Ooze light/dark and magic lamp](docs/ooze-theme-demo.gif)
 
@@ -15,8 +15,8 @@
 | **Shell** | Global menu bar, dock, desktop icons, system appearance |
 | **Spot** | File manager with sidebar, column, and grid views |
 | **Ooze King** | System apps launcher (Spot, Command, Ear, Pak) |
-| **Ooze Command** | Terminal with tabs, Gel chrome, and global menu support |
-| **Ooze Gel** | App window dressing — header bar, traffic lights, drag and resize |
+| **Ooze Command** | Terminal with tabs, Ooze Gel, and global menu support |
+| **Ooze Gel** | App window frame — header bar, traffic lights, drag and resize |
 | **OozeKit** | Shared drawing library for surfaces, pinstripes, buttons, and palette |
 
 Shell and apps use one design language: aluminum surfaces, subtle pinstripes, custom traffic lights, and light/dark mode via `org.gnome.desktop.interface color-scheme`.
@@ -46,7 +46,7 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 ### Ooze Command
 - VTE terminal with multiple tabs and New Tab control
 - Shared Ooze Gel header bar and traffic lights
-- Application menu for the shell global menu
+- Application menu for the shell global menu (GTK apps that export a menubar)
 
 ### Ooze Gel
 - `ooze-header-bar` — titled bar with traffic lights
@@ -57,7 +57,7 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 - `ooze-palette` — light and dark color tables
 - `ooze-draw` — surfaces, pinstripes, separators, button fills
 - `ooze-surface` — header, toolbar, sidebar, and status bar widgets
-- `ooze-button` — toolbar and push-button chrome
+- `ooze-button` — toolbar and push-button finishes
 
 ---
 

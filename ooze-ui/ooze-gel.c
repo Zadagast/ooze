@@ -117,7 +117,7 @@ ooze_shadow_bin_snapshot (GtkWidget   *widget,
   cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
   cairo_fill_preserve (cr);
 
-  /* Outer border – mac-chrome dark gray */
+  /* Outer border – dark gray frame edge */
   cairo_set_source_rgba (cr, 0.33, 0.33, 0.38, 0.92);
   cairo_set_line_width (cr, 1.8);
   cairo_stroke_preserve (cr);
@@ -331,7 +331,7 @@ ooze_gel_ensure_css (void)
 
   provider = gtk_css_provider_new ();
   gtk_css_provider_load_from_string (provider,
-                                     /* GTK window is fully transparent; Cairo draws the rounded chrome. */
+                                     /* GTK window is fully transparent; Cairo draws the rounded Ooze Gel frame. */
                                      "window.ooze-framed-window {"
                                      "  background-color: transparent;"
                                      "  background-image: none;"
@@ -447,7 +447,7 @@ ooze_gel_install_edge_resize (GtkWindow *window)
   if (!child)
     return;
 
-  /* Don't double-wrap the heavy framed chrome path. */
+  /* Don't double-wrap the heavy framed Ooze Gel path. */
   if (g_object_get_data (G_OBJECT (window), "ooze-resize-installed"))
     return;
 

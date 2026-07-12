@@ -1,12 +1,14 @@
 #include "my-window.h"
 
+#include "aqua-chrome.h"
+
 #include <graphene.h>
 #include <meta/compositor.h>
 #include <meta/meta-enums.h>
 #include <meta/window.h>
 
 #define RESIZE_BORDER    8
-#define TITLEBAR_HEIGHT  22
+#define TITLEBAR_HEIGHT  AQUA_TITLEBAR_HEIGHT
 
 typedef struct
 {

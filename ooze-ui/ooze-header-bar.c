@@ -17,7 +17,6 @@ struct _OozeHeaderBar
 {
   GtkBox     parent_instance;
   GtkWidget *traffic;
-  GtkWidget *title_area;
   GtkWidget *title_label;
   GtkWindow *window;
 };
@@ -45,16 +44,12 @@ ooze_header_bar_ensure_css (void)
   gtk_css_provider_load_from_string (provider,
     /* The gradient is drawn in Cairo; GTK must not paint a background here. */
     ".ooze-header-bar {"
-    "  min-height: 22px;"
+    "  min-height: 28px;"
     "  padding: 0;"
     "  border-radius: 0;"
     "  background: none;"
     "  border: none;"
     "  box-shadow: none;"
-    "}"
-    ".ooze-header-title-area {"
-    "  min-height: 22px;"
-    "  background: transparent;"
     "}"
     /* Title colour follows Adwaita so it adapts to light/dark automatically.
      * Weight/size come from ooze_theme_ensure() (Inter 11 regular). */
@@ -119,6 +114,8 @@ static void
 ooze_header_bar_init (OozeHeaderBar *self)
 {
   GtkWidget *overlay;
+  GtkWidget *controls;
+  GtkWidget *spacer;
 
   ooze_header_bar_ensure_css ();
   gtk_orientable_set_orientation (GTK_ORIENTABLE (self),
@@ -132,21 +129,27 @@ ooze_header_bar_init (OozeHeaderBar *self)
                            G_CALLBACK (gtk_widget_queue_draw), self,
                            G_CONNECT_SWAPPED);
 
-  self->traffic = GTK_WIDGET (ooze_traffic_lights_new ());
-  gtk_widget_set_valign (self->traffic, GTK_ALIGN_CENTER);
-  gtk_box_append (GTK_BOX (self), self->traffic);
-
-  self->title_area = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-  gtk_widget_add_css_class (self->title_area, "ooze-header-title-area");
-  gtk_widget_set_hexpand (self->title_area, TRUE);
-  gtk_widget_set_valign (self->title_area, GTK_ALIGN_FILL);
-  gtk_box_append (GTK_BOX (self), self->title_area);
-
+  /* Full-bar overlay so the title centers on the window, not in the
+   * leftover space after the traffic lights (classic Aqua). */
   overlay = gtk_overlay_new ();
   gtk_widget_set_hexpand (overlay, TRUE);
   gtk_widget_set_halign (overlay, GTK_ALIGN_FILL);
   gtk_widget_set_valign (overlay, GTK_ALIGN_FILL);
-  gtk_box_append (GTK_BOX (self->title_area), overlay);
+  gtk_box_append (GTK_BOX (self), overlay);
+
+  controls = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_hexpand (controls, TRUE);
+  gtk_widget_set_halign (controls, GTK_ALIGN_FILL);
+  gtk_widget_set_valign (controls, GTK_ALIGN_FILL);
+  gtk_overlay_set_child (GTK_OVERLAY (overlay), controls);
+
+  self->traffic = GTK_WIDGET (ooze_traffic_lights_new ());
+  gtk_widget_set_valign (self->traffic, GTK_ALIGN_CENTER);
+  gtk_box_append (GTK_BOX (controls), self->traffic);
+
+  spacer = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_hexpand (spacer, TRUE);
+  gtk_box_append (GTK_BOX (controls), spacer);
 
   self->title_label = gtk_label_new ("");
   gtk_widget_add_css_class (self->title_label, "ooze-header-title");
@@ -154,7 +157,9 @@ ooze_header_bar_init (OozeHeaderBar *self)
   gtk_widget_set_halign (self->title_label, GTK_ALIGN_CENTER);
   gtk_widget_set_valign (self->title_label, GTK_ALIGN_CENTER);
   gtk_widget_set_margin_start (self->title_label, 8);
-  gtk_widget_set_margin_end   (self->title_label, 8);
+  gtk_widget_set_margin_end (self->title_label, 8);
+  /* Pass clicks through so traffic lights stay hittable under long titles. */
+  gtk_widget_set_can_target (self->title_label, FALSE);
   gtk_overlay_add_overlay (GTK_OVERLAY (overlay), self->title_label);
 }
 

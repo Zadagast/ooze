@@ -1,6 +1,7 @@
 #include "ooze-theme.h"
 
 #include "ooze-font.h"
+#include "ooze-scroll.h"
 
 #include <gtk/gtk.h>
 
@@ -48,6 +49,9 @@ ooze_theme_ensure (void)
                                               GTK_STYLE_PROVIDER (p),
                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 10);
   g_object_unref (p);
+
+  /* Aqua sliding-window scrollbars (always-visible proportional thumbs). */
+  ooze_scroll_ensure_css ();
 
   loaded = TRUE;
 }

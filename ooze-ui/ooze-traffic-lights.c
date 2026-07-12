@@ -188,7 +188,7 @@ ooze_traffic_lights_init (OozeTrafficLights *self)
 
   gtk_widget_set_cursor_from_name (GTK_WIDGET (self), "default");
   gtk_widget_set_valign (GTK_WIDGET (self), GTK_ALIGN_CENTER);
-  gtk_widget_set_size_request (GTK_WIDGET (self), -1, AQUA_TRAFFIC_LIGHT_SIZE + 4);
+  gtk_widget_set_size_request (GTK_WIDGET (self), -1, AQUA_TITLEBAR_HEIGHT);
 
   gesture = gtk_gesture_click_new ();
   gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (gesture), GDK_BUTTON_PRIMARY);

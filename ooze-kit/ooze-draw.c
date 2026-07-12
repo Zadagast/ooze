@@ -108,49 +108,102 @@ ooze_draw_separator (cairo_t          *cr,
 
 void
 ooze_draw_button_bg (cairo_t          *cr,
-                     int               w,
-                     int               h,
+                     double            x,
+                     double            y,
+                     double            w,
+                     double            h,
                      OozeBtnState      state,
                      const OozePalette *p)
 {
-  /* 2 px inset so the fill doesn't touch widget edges */
-  const double M = 2.0;
-  const double R = 6.0;
+  /* Radius scales slightly with height so compact tiles stay round. */
+  const double R = CLAMP (MIN (8.0, h * 0.28), 5.0, 8.0);
 
   if (state == OOZE_BTN_NORMAL)
+    return;
+
+  if (w < 4.0 || h < 4.0)
     return;
 
   switch (state)
     {
     case OOZE_BTN_PRESSED:
-      cairo_set_source_rgba (cr,
-                             p->accent_r, p->accent_g, p->accent_b, 1.0);
-      rounded_rect (cr, M, M, w - M * 2.0, h - M * 2.0, R);
-      cairo_fill (cr);
-
-      /* crisp border around the blue pill */
-      rounded_rect (cr, M + 0.5, M + 0.5,
-                    w - (M + 0.5) * 2.0, h - (M + 0.5) * 2.0, R);
-      cairo_set_source_rgba (cr,
-                             p->accent_r * 0.55,
-                             p->accent_g * 0.55,
-                             p->accent_b * 0.55,
-                             0.60);
-      cairo_set_line_width (cr, 1.0);
-      cairo_stroke (cr);
-      break;
-
     case OOZE_BTN_ACTIVE:
-      rounded_rect (cr, M, M, w - M * 2.0, h - M * 2.0, R);
-      cairo_set_source_rgba (cr,
-                             p->accent_r, p->accent_g, p->accent_b,
-                             p->btn_active_a);
-      cairo_fill (cr);
+      {
+        /* Dock-like frosted plate. Light mode uses a soft smoke fill so the
+         * plate reads on aluminum toolbars (pure white glass disappears). */
+        const gboolean pressed = (state == OOZE_BTN_PRESSED);
+        const double glass_r = p->dark ? 0.16 : 0.92;
+        const double glass_g = p->dark ? 0.16 : 0.93;
+        const double glass_b = p->dark ? 0.18 : 0.96;
+        const double smoke_a_top = pressed
+          ? (p->dark ? 0.58 : 0.22)
+          : (p->dark ? 0.42 : 0.16);
+        const double smoke_a_mid = pressed
+          ? (p->dark ? 0.44 : 0.16)
+          : (p->dark ? 0.30 : 0.11);
+        const double smoke_a_bot = pressed
+          ? (p->dark ? 0.34 : 0.12)
+          : (p->dark ? 0.22 : 0.08);
+        const double border_hi = p->dark ? 0.34 : 0.72;
+        const double border_lo = p->dark ? 0.28 : 0.30;
+        cairo_pattern_t *grad;
+
+        rounded_rect (cr, x, y, w, h, R);
+
+        if (p->dark)
+          {
+            grad = cairo_pattern_create_linear (0, y, 0, y + h);
+            cairo_pattern_add_color_stop_rgba (grad, 0.0,
+                                               glass_r, glass_g, glass_b, smoke_a_top);
+            cairo_pattern_add_color_stop_rgba (grad, 0.45,
+                                               glass_r, glass_g, glass_b, smoke_a_mid);
+            cairo_pattern_add_color_stop_rgba (grad, 1.0,
+                                               glass_r * 0.92, glass_g * 0.94, glass_b * 0.98,
+                                               smoke_a_bot);
+            cairo_set_source (cr, grad);
+            cairo_fill_preserve (cr);
+            cairo_pattern_destroy (grad);
+          }
+        else
+          {
+            /* Soft translucent white plate + faint smoke so it lifts off #f0f0f0. */
+            grad = cairo_pattern_create_linear (0, y, 0, y + h);
+            cairo_pattern_add_color_stop_rgba (grad, 0.0,
+                                               1.0, 1.0, 1.0, smoke_a_top + 0.28);
+            cairo_pattern_add_color_stop_rgba (grad, 0.5,
+                                               glass_r, glass_g, glass_b, smoke_a_mid + 0.18);
+            cairo_pattern_add_color_stop_rgba (grad, 1.0,
+                                               0.78, 0.80, 0.84, smoke_a_bot + 0.14);
+            cairo_set_source (cr, grad);
+            cairo_fill_preserve (cr);
+            cairo_pattern_destroy (grad);
+
+            cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, pressed ? 0.10 : 0.07);
+            cairo_fill_preserve (cr);
+          }
+
+        /* Light rim */
+        cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, border_hi);
+        cairo_set_line_width (cr, 1.0);
+        cairo_stroke (cr);
+
+        /* Dark hairline — stronger in light mode for readability */
+        rounded_rect (cr, x + 0.5, y + 0.5, w - 1.0, h - 1.0, R);
+        cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, border_lo);
+        cairo_set_line_width (cr, 1.0);
+        cairo_stroke (cr);
+
+        /* Top gloss */
+        rounded_rect (cr, x + 2.0, y + 2.0,
+                      w - 4.0, h * 0.40,
+                      MAX (R - 2.5, 2.0));
+        cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, p->dark ? 0.16 : 0.45);
+        cairo_fill (cr);
+      }
       break;
 
     case OOZE_BTN_HOVER:
-      rounded_rect (cr, M, M, w - M * 2.0, h - M * 2.0, R);
-      /* Light on dark, dark on light */
+      rounded_rect (cr, x, y, w, h, R);
       cairo_set_source_rgba (cr,
                              p->dark ? 1.0 : 0.0,
                              p->dark ? 1.0 : 0.0,
