@@ -10,4 +10,4 @@ Categories=System;PackageManager;
 StartupNotify=true
 StartupWMClass=org.ooze.Pak
 MimeType=application/vnd.flatpak;application/vnd.flatpak.ref;application/vnd.flatpak.repo;
-SingleMainWindow=true
+X-GNOME-SingleWindow=true

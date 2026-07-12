@@ -10,4 +10,4 @@ Categories=Utility;FileManager;
 StartupNotify=true
 StartupWMClass=org.ooze.Spot
 MimeType=inode/directory;
-SingleMainWindow=false
+X-GNOME-SingleWindow=false
