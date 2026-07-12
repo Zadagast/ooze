@@ -2,7 +2,7 @@
 
 **Ooze** is an experimental desktop environment built on [Mutter](https://gitlab.gnome.org/GNOME/mutter)’s Wayland compositor. It explores a cohesive Aqua-inspired shell — menu bar, dock, traffic-light window chrome — with first-party GTK4 apps that share one drawing system.
 
-![Ooze light and dark mode](docs/ooze-light-dark.gif)
+![Ooze light and dark mode](docs/ooze-theme-demo.gif)
 
 *Light ↔ dark mode with Spot (file manager) and Ooze Command (terminal).*
 
