@@ -46,13 +46,14 @@ ooze_surface_ensure_css (void)
      * Status bar chrome stays edge-to-edge (connected to the window frame).
      * Only children are inset so glyphs clear the CSD corner radius.
      */
+    /* Match AQUA_STATUSBAR_HEIGHT / title-bar strip (28px). */
     ".ooze-surface-statusbar {"
-    "  min-height: 24px;"
+    "  min-height: 28px;"
     "  padding: 0;"
     "}"
     ".ooze-surface-statusbar > * {"
-    "  margin-top: 3px;"
-    "  margin-bottom: 8px;"
+    "  margin-top: 4px;"
+    "  margin-bottom: 4px;"
     "  margin-left: 10px;"
     "  margin-right: 10px;"
     "}");

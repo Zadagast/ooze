@@ -1,7 +1,7 @@
 [Desktop Entry]
-Name=Ooze Pak
+Name=Software
 GenericName=Package Manager
-Comment=Install and remove Flatpak apps on Ooze
+Comment=Ooze Pak — install and remove Flatpak apps
 Exec=ooze-pak %U
 Icon=system-software-install
 Terminal=false

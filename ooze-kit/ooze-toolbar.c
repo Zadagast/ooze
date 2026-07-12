@@ -24,16 +24,20 @@ ooze_toolbar_ensure_css (void)
   gtk_css_provider_load_from_string (p,
     ".ooze-toolbar {"
     "  background: none;"
-    "  min-height: 52px;"
     "  padding: 4px 8px;"
+    "}"
+    ".ooze-toolbar-group {"
+    "  padding: 0 2px;"
     "}"
     ".ooze-toolbar separator {"
     "  background: @borders;"
     "  min-width: 1px;"
-    "  margin: 4px 2px;"
+    "  margin: 6px 4px;"
     "}"
-    /* All chrome buttons: color icon + label (Computer / Home pattern). */
-    ".ooze-toolbar-btn { min-width: 52px; }"
+    /* Width floor only — height comes from labeled tiles. */
+    ".ooze-toolbar-btn {"
+    "  min-width: 48px;"
+    "}"
     ".ooze-toolbar-btn:active { color: #ffffff; }"
     ".ooze-settings-tile {"
     "  min-width: 112px;"
@@ -59,11 +63,6 @@ ooze_toolbar_ensure_css (void)
     ".ooze-launcher-grid {"
     "  padding: 28px 24px 36px 24px;"
     "}"
-    /* Spot Back / Forward: slightly wider nav tiles. */
-    ".ooze-nav-btn {"
-    "  min-width: 64px;"
-    "  padding: 4px 6px;"
-    "}"
     ".ooze-toolbar-btn:disabled,"
     ".ooze-nav-btn:disabled {"
     "  opacity: 0.42;"
@@ -82,7 +81,47 @@ ooze_toolbar_new (void)
 
   ooze_toolbar_ensure_css ();
   toolbar = ooze_surface_new (OOZE_SURFACE_TOOLBAR, GTK_ORIENTATION_HORIZONTAL);
-  gtk_box_set_spacing (GTK_BOX (toolbar), 2);
+  gtk_box_set_spacing (GTK_BOX (toolbar), 0);
   gtk_widget_add_css_class (toolbar, "ooze-toolbar");
   return toolbar;
+}
+
+GtkWidget *
+ooze_toolbar_add_group (GtkWidget *toolbar)
+{
+  GtkWidget *group;
+
+  g_return_val_if_fail (GTK_IS_BOX (toolbar), NULL);
+
+  group = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 2);
+  gtk_widget_add_css_class (group, "ooze-toolbar-group");
+  gtk_widget_set_valign (group, GTK_ALIGN_CENTER);
+  gtk_box_append (GTK_BOX (toolbar), group);
+  return group;
+}
+
+GtkWidget *
+ooze_toolbar_add_separator (GtkWidget *toolbar)
+{
+  GtkWidget *sep;
+
+  g_return_val_if_fail (GTK_IS_BOX (toolbar), NULL);
+
+  sep = gtk_separator_new (GTK_ORIENTATION_VERTICAL);
+  gtk_widget_set_valign (sep, GTK_ALIGN_FILL);
+  gtk_box_append (GTK_BOX (toolbar), sep);
+  return sep;
+}
+
+GtkWidget *
+ooze_toolbar_add_spacer (GtkWidget *toolbar)
+{
+  GtkWidget *spacer;
+
+  g_return_val_if_fail (GTK_IS_BOX (toolbar), NULL);
+
+  spacer = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_hexpand (spacer, TRUE);
+  gtk_box_append (GTK_BOX (toolbar), spacer);
+  return spacer;
 }

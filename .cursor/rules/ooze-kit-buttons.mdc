@@ -1,0 +1,22 @@
+---
+description: OozeKit button and toolbar control rules
+globs: ooze-kit/**,spot/**,ooze-king/**,ooze-ear/**,ooze-command/**
+alwaysApply: false
+---
+
+# OozeKit buttons
+
+Toolbar / settings controls MUST follow Spot’s Computer / Home / Favorites pattern:
+
+- Full-color (non-symbolic) theme icons — prefer names without `-symbolic`
+- Caption text centered **below** the icon
+- Use `ooze_button_new_labeled()` (or `ooze_button_new_toolbar()`) — never icon-only symbolic pills for app controls
+- Icon sizes come from `ooze-icons.h`: toolbar **32**, sidebar **24**, list **16**, grid **48**. Always use those constants / `ooze_icon_image_new()`.
+
+Do **not** use symbolic-only icon buttons for OozeKit controls. Symbolic icons are a last-resort fallback only when no color icon exists.
+
+## Exclusive toggles
+
+Pairs like Spot **Grid** / **Columns** are two labeled OozeKit toolbar tiles. Use `ooze_button_set_toggled()` so exactly one peer is active (clear dock-like glass plate). Do not invent icon-only segmented pills or flat blue selection boxes.
+
+Spot view modes: **Grid** and **Columns** only; **Grid** is the default.

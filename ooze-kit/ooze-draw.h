@@ -26,8 +26,8 @@ typedef enum
 {
   OOZE_BTN_NORMAL  = 0,   /* no fill — fully transparent */
   OOZE_BTN_HOVER   = 1,   /* subtle tint */
-  OOZE_BTN_ACTIVE  = 2,   /* accent tint (toggled-on) */
-  OOZE_BTN_PRESSED = 3,   /* solid accent + dark border */
+  OOZE_BTN_ACTIVE  = 2,   /* clear dock-like glass plate (toggled-on) */
+  OOZE_BTN_PRESSED = 3,   /* denser glass plate while pressed */
 } OozeBtnState;
 
 /*
@@ -58,14 +58,16 @@ void ooze_draw_separator (cairo_t          *cr,
                           const OozePalette *p);
 
 /*
- * ooze_draw_button_bg – rounded-rect button fill.
+ * ooze_draw_button_bg – rounded glass / hover fill at an explicit rect.
  *
- * Draws inside a 2 px inset margin (M) so the fill doesn't clip at the
- * widget boundary.  OOZE_BTN_NORMAL is a no-op; callers may skip the
- * Cairo context creation in that case.
+ * Callers pass the plate rectangle in widget coordinates. OozeButton passes
+ * its allocation inset by a fixed edge so the glass always frames the full
+ * control. OOZE_BTN_NORMAL is a no-op.
  */
 void ooze_draw_button_bg (cairo_t          *cr,
-                          int               w,
-                          int               h,
+                          double            x,
+                          double            y,
+                          double            w,
+                          double            h,
                           OozeBtnState      state,
                           const OozePalette *p);

@@ -76,6 +76,7 @@ executable('my-desktop',
   'src/my-dock.c',
   'src/my-desktop-icons.c',
   'src/my-aqua-menu.c',
+  'src/my-global-menu.c',
   'src/my-theme.c',
   'src/my-window.c',
   'src/my-magic-lamp.c',
@@ -126,6 +127,9 @@ ooze_kit_sources = [
   'ooze-kit/ooze-icons.c',
   'ooze-kit/ooze-toolbar.c',
   'ooze-kit/ooze-theme.c',
+  'ooze-kit/ooze-about.c',
+  'ooze-kit/ooze-pinline.c',
+  'ooze-kit/ooze-scroll.c',
 ]
 
 # Shared source list for ooze-ui widgets (header bar, traffic lights, Ooze Gel)
@@ -217,6 +221,10 @@ if gtk4_dep.found() and adw_dep.found()
       c_args: ooze_app_c_args,
       install: true,
     )
+
+    install_data('data/org.ooze.Command.desktop',
+      install_dir: get_option('datadir') / 'applications',
+    )
   else
     warning('Ooze Command skipped: install libvte-2.91-gtk4-dev')
   endif
@@ -242,6 +250,26 @@ if gtk4_dep.found() and adw_dep.found()
 
   install_data('data/org.ooze.King.desktop',
     install_dir: get_option('datadir') / 'applications',
+  )
+
+  # Dev gallery for OozeKit widgets — not installed as a desktop product.
+  executable('ooze-kit-factory',
+    'ooze-kit-factory/main.c',
+    'ooze-kit-factory/ooze-kit-factory-window.c',
+    'src/my-icons.c',
+    'src/my-icons-gtk.c',
+    ooze_ui_sources,
+    ooze_kit_sources,
+    include_directories: ooze_app_inc + [include_directories('ooze-kit-factory')],
+    dependencies: [
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: false,
   )
 
   pipewire_dep = dependency('libpipewire-0.3', required: false)

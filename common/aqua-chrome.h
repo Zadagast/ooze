@@ -5,10 +5,12 @@
 
 G_BEGIN_DECLS
 
-#define AQUA_TITLEBAR_HEIGHT   22
-#define AQUA_TRAFFIC_LIGHT_SIZE 12
-#define AQUA_TRAFFIC_LIGHT_GAP  7
-#define AQUA_TRAFFIC_LIGHT_MARGIN 8
+/* Shared chrome strip height — title bar and status bar stay matched. */
+#define AQUA_TITLEBAR_HEIGHT      28
+#define AQUA_STATUSBAR_HEIGHT     AQUA_TITLEBAR_HEIGHT
+#define AQUA_TRAFFIC_LIGHT_SIZE   14
+#define AQUA_TRAFFIC_LIGHT_GAP    8
+#define AQUA_TRAFFIC_LIGHT_MARGIN 10
 
 #define AQUA_TRAFFIC_CLOSE_R 1.0
 #define AQUA_TRAFFIC_CLOSE_G 0.373

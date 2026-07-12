@@ -1,6 +1,7 @@
 #include "my-plugin.h"
 #include "my-aqua-draw.h"
 #include "my-aqua-menu.h"
+#include "my-global-menu.h"
 #include "my-desktop-icons.h"
 #include "my-dock.h"
 #include "my-magic-lamp.h"
@@ -58,7 +59,9 @@ struct _MyPlugin
   ClutterActor *background_group;
   ClutterActor *panel;
   ClutterActor *menu_icon;
-  ClutterActor *menu_bar_labels[6];
+  ClutterActor *menu_bar_labels[MY_GLOBAL_MENU_MAX_TOP];
+  guint         n_menu_bar_labels;
+  gboolean      menu_bar_from_app;
   ClutterActor *clock_label;
   ClutterActor *aqua_dock;
   ClutterActor *aqua_dock_plate;
@@ -67,6 +70,7 @@ struct _MyPlugin
   MetaMonitorManager *monitor_manager;
   MetaContext *context;
   MyAquaMenu *menu_popup;
+  MyGlobalMenu *global_menu;
   gulong monitors_changed_handler;
   gulong workspace_added_handler;
   guint clock_timer;
@@ -117,6 +121,15 @@ typedef enum
 
 static void my_plugin_menu_action (gpointer user_data, int action_id);
 static void my_plugin_show_bar_menu (MyPlugin *plugin, gsize menu_index, ClutterActor *anchor);
+static void my_plugin_rebuild_menu_bar (MyPlugin *plugin);
+static void my_plugin_on_global_menu_changed (gpointer user_data);
+static ClutterActor *my_plugin_create_menu_bar_item (ClutterActor *ref_actor,
+                                                     const char   *font_desc,
+                                                     const char   *text,
+                                                     gfloat        r,
+                                                     gfloat        g,
+                                                     gfloat        b);
+static void my_plugin_layout_menu_labels (MyPlugin *plugin);
 static MetaWindow *my_plugin_get_focus_window (MyPlugin *plugin);
 
 static MetaWindow *
@@ -168,6 +181,13 @@ my_plugin_menu_action (gpointer user_data,
 
   window = my_plugin_get_focus_window (plugin);
 
+  if (action_id >= MY_MENU_APP_ACTION_BASE)
+    {
+      if (plugin->global_menu)
+        my_global_menu_activate (plugin->global_menu, action_id);
+      return;
+    }
+
   switch (action_id)
     {
     case MY_MENU_FILE_NEW_SPOT:
@@ -203,7 +223,7 @@ my_plugin_menu_action (gpointer user_data,
       break;
 
     case MY_MENU_GO_APPLICATIONS:
-      my_dock_launch_spot_path (plugin->context, "/usr/share/applications");
+      my_dock_launch_pak (plugin->context);
       break;
 
     case MY_MENU_WINDOW_MINIMIZE:
@@ -310,7 +330,7 @@ on_menu_bar_pressed (ClutterActor *actor,
   if (clutter_event_get_button (event) != CLUTTER_BUTTON_PRIMARY)
     return CLUTTER_EVENT_PROPAGATE;
 
-  for (menu_index = 0; menu_index < G_N_ELEMENTS (plugin->menu_bar_labels); menu_index++)
+  for (menu_index = 0; menu_index < plugin->n_menu_bar_labels; menu_index++)
     {
       if (plugin->menu_bar_labels[menu_index] == actor)
         {
@@ -370,6 +390,23 @@ my_plugin_show_bar_menu (MyPlugin     *plugin,
 {
   MetaWindow *focus;
   gboolean has_focus;
+  MyAquaMenuEntry *app_entries = NULL;
+  gsize n_app_entries = 0;
+
+  if (plugin->menu_bar_from_app &&
+      plugin->global_menu &&
+      my_global_menu_fill_entries (plugin->global_menu,
+                                   (guint) menu_index,
+                                   &app_entries,
+                                   &n_app_entries) &&
+      n_app_entries > 0)
+    {
+      my_aqua_menu_toggle_for_anchor (plugin->menu_popup,
+                                      anchor,
+                                      app_entries,
+                                      n_app_entries);
+      return;
+    }
 
   focus = my_plugin_get_focus_window (plugin);
   has_focus = focus != NULL;
@@ -636,42 +673,18 @@ my_plugin_refresh_theme (MyPlugin *plugin)
   MetaDisplay *display;
   GList *windows;
   GList *l;
-  g_autoptr (ClutterContent) ooze_content = NULL;
-  const MyAquaPalette *palette;
-  gsize i;
 
   if (!plugin->panel)
     return;
 
   display = meta_plugin_get_display (META_PLUGIN (plugin));
-  palette = my_theme_get_palette (NULL);
 
   plugin->last_panel_width = 0;
   plugin->last_dock_plate_width = 0;
 
   my_plugin_refresh_ooze_button (plugin);
+  my_plugin_rebuild_menu_bar (plugin);
 
-  for (i = 0; i < G_N_ELEMENTS (menu_bar_items); i++)
-    {
-      ClutterActor *bin = plugin->menu_bar_labels[i];
-      ClutterActor *label;
-
-      if (!bin)
-        continue;
-
-      label = clutter_actor_get_first_child (bin);
-      if (!label)
-        continue;
-
-      my_plugin_set_text_label (label,
-                                  OOZE_UI_FONT,
-                                  menu_bar_items[i],
-                                  (gfloat) palette->menu_text_r,
-                                  (gfloat) palette->menu_text_g,
-                                  (gfloat) palette->menu_text_b);
-    }
-
-  my_plugin_layout_menu_labels (plugin);
   my_plugin_update_clock (plugin);
   my_plugin_update_layout (plugin, display);
 
@@ -770,6 +783,93 @@ my_plugin_create_menu_bar_item (ClutterActor *ref_actor,
   clutter_actor_show (label);
 
   return bin;
+}
+
+static void
+my_plugin_clear_menu_bar_labels (MyPlugin *plugin)
+{
+  guint i;
+
+  for (i = 0; i < plugin->n_menu_bar_labels; i++)
+    {
+      if (plugin->menu_bar_labels[i])
+        {
+          clutter_actor_destroy (plugin->menu_bar_labels[i]);
+          plugin->menu_bar_labels[i] = NULL;
+        }
+    }
+  plugin->n_menu_bar_labels = 0;
+}
+
+static void
+my_plugin_rebuild_menu_bar (MyPlugin *plugin)
+{
+  const MyAquaPalette *palette;
+  guint n;
+  guint i;
+  gboolean from_app;
+
+  if (!plugin->panel)
+    return;
+
+  palette = my_theme_get_palette (NULL);
+  from_app = plugin->global_menu &&
+             my_global_menu_has_app_menu (plugin->global_menu);
+  n = from_app ? my_global_menu_get_n_top (plugin->global_menu)
+               : G_N_ELEMENTS (menu_bar_items);
+  if (n > MY_GLOBAL_MENU_MAX_TOP)
+    n = MY_GLOBAL_MENU_MAX_TOP;
+
+  my_plugin_clear_menu_bar_labels (plugin);
+  plugin->menu_bar_from_app = from_app;
+
+  for (i = 0; i < n; i++)
+    {
+      const char *text;
+      ClutterActor *label;
+
+      if (from_app)
+        {
+          text = my_global_menu_get_top_label (plugin->global_menu, i);
+          if (!text)
+            text = "Menu";
+        }
+      else
+        text = menu_bar_items[i];
+
+      label = my_plugin_create_menu_bar_item (plugin->panel,
+                                              OOZE_UI_FONT,
+                                              text,
+                                              (gfloat) palette->menu_text_r,
+                                              (gfloat) palette->menu_text_g,
+                                              (gfloat) palette->menu_text_b);
+      g_signal_connect (label,
+                        "button-press-event",
+                        G_CALLBACK (on_menu_bar_pressed),
+                        plugin);
+
+      /* Keep labels before the clock: insert after ooze button. */
+      if (plugin->clock_label)
+        clutter_actor_insert_child_below (plugin->panel, label, plugin->clock_label);
+      else
+        clutter_actor_add_child (plugin->panel, label);
+
+      plugin->menu_bar_labels[i] = label;
+    }
+
+  plugin->n_menu_bar_labels = n;
+  my_plugin_layout_menu_labels (plugin);
+}
+
+static void
+my_plugin_on_global_menu_changed (gpointer user_data)
+{
+  MyPlugin *plugin = MY_PLUGIN (user_data);
+
+  if (plugin->menu_popup && my_aqua_menu_is_open (plugin->menu_popup))
+    my_aqua_menu_close (plugin->menu_popup);
+
+  my_plugin_rebuild_menu_bar (plugin);
 }
 
 static void
@@ -1119,7 +1219,7 @@ my_plugin_apply_window_chrome (MyPlugin         *plugin,
     return;
 
   /*
-   * Ooze apps (org.ooze.*) draw their own GTK window dressing via Ooze Gel,
+   * Ooze apps (org.ooze.*) draw their own GTK window frame via Ooze Gel,
    * so we must not add a second compositor-level titlebar on top.
    * All other apps – including CSD Wayland clients like Inkscape – get
    * the Aqua traffic-light overlay drawn by the compositor.
@@ -1499,12 +1599,13 @@ my_plugin_setup_panel (MyPlugin       *plugin,
   g_autoptr (ClutterContent) ooze_content = NULL;
   int ooze_width = 1;
   int ooze_height = 1;
-  gsize i;
+  const MyAquaPalette *palette;
 
   if (plugin->panel)
     return;
 
   stage = CLUTTER_ACTOR (meta_compositor_get_stage (compositor));
+  palette = my_theme_get_palette (NULL);
 
   plugin->panel = clutter_actor_new ();
   clutter_actor_set_reactive (plugin->panel, TRUE);
@@ -1542,36 +1643,15 @@ my_plugin_setup_panel (MyPlugin       *plugin,
                     G_CALLBACK (on_ooze_button_pressed),
                     plugin);
 
-  {
-    const MyAquaPalette *palette = my_theme_get_palette (NULL);
-
-    for (i = 0; i < G_N_ELEMENTS (menu_bar_items); i++)
-      {
-        ClutterActor *label;
-
-        label = my_plugin_create_menu_bar_item (plugin->panel,
-                                                OOZE_UI_FONT,
-                                                menu_bar_items[i],
-                                                (gfloat) palette->menu_text_r,
-                                                (gfloat) palette->menu_text_g,
-                                                (gfloat) palette->menu_text_b);
-        g_signal_connect (label,
-                          "button-press-event",
-                          G_CALLBACK (on_menu_bar_pressed),
-                          plugin);
-        clutter_actor_add_child (plugin->panel, label);
-        plugin->menu_bar_labels[i] = label;
-      }
-
-    plugin->clock_label = my_plugin_create_text_label (plugin->panel,
-                                                       OOZE_UI_FONT,
-                                                       "Sat Jan  1  12:00 PM",
-                                                       (gfloat) palette->menu_text_r,
-                                                       (gfloat) palette->menu_text_g,
-                                                       (gfloat) palette->menu_text_b);
-  }
+  plugin->clock_label = my_plugin_create_text_label (plugin->panel,
+                                                     OOZE_UI_FONT,
+                                                     "Sat Jan  1  12:00 PM",
+                                                     (gfloat) palette->menu_text_r,
+                                                     (gfloat) palette->menu_text_g,
+                                                     (gfloat) palette->menu_text_b);
   clutter_actor_add_child (plugin->panel, plugin->clock_label);
-  my_plugin_layout_menu_labels (plugin);
+
+  my_plugin_rebuild_menu_bar (plugin);
   my_plugin_update_clock (plugin);
 
   if (!plugin->clock_timer)
@@ -1829,6 +1909,15 @@ my_plugin_init_ui (MyPlugin *plugin)
 
   my_theme_get_default ();
   my_theme_watch (NULL, my_plugin_on_theme_changed, plugin);
+
+  if (!plugin->global_menu)
+    {
+      plugin->global_menu = my_global_menu_new (display);
+      my_global_menu_set_changed_callback (plugin->global_menu,
+                                           my_plugin_on_global_menu_changed,
+                                           plugin);
+      my_plugin_rebuild_menu_bar (plugin);
+    }
 }
 
 static void
@@ -2201,10 +2290,15 @@ my_plugin_dispose (GObject *object)
   my_aqua_menu_destroy (plugin->menu_popup);
   plugin->menu_popup = NULL;
 
+  my_global_menu_free (plugin->global_menu);
+  plugin->global_menu = NULL;
+
   g_clear_pointer (&plugin->panel, clutter_actor_destroy);
   plugin->menu_icon = NULL;
   plugin->clock_label = NULL;
   memset (plugin->menu_bar_labels, 0, sizeof plugin->menu_bar_labels);
+  plugin->n_menu_bar_labels = 0;
+  plugin->menu_bar_from_app = FALSE;
   g_clear_pointer (&plugin->aqua_dock, clutter_actor_destroy);
   plugin->aqua_dock_plate = NULL;
   plugin->aqua_dock_icons = NULL;

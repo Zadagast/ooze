@@ -368,7 +368,7 @@ static const char *pak_dock_icon_names[] = {
   NULL,
 };
 
-static void
+void
 my_dock_launch_pak (MetaContext *context)
 {
   g_autoptr (GSubprocessLauncher) launcher = NULL;
@@ -844,18 +844,28 @@ on_app_launcher_pressed (ClutterActor *actor,
   MetaContext *context;
   const char *app_id;
   MyDockLaunchFn launch;
+  guint button;
 
-  if (clutter_event_get_button (event) != CLUTTER_BUTTON_PRIMARY)
-    return CLUTTER_EVENT_PROPAGATE;
-
+  button = clutter_event_get_button (event);
   display = g_object_get_data (G_OBJECT (actor), "launch-display");
   context = g_object_get_data (G_OBJECT (actor), "launch-context");
   app_id = g_object_get_data (G_OBJECT (actor), "app-id");
   launch = g_object_get_data (G_OBJECT (actor), "launch-fn");
 
-  if (display && context && app_id && launch)
-    my_dock_handle_app_click (display, context, app_id, launch);
+  if (!display || !context || !app_id || !launch)
+    return CLUTTER_EVENT_STOP;
 
+  /* Middle-click always opens a new window. */
+  if (button == CLUTTER_BUTTON_MIDDLE)
+    {
+      launch (context);
+      return CLUTTER_EVENT_STOP;
+    }
+
+  if (button != CLUTTER_BUTTON_PRIMARY)
+    return CLUTTER_EVENT_PROPAGATE;
+
+  my_dock_handle_app_click (display, context, app_id, launch);
   return CLUTTER_EVENT_STOP;
 }
 

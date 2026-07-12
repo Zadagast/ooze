@@ -1,0 +1,19 @@
+---
+description: OozeKit Inter 11pt regular typography
+globs: ooze-kit/**,ooze-ui/**,spot/**,ooze-king/**,ooze-ear/**,ooze-command/**,common/ooze-font.h
+alwaysApply: false
+---
+
+# OozeKit typography
+
+Default UI type for OozeKit apps and shell chrome:
+
+- **Family:** Inter
+- **Size:** 11pt
+- **Weight:** 400 (regular)
+
+Do not use medium/semibold/bold in kit or app chrome CSS unless the product explicitly needs emphasis. Opt in with the `.ooze-emphasis` class (weight 600) or `OOZE_UI_FONT_EMPHASIS` for Pango.
+
+Call `ooze_theme_ensure()` once at app startup. Font tokens live in `common/ooze-font.h`.
+
+Terminal text (Ooze Command VTE) stays monospace — only chrome uses Inter.

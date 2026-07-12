@@ -1,6 +1,7 @@
 #include "ooze-sound-pane.h"
 #include "ooze-ear-pw.h"
 
+#include "ooze-scroll.h"
 #include "ooze-surface.h"
 
 #include <adwaita.h>
@@ -722,7 +723,7 @@ make_device_page (OozeSoundPane *self,
   gtk_widget_set_vexpand (frame, TRUE);
   gtk_widget_set_hexpand (frame, TRUE);
 
-  scrolled = gtk_scrolled_window_new ();
+  scrolled = ooze_scrolled_window_new ();
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
   gtk_widget_set_vexpand (scrolled, TRUE);
@@ -763,7 +764,7 @@ make_apps_page (OozeSoundPane *self)
   frame = gtk_frame_new (NULL);
   gtk_widget_set_vexpand (frame, TRUE);
 
-  scrolled = gtk_scrolled_window_new ();
+  scrolled = ooze_scrolled_window_new ();
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
   gtk_widget_set_vexpand (scrolled, TRUE);
