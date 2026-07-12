@@ -48,15 +48,13 @@ c_args += '-DOOZE_DATA_DIR="@0@"'.format(ooze_data_dir)
 elementary_icons = meson.project_source_root() / 'data' / 'icons' / 'elementary' / 'index.theme'
 install_icons_script = meson.project_source_root() / 'scripts' / 'install-elementary-icons.sh'
 
-if not fs.exists(elementary_icons)
-  run_command(find_program('bash'), install_icons_script, check: true)
-endif
+# Elementary icons are fetched on demand by the custom target, not at configure time.
 
 custom_target(
   'elementary-icons',
   output: 'elementary-icons.stamp',
   command: [find_program('bash'), install_icons_script, '@OUTPUT@'],
-  build_by_default: true,
+  build_by_default: false,
 )
 
 if fs.exists(elementary_icons)

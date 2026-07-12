@@ -1,0 +1,73 @@
+# Compile-only CI for pull requests and main branch pushes.
+#
+# The Ubuntu 26.04 container provides the Mutter 18 development packages
+# required by Ooze while keeping setup network-free for icon assets.
+
+name: CI
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compile (Ubuntu 26.04)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:26.04
+      env:
+        DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            git
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            meson \
+            ninja-build \
+            pkg-config \
+            libmutter-18-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libcairo2-dev \
+            libvte-2.91-gtk4-dev \
+            libgdk-pixbuf-2.0-dev \
+            libpng-dev \
+            libpipewire-0.3-dev \
+            desktop-file-utils
+
+      - name: Configure
+        run: meson setup build
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Validate desktop files
+        run: |
+          desktop-file-validate data/*.desktop
+          desktop-file-validate data/applications/*.desktop
