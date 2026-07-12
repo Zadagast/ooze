@@ -6,5 +6,6 @@
 - [x] Implement window mapping (`map` hook)
 - [x] Build dock with app launchers (Spot file tracking first)
 - [x] Wire Spot dock launcher and Super+E shortcut
+- [x] Implement Spot file manager (GTK4/libadwaita)
 - [ ] Add remaining keyboard shortcuts (e.g., spawn a terminal)
 - [x] Implement window dragging and resizing

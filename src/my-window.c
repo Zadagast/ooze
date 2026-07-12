@@ -36,6 +36,15 @@ my_window_is_client_decorated (MetaWindow *window)
   return FALSE;
 }
 
+gboolean
+my_window_uses_ooze_client_chrome (MetaWindow *window)
+{
+  const char *app_id;
+
+  app_id = meta_window_get_gtk_application_id (window);
+  return app_id && g_str_has_prefix (app_id, "org.ooze.");
+}
+
 static void
 my_window_event_stage_point (ClutterEvent     *event,
                              graphene_point_t *point)

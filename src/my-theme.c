@@ -154,6 +154,20 @@ my_theme_get_palette (MyTheme *theme)
 }
 
 void
+my_theme_toggle (MyTheme *theme)
+{
+  if (!theme)
+    theme = my_theme_get_default ();
+
+  /* Write to GSettings; the "changed::color-scheme" signal handler will
+   * call my_theme_apply() which fires all registered watchers so the panel,
+   * dock, and wallpaper repaint themselves with the new palette immediately. */
+  g_settings_set_string (theme->settings,
+                         "color-scheme",
+                         theme->dark ? "prefer-light" : "prefer-dark");
+}
+
+void
 my_theme_watch (MyTheme               *theme,
                 MyThemeChangedCallback callback,
                 gpointer               user_data)

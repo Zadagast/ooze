@@ -1,11 +1,14 @@
 #include "my-aqua-draw.h"
 #include "my-theme.h"
 
+#include "../common/aqua-chrome.h"
+
 #define __COGL_H_INSIDE__
 #include "cogl/cogl-texture-2d.h"
 #undef __COGL_H_INSIDE__
 
 #include <cairo/cairo.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
 #include <math.h>
 #include <pango/pangocairo.h>
 
@@ -72,9 +75,9 @@ my_aqua_surface_to_texture (ClutterActor     *ref_actor,
   return texture;
 }
 
-static ClutterContent *
-my_aqua_content_from_surface (ClutterActor     *ref_actor,
-                              cairo_surface_t  *surface)
+ClutterContent *
+my_aqua_content_from_surface (ClutterActor    *ref_actor,
+                              cairo_surface_t *surface)
 {
   g_autoptr (CoglTexture) texture = NULL;
 
@@ -83,6 +86,168 @@ my_aqua_content_from_surface (ClutterActor     *ref_actor,
     return NULL;
 
   return clutter_texture_content_new_from_texture (texture, NULL);
+}
+
+static char *
+my_aqua_find_data_path (const char *filename)
+{
+  const char *env_dir;
+  g_autofree char *path = NULL;
+  static const char *fallback_dirs[] = {
+    "data",
+    "../data",
+    NULL,
+  };
+  gsize i;
+
+  env_dir = g_getenv ("OOZE_DATA_DIR");
+  if (env_dir && env_dir[0] != '\0')
+    {
+      path = g_build_filename (env_dir, filename, NULL);
+      if (g_file_test (path, G_FILE_TEST_EXISTS))
+        return g_steal_pointer (&path);
+    }
+
+#ifdef OOZE_DATA_DIR
+  path = g_build_filename (OOZE_DATA_DIR, filename, NULL);
+  if (g_file_test (path, G_FILE_TEST_EXISTS))
+    return g_steal_pointer (&path);
+#endif
+
+  for (i = 0; fallback_dirs[i] != NULL; i++)
+    {
+      path = g_build_filename (fallback_dirs[i], filename, NULL);
+      if (g_file_test (path, G_FILE_TEST_EXISTS))
+        return g_steal_pointer (&path);
+    }
+
+  return NULL;
+}
+
+static GdkPixbuf *
+my_aqua_load_data_pixbuf (const char *filename,
+                          int         width,
+                          int         height)
+{
+  g_autofree char *path = my_aqua_find_data_path (filename);
+  g_autoptr (GError) error = NULL;
+
+  if (!path)
+    return NULL;
+
+  return gdk_pixbuf_new_from_file_at_scale (path,
+                                            width,
+                                            height,
+                                            TRUE,
+                                            &error);
+}
+
+static ClutterContent *
+my_aqua_content_from_pixbuf (ClutterActor *ref_actor,
+                             GdkPixbuf    *pixbuf)
+{
+  ClutterContext *clutter_context;
+  ClutterBackend *backend;
+  CoglContext *cogl_context;
+  CoglTexture *texture;
+  g_autoptr (GError) error = NULL;
+  int width;
+  int height;
+  int rowstride;
+  CoglPixelFormat format;
+
+  clutter_context = my_aqua_get_context (ref_actor);
+  if (!clutter_context)
+    return NULL;
+
+  backend = clutter_context_get_backend (clutter_context);
+  cogl_context = clutter_backend_get_cogl_context (backend);
+  if (!cogl_context)
+    return NULL;
+
+  width = gdk_pixbuf_get_width (pixbuf);
+  height = gdk_pixbuf_get_height (pixbuf);
+  rowstride = gdk_pixbuf_get_rowstride (pixbuf);
+  format = gdk_pixbuf_get_has_alpha (pixbuf)
+    ? COGL_PIXEL_FORMAT_RGBA_8888
+    : COGL_PIXEL_FORMAT_RGB_888;
+
+  texture = cogl_texture_2d_new_from_data (cogl_context,
+                                           width,
+                                           height,
+                                           format,
+                                           rowstride,
+                                           gdk_pixbuf_get_pixels (pixbuf),
+                                           &error);
+  if (!texture)
+    {
+      g_warning ("MyAqua: failed to upload pixbuf texture: %s",
+                 error ? error->message : "unknown error");
+      return NULL;
+    }
+
+  return clutter_texture_content_new_from_texture (texture, NULL);
+}
+
+static void
+my_aqua_draw_feather (cairo_t             *cr,
+                      gdouble              width,
+                      gdouble              height,
+                      const MyAquaPalette *palette)
+{
+  gdouble cy;
+  int i;
+
+  cairo_save (cr);
+  cairo_scale (cr, width / 32.0, height / 12.0);
+
+  cy = 6.0;
+
+  cairo_move_to (cr, 2.0, cy);
+  cairo_curve_to (cr, 8.0, cy - 2.2, 24.0, cy - 2.0, 30.0, cy);
+  cairo_curve_to (cr, 24.0, cy + 2.0, 8.0, cy + 2.2, 2.0, cy);
+  cairo_close_path (cr);
+  cairo_set_source_rgba (cr,
+                         palette->menu_text_r,
+                         palette->menu_text_g,
+                         palette->menu_text_b,
+                         0.92);
+  cairo_fill (cr);
+
+  cairo_move_to (cr, 3.0, cy);
+  cairo_curve_to (cr, 10.0, cy - 0.35, 22.0, cy - 0.35, 29.0, cy);
+  cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 0.22);
+  cairo_set_line_width (cr, 0.8);
+  cairo_stroke (cr);
+
+  cairo_move_to (cr, 4.0, cy);
+  cairo_line_to (cr, 28.0, cy);
+  cairo_set_source_rgba (cr,
+                         palette->menu_text_r * 0.55,
+                         palette->menu_text_g * 0.55,
+                         palette->menu_text_b * 0.55,
+                         0.85);
+  cairo_set_line_width (cr, 0.55);
+  cairo_stroke (cr);
+
+  for (i = 0; i < 8; i++)
+    {
+      gdouble x = 5.0 + i * 3.1;
+
+      cairo_move_to (cr, x, cy - 0.15);
+      cairo_line_to (cr, x + 1.6, cy - 1.8);
+      cairo_move_to (cr, x + 0.4, cy + 0.15);
+      cairo_line_to (cr, x + 2.0, cy + 1.8);
+    }
+  cairo_set_source_rgba (cr,
+                         palette->menu_text_r,
+                         palette->menu_text_g,
+                         palette->menu_text_b,
+                         0.55);
+  cairo_set_line_width (cr, 0.45);
+  cairo_stroke (cr);
+
+  cairo_restore (cr);
 }
 
 static void
@@ -351,9 +516,6 @@ my_aqua_traffic_light_content (ClutterActor *ref_actor,
   cairo_surface_t *surface;
   cairo_t *cr;
   ClutterContent *content;
-  gdouble radius;
-  gdouble cx;
-  gdouble cy;
 
   if (size < 1)
     size = 1;
@@ -361,21 +523,13 @@ my_aqua_traffic_light_content (ClutterActor *ref_actor,
   surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, size, size);
   cr = cairo_create (surface);
 
-  cx = size / 2.0;
-  cy = size / 2.0;
-  radius = size / 2.0 - 0.75;
-
-  cairo_arc (cr, cx, cy, radius, 0, 2 * G_PI);
-  cairo_set_source_rgb (cr, r, g, b);
-  cairo_fill_preserve (cr);
-
-  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.35);
-  cairo_set_line_width (cr, 0.75);
-  cairo_stroke (cr);
-
-  cairo_arc (cr, cx - radius * 0.28, cy - radius * 0.32, radius * 0.22, 0, 2 * G_PI);
-  cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 0.45);
-  cairo_fill (cr);
+  aqua_traffic_draw_circle (cr,
+                            size / 2.0,
+                            size / 2.0,
+                            size,
+                            r,
+                            g,
+                            b);
 
   cairo_destroy (cr);
   content = my_aqua_content_from_surface (ref_actor, surface);
@@ -384,55 +538,154 @@ my_aqua_traffic_light_content (ClutterActor *ref_actor,
   return content;
 }
 
+#define OOZE_BUTTON_LABEL "🫟 Oooze"
 
 ClutterContent *
-my_aqua_apple_logo_content (ClutterActor *ref_actor,
-                            int           size)
+my_aqua_ooze_button_content (ClutterActor *ref_actor,
+                             int          *width_out,
+                             int          *height_out)
 {
   cairo_surface_t *surface;
   cairo_t *cr;
   ClutterContent *content;
-  gdouble scale;
-  const MyAquaPalette *palette = my_theme_get_palette (NULL);
+  PangoLayout *layout;
+  PangoFontDescription *font;
+  PangoRectangle ink;
+  PangoRectangle logical;
+  cairo_pattern_t *gradient;
+  gdouble radius;
+  gdouble pad_x = 8.0;
+  gdouble height = 18.0;
+  gdouble width;
+  gdouble text_x;
+  gdouble text_y;
 
-  if (size < 1)
-    size = 1;
+  font = pango_font_description_from_string ("Sans Bold 11");
 
-  surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, size, size);
+  surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, 1, 1);
+  cr = cairo_create (surface);
+  layout = pango_cairo_create_layout (cr);
+  pango_layout_set_font_description (layout, font);
+  pango_layout_set_text (layout, OOZE_BUTTON_LABEL, -1);
+  pango_layout_get_pixel_extents (layout, &ink, &logical);
+  g_object_unref (layout);
+  cairo_destroy (cr);
+  cairo_surface_destroy (surface);
+
+  width = logical.width + pad_x * 2.0;
+  if (width < 64.0)
+    width = 64.0;
+
+  surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32,
+                                        (int) ceil (width),
+                                        (int) ceil (height));
   cr = cairo_create (surface);
 
-  scale = size / 16.0;
-  cairo_scale (cr, scale, scale);
-  cairo_translate (cr, 0.5, 0.5);
+  radius = 4.0;
+  my_aqua_rounded_rect (cr, 0.5, 0.5, width - 1.0, height - 1.0, radius);
 
-  cairo_move_to (cr, 8.0, 1.5);
-  cairo_curve_to (cr, 8.8, 0.4, 10.0, 0.0, 11.0, 0.6);
-  cairo_curve_to (cr, 10.2, 1.8, 10.6, 3.4, 11.6, 4.2);
-  cairo_curve_to (cr, 10.4, 4.3, 9.3, 3.6, 8.0, 3.6);
-  cairo_curve_to (cr, 6.7, 3.6, 5.6, 4.3, 4.4, 4.2);
-  cairo_curve_to (cr, 5.4, 3.3, 5.9, 1.8, 5.0, 0.6);
-  cairo_curve_to (cr, 6.0, 0.0, 7.2, 0.4, 8.0, 1.5);
-  cairo_close_path (cr);
+  gradient = cairo_pattern_create_linear (0, 0, 0, height);
+  cairo_pattern_add_color_stop_rgb (gradient, 0.0, 0.38, 0.78, 0.36);
+  cairo_pattern_add_color_stop_rgb (gradient, 0.45, 0.22, 0.62, 0.20);
+  cairo_pattern_add_color_stop_rgb (gradient, 1.0, 0.08, 0.42, 0.10);
+  cairo_set_source (cr, gradient);
+  cairo_fill_preserve (cr);
+  cairo_pattern_destroy (gradient);
 
-  cairo_move_to (cr, 8.0, 4.0);
-  cairo_curve_to (cr, 10.6, 4.0, 12.4, 5.8, 12.4, 8.6);
-  cairo_curve_to (cr, 12.4, 12.0, 10.0, 15.0, 8.0, 15.0);
-  cairo_curve_to (cr, 6.0, 15.0, 3.6, 12.0, 3.6, 8.6);
-  cairo_curve_to (cr, 3.6, 5.8, 5.4, 4.0, 8.0, 4.0);
-  cairo_close_path (cr);
+  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.28);
+  cairo_set_line_width (cr, 1.0);
+  cairo_stroke (cr);
 
-  cairo_set_source_rgba (cr,
-                         palette->menu_text_r,
-                         palette->menu_text_g,
-                         palette->menu_text_b,
-                         1.0);
+  cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 0.35);
+  my_aqua_rounded_rect (cr, 1.5, 1.5, width - 3.0, (height - 3.0) * 0.45, radius - 1.0);
   cairo_fill (cr);
 
+  layout = pango_cairo_create_layout (cr);
+  pango_layout_set_font_description (layout, font);
+  pango_layout_set_text (layout, OOZE_BUTTON_LABEL, -1);
+  pango_layout_get_pixel_extents (layout, &ink, &logical);
+
+  text_x = (width - logical.width) / 2.0;
+  text_y = (height - logical.height) / 2.0 - ink.y;
+
+  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.35);
+  cairo_move_to (cr, text_x + 0.5, text_y + 0.5);
+  pango_cairo_show_layout (cr, layout);
+
+  cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
+  cairo_move_to (cr, text_x, text_y);
+  pango_cairo_show_layout (cr, layout);
+
+  g_object_unref (layout);
+  pango_font_description_free (font);
+  cairo_destroy (cr);
+
+  content = my_aqua_content_from_surface (ref_actor, surface);
+  cairo_surface_destroy (surface);
+
+  if (width_out)
+    *width_out = (int) ceil (width);
+  if (height_out)
+    *height_out = (int) ceil (height);
+
+  return content;
+}
+
+ClutterContent *
+my_aqua_menu_feather_content (ClutterActor *ref_actor,
+                              int           width,
+                              int           height)
+{
+  cairo_surface_t *surface;
+  cairo_t *cr;
+  ClutterContent *content;
+
+  if (width < 1)
+    width = 1;
+  if (height < 1)
+    height = 1;
+
+  surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
+  cr = cairo_create (surface);
+  my_aqua_draw_feather (cr, width, height, my_theme_get_palette (NULL));
   cairo_destroy (cr);
   content = my_aqua_content_from_surface (ref_actor, surface);
   cairo_surface_destroy (surface);
 
   return content;
+}
+
+ClutterContent *
+my_aqua_spot_icon_content (ClutterActor *ref_actor,
+                           MetaDisplay  *display,
+                           int           logical_size)
+{
+  g_autoptr (GdkPixbuf) pixbuf = NULL;
+  int texture;
+
+  if (logical_size < 1)
+    logical_size = 1;
+
+  texture = my_aqua_icon_texture_size (display, logical_size);
+  pixbuf = my_aqua_load_data_pixbuf ("spot-logo.svg", texture, texture);
+  if (!pixbuf)
+    {
+      g_warning ("MyAqua: spot-logo.svg not found; using fallback tile");
+      return my_aqua_dock_icon_content (ref_actor,
+                                        texture,
+                                        0.22f,
+                                        0.48f,
+                                        0.92f);
+    }
+
+  return my_aqua_content_from_pixbuf (ref_actor, pixbuf);
+}
+
+ClutterContent *
+my_aqua_apple_logo_content (ClutterActor *ref_actor,
+                            int           size)
+{
+  return my_aqua_menu_feather_content (ref_actor, size, size);
 }
 
 ClutterContent *

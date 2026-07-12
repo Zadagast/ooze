@@ -1,6 +1,11 @@
 # Meson / Ninja
 build/
 
+# Bundled elementary icon theme (~38MB, fetched by `ninja -C build`)
+data/icons/elementary/
+.cache/
+build-elementary-icons/
+
 # Editor / OS
 *~
 *.swp

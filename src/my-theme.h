@@ -40,6 +40,7 @@ MyTheme *my_theme_new (void);
 MyTheme *my_theme_get_default (void);
 gboolean my_theme_is_dark (MyTheme *theme);
 const MyAquaPalette *my_theme_get_palette (MyTheme *theme);
+void my_theme_toggle (MyTheme *theme);
 void my_theme_watch (MyTheme *theme, MyThemeChangedCallback callback, gpointer user_data);
 void my_theme_unwatch (MyTheme *theme, MyThemeChangedCallback callback, gpointer user_data);
 void my_theme_free (MyTheme *theme);
