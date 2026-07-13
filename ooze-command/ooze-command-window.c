@@ -797,7 +797,7 @@ ooze_command_window_init (OozeCommandWindow *self)
   ooze_toolbar_ensure_css ();
 
   gtk_window_set_title (GTK_WINDOW (self), "Terminal");
-  gtk_window_set_icon_name (GTK_WINDOW (self), "org.ooze.Command");
+  gtk_window_set_icon_name (GTK_WINDOW (self), "utilities-terminal");
   gtk_window_set_default_size (GTK_WINDOW (self), 900, 560);
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-command");
 

@@ -73,6 +73,7 @@ static const OozeDockIconAlias dock_icon_aliases[] = {
   { "org.gnome.TextEditor-symbolic", "accessories-text-editor" },
   { "org.gnome.Calculator", "accessories-calculator" },
   { "org.gnome.Calculator-symbolic", "accessories-calculator" },
+  /* Map legacy org.ooze.* icon ids to Freedesktop names so Themes packs apply. */
   { "org.ooze.Spot",            "system-file-manager"  },
   { "org.ooze.Spot-symbolic",   "system-file-manager"  },
   { "org.ooze.Command",         "utilities-terminal"   },
@@ -87,6 +88,8 @@ static const OozeDockIconAlias dock_icon_aliases[] = {
   { "org.ooze.About-symbolic",  "help-about" },
   { "org.ooze.Monitor",         "video-display" },
   { "org.ooze.Monitor-symbolic","video-display" },
+  { "org.ooze.Themes",          "preferences-desktop-theme" },
+  { "org.ooze.Themes-symbolic", "preferences-desktop-theme" },
   { "org.ooze.Eye",             "image-x-generic" },
   { "org.ooze.Eye-symbolic",    "image-x-generic" },
   { "org.ooze.Torrent",         "application-x-bittorrent" },
@@ -131,16 +134,16 @@ typedef struct {
 } OozeDockAppSpec;
 
 static const char *eye_dock_icon_names[] = {
-  "org.ooze.Eye", "image-x-generic", "image-viewer", NULL,
+  "image-x-generic", "image-viewer", NULL,
 };
 static const char *torrent_dock_icon_names[] = {
-  "org.ooze.Torrent", "application-x-bittorrent", "network-workgroup", NULL,
+  "application-x-bittorrent", "network-workgroup", NULL,
 };
 static const char *monitor_dock_icon_names[] = {
-  "org.ooze.Monitor", "video-display", "preferences-desktop-display", NULL,
+  "video-display", "preferences-desktop-display", NULL,
 };
 static const char *about_dock_icon_names[] = {
-  "org.ooze.About", "help-about", "dialog-information", NULL,
+  "help-about", "dialog-information", NULL,
 };
 
 static void ooze_dock_launch_binary (MetaContext *context, const char *binary);
@@ -242,7 +245,6 @@ ooze_dock_launch_spot (MetaContext *context)
 /* ── Ooze Command (terminal) launcher ──────────────────────────────────── */
 
 static const char *command_dock_icon_names[] = {
-  "org.ooze.Command",
   "utilities-terminal",
   NULL,
 };
@@ -314,7 +316,6 @@ ooze_dock_create_command_launcher (ClutterActor *stage,
 /* ── Ooze King (System Settings) launcher ───────────────────────────────── */
 
 static const char *king_dock_icon_names[] = {
-  "org.ooze.King",
   "preferences-system",
   "preferences-desktop",
   NULL,
@@ -386,7 +387,6 @@ ooze_dock_create_king_launcher (ClutterActor *stage,
 /* ── Ooze Ear (PipeWire mixer) launcher ─────────────────────────────────── */
 
 static const char *ear_dock_icon_names[] = {
-  "org.ooze.Ear",
   "audio-headphones",
   "multimedia-volume-control",
   "preferences-desktop-sound",
@@ -459,7 +459,6 @@ ooze_dock_create_ear_launcher (ClutterActor *stage,
 /* ── Ooze Pak (Flatpak manager) launcher ────────────────────────────────── */
 
 static const char *pak_dock_icon_names[] = {
-  "org.ooze.Pak",
   "system-software-install",
   "package-x-generic",
   NULL,

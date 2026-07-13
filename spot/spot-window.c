@@ -1436,7 +1436,7 @@ spot_action_about (GSimpleAction *action G_GNUC_UNUSED,
 {
   ooze_about_present (GTK_WINDOW (user_data),
                       "Spot",
-                      "org.ooze.Spot",
+                      "system-file-manager",
                       "File manager for Ooze Desktop.",
                       OOZE_VERSION);
 }
@@ -2500,7 +2500,7 @@ spot_update_title (SpotWindow *self)
 {
   if (!self->current_dir)
     {
-      ooze_header_bar_set_title (OOZE_HEADER_BAR (self->title_header), "File Manager");
+      ooze_header_bar_set_title (OOZE_HEADER_BAR (self->title_header), "Spot");
       return;
     }
 
@@ -3106,8 +3106,8 @@ spot_window_constructed (GObject *object)
 
   spot_ensure_css ();
 
-  gtk_window_set_title (GTK_WINDOW (self), "File Manager");
-  gtk_window_set_icon_name (GTK_WINDOW (self), "org.ooze.Spot");
+  gtk_window_set_title (GTK_WINDOW (self), "Spot");
+  gtk_window_set_icon_name (GTK_WINDOW (self), "system-file-manager");
   gtk_window_set_default_size (GTK_WINDOW (self), 960, 640);
   /*
    * Do NOT call gtk_window_set_decorated(FALSE).
@@ -3126,7 +3126,7 @@ spot_window_constructed (GObject *object)
    * on it, and marks it with the "titlebar" CSS class. */
   self->title_header = GTK_WIDGET (ooze_header_bar_new ());
   ooze_header_bar_attach_window (OOZE_HEADER_BAR (self->title_header), GTK_WINDOW (self));
-  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->title_header), "File Manager");
+  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->title_header), "Spot");
   gtk_window_set_titlebar (GTK_WINDOW (self), self->title_header);
 
   shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);

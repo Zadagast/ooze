@@ -142,17 +142,8 @@ install_data('packaging/deb/ooze-session-env.sh',
   install_mode: 'rwxr-xr-x',
 )
 
-install_data('data/spot-logo.svg',
-  install_dir: ooze_data_dir,
-)
-
 install_data('data/icons/Adwaita/symbolic/actions/view-column-symbolic.svg',
   install_dir: ooze_data_dir / 'icons/Adwaita/symbolic/actions',
-)
-
-install_data('data/spot-logo.svg',
-  install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps',
-  rename: 'org.ooze.Spot.svg',
 )
 
 vte_dep = dependency('vte-2.91-gtk4', required: false)
@@ -248,15 +239,6 @@ if gtk4_dep.found() and adw_dep.found()
 
   install_data('data/org.ooze.Pak.desktop',
     install_dir: get_option('datadir') / 'applications',
-  )
-
-  install_data('data/pak-logo.svg',
-    install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps',
-    rename: 'org.ooze.Pak.svg',
-  )
-
-  install_data('data/pak-logo.svg',
-    install_dir: ooze_data_dir,
   )
 
   if vte_dep.found()
@@ -555,15 +537,6 @@ if gtk4_dep.found() and adw_dep.found()
 
     install_data('data/org.ooze.Ear.desktop',
       install_dir: get_option('datadir') / 'applications',
-    )
-
-    install_data('data/ear-logo.svg',
-      install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps',
-      rename: 'org.ooze.Ear.svg',
-    )
-
-    install_data('data/ear-logo.svg',
-      install_dir: ooze_data_dir,
     )
   else
     warning('Ooze Ear skipped: install libpipewire-0.3-dev')
