@@ -90,6 +90,38 @@ static const SpotPlace sidebar_places[] = {
   { "Videos", G_USER_DIRECTORY_VIDEOS, FALSE },
 };
 
+/*
+ * Resolve a sidebar / Go-menu place path. Prefer XDG user-dirs; if that fails
+ * (common when the nest remaps XDG_CONFIG_HOME without user-dirs.dirs), fall
+ * back to $HOME/<label> so Documents / Downloads / etc. still appear.
+ */
+static char *
+spot_place_path_dup (const SpotPlace *place)
+{
+  const char *path;
+
+  if (place->use_home)
+    return g_strdup (g_get_home_dir ());
+
+  path = g_get_user_special_dir (place->dir);
+  if (path && path[0] != '\0')
+    return g_strdup (path);
+
+  return g_build_filename (g_get_home_dir (), place->label, NULL);
+}
+
+static char *
+spot_special_dir_path_dup (GUserDirectory dir,
+                           const char    *fallback_name)
+{
+  const char *path = g_get_user_special_dir (dir);
+
+  if (path && path[0] != '\0')
+    return g_strdup (path);
+
+  return g_build_filename (g_get_home_dir (), fallback_name, NULL);
+}
+
 /* ══════════════════════════════════════════════════════════════════════════ */
 
 static void
@@ -808,7 +840,8 @@ spot_action_go_desktop (GSimpleAction *action G_GNUC_UNUSED,
                         GVariant      *param G_GNUC_UNUSED,
                         gpointer       user_data)
 {
-  const char *path = g_get_user_special_dir (G_USER_DIRECTORY_DESKTOP);
+  g_autofree char *path = spot_special_dir_path_dup (G_USER_DIRECTORY_DESKTOP,
+                                                     "Desktop");
 
   if (path)
     spot_navigate_to_path_string (SPOT_WINDOW (user_data), path, TRUE);
@@ -819,7 +852,8 @@ spot_action_go_documents (GSimpleAction *action G_GNUC_UNUSED,
                           GVariant      *param G_GNUC_UNUSED,
                           gpointer       user_data)
 {
-  const char *path = g_get_user_special_dir (G_USER_DIRECTORY_DOCUMENTS);
+  g_autofree char *path = spot_special_dir_path_dup (G_USER_DIRECTORY_DOCUMENTS,
+                                                     "Documents");
 
   if (path)
     spot_navigate_to_path_string (SPOT_WINDOW (user_data), path, TRUE);
@@ -830,7 +864,8 @@ spot_action_go_downloads (GSimpleAction *action G_GNUC_UNUSED,
                           GVariant      *param G_GNUC_UNUSED,
                           gpointer       user_data)
 {
-  const char *path = g_get_user_special_dir (G_USER_DIRECTORY_DOWNLOAD);
+  g_autofree char *path = spot_special_dir_path_dup (G_USER_DIRECTORY_DOWNLOAD,
+                                                     "Downloads");
 
   if (path)
     spot_navigate_to_path_string (SPOT_WINDOW (user_data), path, TRUE);
@@ -1659,10 +1694,11 @@ static void
 on_nav_favorites_clicked (GtkButton *button G_GNUC_UNUSED,
                             gpointer   user_data)
 {
-  const char *path = g_get_user_special_dir (G_USER_DIRECTORY_DOCUMENTS);
+  g_autofree char *path = spot_special_dir_path_dup (G_USER_DIRECTORY_DOCUMENTS,
+                                                     "Documents");
 
   if (!path)
-    path = g_get_home_dir ();
+    path = g_strdup (g_get_home_dir ());
   spot_navigate_to_path_string (SPOT_WINDOW (user_data), path, TRUE);
 }
 
@@ -1894,13 +1930,10 @@ spot_column_browser_root (GFile *dir)
   /* Home and special dirs first — longest / deepest match wins. */
   for (i = 0; i < G_N_ELEMENTS (sidebar_places); i++)
     {
-      const char *path;
+      g_autofree char *path = NULL;
       g_autoptr (GFile) place = NULL;
 
-      if (sidebar_places[i].use_home)
-        path = g_get_home_dir ();
-      else
-        path = g_get_user_special_dir (sidebar_places[i].dir);
+      path = spot_place_path_dup (&sidebar_places[i]);
       if (!path)
         continue;
 
@@ -2449,12 +2482,8 @@ spot_create_sidebar (SpotWindow *self)
 
   for (i = 0; i < G_N_ELEMENTS (sidebar_places); i++)
     {
-      const char *path;
+      g_autofree char *path = spot_place_path_dup (&sidebar_places[i]);
 
-      if (sidebar_places[i].use_home)
-        path = g_get_home_dir ();
-      else
-        path = g_get_user_special_dir (sidebar_places[i].dir);
       if (!path)
         continue;
 

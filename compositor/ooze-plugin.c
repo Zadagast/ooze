@@ -225,10 +225,144 @@ ooze_plugin_refresh_dock_plate (OozePlugin *plugin, int plate_width)
 }
 
 static void
+ooze_plugin_get_primary_monitor_geometry (MetaDisplay  *display,
+                                          MtkRectangle *rect_out)
+{
+  int primary;
+  int n_monitors;
+
+  g_return_if_fail (rect_out != NULL);
+
+  n_monitors = meta_display_get_n_monitors (display);
+  if (n_monitors < 1)
+    {
+      meta_display_get_size (display, &rect_out->width, &rect_out->height);
+      rect_out->x = 0;
+      rect_out->y = 0;
+      return;
+    }
+
+  primary = meta_display_get_primary_monitor (display);
+  if (primary < 0 || primary >= n_monitors)
+    primary = 0;
+
+  meta_display_get_monitor_geometry (display, primary, rect_out);
+}
+
+static void
+ooze_plugin_clear_aux_panels (OozePlugin *plugin)
+{
+  guint i;
+
+  for (i = 0; i < plugin->n_aux_panels; i++)
+    g_clear_pointer (&plugin->aux_panels[i], clutter_actor_destroy);
+
+  g_clear_pointer (&plugin->aux_panels, g_free);
+  g_clear_pointer (&plugin->aux_panel_widths, g_free);
+  plugin->n_aux_panels = 0;
+}
+
+static void
+ooze_plugin_refresh_aux_panel_texture (OozePlugin    *plugin,
+                                       guint        index,
+                                       ClutterActor *panel,
+                                       int          width)
+{
+  g_autoptr (ClutterContent) content = NULL;
+
+  if (!panel || width < 1)
+    return;
+
+  if (plugin->aux_panel_widths &&
+      plugin->aux_panel_widths[index] == width)
+    return;
+
+  content = ooze_aqua_pinstripe_content (panel, width, (int) PANEL_HEIGHT);
+  if (content)
+    ooze_aqua_actor_set_content (panel,
+                                 g_steal_pointer (&content),
+                                 width,
+                                 (int) PANEL_HEIGHT);
+
+  if (plugin->aux_panel_widths)
+    plugin->aux_panel_widths[index] = width;
+}
+
+static void
+ooze_plugin_sync_aux_panels (OozePlugin       *plugin,
+                             MetaDisplay    *display,
+                             MetaCompositor *compositor)
+{
+  ClutterActor *stage;
+  ClutterActor *window_group;
+  int n_monitors;
+  int primary;
+  int i;
+  guint aux_needed;
+  guint aux_i;
+
+  n_monitors = meta_display_get_n_monitors (display);
+  if (n_monitors < 1)
+    {
+      ooze_plugin_clear_aux_panels (plugin);
+      return;
+    }
+
+  primary = meta_display_get_primary_monitor (display);
+  if (primary < 0 || primary >= n_monitors)
+    primary = 0;
+
+  aux_needed = (guint) MAX (0, n_monitors - 1);
+  if (aux_needed != plugin->n_aux_panels)
+    {
+      ooze_plugin_clear_aux_panels (plugin);
+      if (aux_needed == 0)
+        return;
+
+      plugin->aux_panels = g_new0 (ClutterActor *, aux_needed);
+      plugin->aux_panel_widths = g_new0 (int, aux_needed);
+      plugin->n_aux_panels = aux_needed;
+
+      stage = CLUTTER_ACTOR (meta_compositor_get_stage (compositor));
+      window_group = meta_compositor_get_window_group (compositor);
+
+      for (aux_i = 0; aux_i < aux_needed; aux_i++)
+        {
+          ClutterActor *panel = clutter_actor_new ();
+
+          clutter_actor_set_reactive (panel, FALSE);
+          clutter_actor_add_child (stage, panel);
+          clutter_actor_set_child_above_sibling (stage, panel, window_group);
+          clutter_actor_show (panel);
+          plugin->aux_panels[aux_i] = panel;
+        }
+    }
+
+  aux_i = 0;
+  for (i = 0; i < n_monitors; i++)
+    {
+      MtkRectangle rect;
+      ClutterActor *panel;
+
+      if (i == primary)
+        continue;
+
+      if (aux_i >= plugin->n_aux_panels)
+        break;
+
+      meta_display_get_monitor_geometry (display, i, &rect);
+      panel = plugin->aux_panels[aux_i];
+      ooze_plugin_refresh_aux_panel_texture (plugin, aux_i, panel, rect.width);
+      clutter_actor_set_size (panel, (gfloat) rect.width, PANEL_HEIGHT);
+      clutter_actor_set_position (panel, (gfloat) rect.x, (gfloat) rect.y);
+      aux_i++;
+    }
+}
+
+static void
 ooze_plugin_update_aqua_dock_layout (OozePlugin *plugin, MetaDisplay *display)
 {
-  int width;
-  int height;
+  MtkRectangle primary;
   gsize icon_count;
   gfloat plate_width;
   gfloat dock_height;
@@ -237,7 +371,7 @@ ooze_plugin_update_aqua_dock_layout (OozePlugin *plugin, MetaDisplay *display)
   if (!plugin->aqua_dock)
     return;
 
-  meta_display_get_size (display, &width, &height);
+  ooze_plugin_get_primary_monitor_geometry (display, &primary);
   icon_count = ooze_plugin_count_dock_icons (plugin);
   if (icon_count == 0)
     icon_count = 4;
@@ -247,14 +381,16 @@ ooze_plugin_update_aqua_dock_layout (OozePlugin *plugin, MetaDisplay *display)
                 2.0f * AQUA_DOCK_PADDING;
   dock_height = AQUA_DOCK_PLATE_H + AQUA_DOCK_REFLECT_H;
 
-  x = ((gfloat) width - plate_width) / 2.0f;
+  /* Dock stays on the main (primary) desktop only. */
+  x = (gfloat) primary.x + ((gfloat) primary.width - plate_width) / 2.0f;
 
   ooze_plugin_refresh_dock_plate (plugin, (int) plate_width);
 
   clutter_actor_set_size (plugin->aqua_dock, plate_width, dock_height);
   clutter_actor_set_position (plugin->aqua_dock,
                               x,
-                              (gfloat) height - AQUA_DOCK_PLATE_H - AQUA_DOCK_BOTTOM_GAP);
+                              (gfloat) primary.y + (gfloat) primary.height -
+                              AQUA_DOCK_PLATE_H - AQUA_DOCK_BOTTOM_GAP);
 
   if (plugin->aqua_dock_plate)
     {
@@ -303,8 +439,9 @@ ooze_plugin_raise_chrome (OozePlugin *plugin, MetaDisplay *display)
   ClutterActor *stage;
   ClutterActor *window_group;
   ClutterActor *above;
+  guint i;
 
-  if (!plugin->panel && !plugin->aqua_dock)
+  if (!plugin->panel && !plugin->aqua_dock && plugin->n_aux_panels == 0)
     return;
 
   compositor = meta_display_get_compositor (display);
@@ -316,6 +453,14 @@ ooze_plugin_raise_chrome (OozePlugin *plugin, MetaDisplay *display)
     {
       clutter_actor_set_child_above_sibling (stage, plugin->aqua_dock, above);
       above = plugin->aqua_dock;
+    }
+
+  for (i = 0; i < plugin->n_aux_panels; i++)
+    {
+      if (!plugin->aux_panels[i])
+        continue;
+      clutter_actor_set_child_above_sibling (stage, plugin->aux_panels[i], above);
+      above = plugin->aux_panels[i];
     }
 
   if (plugin->panel)
@@ -332,22 +477,25 @@ ooze_plugin_update_builtin_struts (OozePlugin    *plugin G_GNUC_UNUSED,
   MetaWorkspaceManager *wm;
   GList *workspaces;
   GList *l;
-  int width;
-  int height;
+  int n_monitors;
+  int primary;
   int panel_h;
   int dock_h;
+  int i;
 
   if (!display)
     return;
 
-  meta_display_get_size (display, &width, &height);
-  if (width < 1 || height < 1)
+  n_monitors = meta_display_get_n_monitors (display);
+  if (n_monitors < 1)
     return;
+
+  primary = meta_display_get_primary_monitor (display);
+  if (primary < 0 || primary >= n_monitors)
+    primary = 0;
 
   panel_h = (int) PANEL_HEIGHT;
   dock_h = (int) (AQUA_DOCK_PLATE_H + AQUA_DOCK_STRUT_GAP);
-  if (panel_h + dock_h >= height)
-    return;
 
   wm = meta_display_get_workspace_manager (display);
   if (!wm)
@@ -358,24 +506,37 @@ ooze_plugin_update_builtin_struts (OozePlugin    *plugin G_GNUC_UNUSED,
     {
       MetaWorkspace *workspace = l->data;
       GSList *struts = NULL;
-      MetaStrut *top;
-      MetaStrut *bottom;
 
-      top = g_new0 (MetaStrut, 1);
-      top->side = META_SIDE_TOP;
-      top->rect.x = 0;
-      top->rect.y = 0;
-      top->rect.width = width;
-      top->rect.height = panel_h;
-      struts = g_slist_prepend (struts, top);
+      for (i = 0; i < n_monitors; i++)
+        {
+          MtkRectangle rect;
+          MetaStrut *top;
 
-      bottom = g_new0 (MetaStrut, 1);
-      bottom->side = META_SIDE_BOTTOM;
-      bottom->rect.x = 0;
-      bottom->rect.y = height - dock_h;
-      bottom->rect.width = width;
-      bottom->rect.height = dock_h;
-      struts = g_slist_prepend (struts, bottom);
+          meta_display_get_monitor_geometry (display, i, &rect);
+          if (panel_h >= rect.height)
+            continue;
+
+          top = g_new0 (MetaStrut, 1);
+          top->side = META_SIDE_TOP;
+          top->rect.x = rect.x;
+          top->rect.y = rect.y;
+          top->rect.width = rect.width;
+          top->rect.height = panel_h;
+          struts = g_slist_prepend (struts, top);
+
+          /* Bottom dock strut only on the main desktop. */
+          if (i == primary && panel_h + dock_h < rect.height)
+            {
+              MetaStrut *bottom = g_new0 (MetaStrut, 1);
+
+              bottom->side = META_SIDE_BOTTOM;
+              bottom->rect.x = rect.x;
+              bottom->rect.y = rect.y + rect.height - dock_h;
+              bottom->rect.width = rect.width;
+              bottom->rect.height = dock_h;
+              struts = g_slist_prepend (struts, bottom);
+            }
+        }
 
       meta_workspace_set_builtin_struts (workspace, struts);
       g_slist_free_full (struts, g_free);
@@ -385,26 +546,32 @@ ooze_plugin_update_builtin_struts (OozePlugin    *plugin G_GNUC_UNUSED,
 static void
 ooze_plugin_update_layout (OozePlugin *plugin, MetaDisplay *display)
 {
-  int width;
-  int height;
+  MetaCompositor *compositor;
+  MtkRectangle primary;
   gfloat clock_width;
 
-  meta_display_get_size (display, &width, &height);
+  compositor = meta_display_get_compositor (display);
+  ooze_plugin_get_primary_monitor_geometry (display, &primary);
 
   if (plugin->panel)
     {
-      ooze_panel_refresh_texture (plugin, width);
-      clutter_actor_set_size (plugin->panel, (gfloat) width, PANEL_HEIGHT);
-      clutter_actor_set_position (plugin->panel, 0.0f, 0.0f);
+      ooze_panel_refresh_texture (plugin, primary.width);
+      clutter_actor_set_size (plugin->panel,
+                              (gfloat) primary.width,
+                              PANEL_HEIGHT);
+      clutter_actor_set_position (plugin->panel,
+                                  (gfloat) primary.x,
+                                  (gfloat) primary.y);
     }
 
+  ooze_plugin_sync_aux_panels (plugin, display, compositor);
   ooze_plugin_raise_chrome (plugin, display);
 
   if (plugin->clock_label)
     {
       clock_width = clutter_actor_get_width (plugin->clock_label);
       clutter_actor_set_position (plugin->clock_label,
-                                  (gfloat) width - clock_width - 12.0f,
+                                  (gfloat) primary.width - clock_width - 12.0f,
                                   ((gfloat) PANEL_HEIGHT -
                                    clutter_actor_get_height (plugin->clock_label)) / 2.0f);
     }
@@ -436,6 +603,9 @@ ooze_plugin_refresh_theme (OozePlugin *plugin)
 
   plugin->last_panel_width = 0;
   plugin->last_dock_plate_width = 0;
+  if (plugin->aux_panel_widths && plugin->n_aux_panels > 0)
+    memset (plugin->aux_panel_widths, 0,
+            sizeof (int) * plugin->n_aux_panels);
 
   ooze_panel_refresh_ooze_button (plugin);
   ooze_panel_rebuild_menu_bar (plugin);
@@ -1167,6 +1337,7 @@ ooze_plugin_dispose (GObject *object)
   OozePlugin *plugin = OOZE_PLUGIN (object);
 
   ooze_panel_dispose (plugin);
+  ooze_plugin_clear_aux_panels (plugin);
 
   if (plugin->monitors_changed_handler && plugin->monitor_manager)
     {
@@ -1244,6 +1415,9 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->panel = NULL;
   plugin->menu_icon = NULL;
   plugin->clock_label = NULL;
+  plugin->aux_panels = NULL;
+  plugin->n_aux_panels = 0;
+  plugin->aux_panel_widths = NULL;
   memset (plugin->menu_bar_labels, 0, sizeof plugin->menu_bar_labels);
   plugin->aqua_dock = NULL;
   plugin->aqua_dock_plate = NULL;

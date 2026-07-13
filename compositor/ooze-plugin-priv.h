@@ -14,6 +14,7 @@ struct _OozePlugin
   MetaPlugin parent_instance;
 
   ClutterActor *background_group;
+  /* Interactive menu bar lives on the primary monitor. */
   ClutterActor *panel;
   ClutterActor *menu_icon;
   ClutterActor *menu_bar_labels[OOZE_GLOBAL_MENU_MAX_TOP];
@@ -27,6 +28,10 @@ struct _OozePlugin
   gboolean      menu_bar_needs_rebuild;
   gboolean      force_shell_menu;
   ClutterActor *clock_label;
+  /* Visual-only menu bars on non-primary monitors (one panel per desktop). */
+  ClutterActor **aux_panels;
+  guint         n_aux_panels;
+  int          *aux_panel_widths;
   ClutterActor *aqua_dock;
   ClutterActor *aqua_dock_plate;
   ClutterActor *aqua_dock_icons;

@@ -1,0 +1,14 @@
+# XDG user directories for the nested Ooze session.
+# run-devkit.sh sets XDG_CONFIG_HOME to data/xdg-config/, so GLib will not
+# see ~/.config/user-dirs.dirs unless we provide one here. Without this file,
+# Spot's sidebar only keeps Home + Desktop (GLib's Desktop-only fallback).
+#
+# Format: XDG_xxx_DIR="$HOME/yyy" — $HOME is expanded by glib.
+XDG_DESKTOP_DIR="$HOME/Desktop"
+XDG_DOWNLOAD_DIR="$HOME/Downloads"
+XDG_TEMPLATES_DIR="$HOME/Templates"
+XDG_PUBLICSHARE_DIR="$HOME/Public"
+XDG_DOCUMENTS_DIR="$HOME/Documents"
+XDG_MUSIC_DIR="$HOME/Music"
+XDG_PICTURES_DIR="$HOME/Pictures"
+XDG_VIDEOS_DIR="$HOME/Videos"
