@@ -1,6 +1,9 @@
 # Deploy the project website (site/) to GitHub Pages.
 #
-# One-time setup: repo Settings → Pages → Source: "GitHub Actions".
+# Requires Pages enabled with Source: "GitHub Actions"
+# (Settings → Pages, or: gh api --method POST repos/OWNER/REPO/pages
+#  -f build_type=workflow -f source[branch]=main -f source[path]=/).
+# configure-pages enablement cannot use GITHUB_TOKEN alone.
 
 name: Deploy website
 
@@ -35,3 +38,4 @@ jobs:
           path: site
       - id: deployment
         uses: actions/deploy-pages@v4
+
