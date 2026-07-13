@@ -3,6 +3,7 @@
 #include "ooze-torrent-session.h"
 
 #include <libtransmission/transmission.h>
+#include <libtransmission/utils.h>
 #include <libtransmission/variant.h>
 
 #include <glib.h>
@@ -58,6 +59,11 @@ ooze_tr_session_new (GError **error)
   auto *self = new OozeTrSession ();
   try
     {
+      /* Registers tr_variant serializers used by Settings::save/load.
+       * Without this, libtransmission prints a flood of
+       * "ERROR: No serializer/deserializer registered for type ..." and
+       * session defaults are incomplete. */
+      tr_lib_init ();
       auto settings = tr_sessionGetDefaultSettings ();
       self->session = tr_sessionInit (config, true, settings);
       if (!self->session)
