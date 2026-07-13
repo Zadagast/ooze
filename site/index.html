@@ -198,6 +198,25 @@
   .shots figure { margin: 0; }
   .shots figcaption { text-align: center; font-size: .9rem; color: var(--ink-soft); margin-top: .5rem; }
 
+  .app-shots {
+    margin-top: 2.2rem;
+    display: grid; gap: 1.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+  .app-shots figure { margin: 0; }
+  .app-shots .frame img {
+    width: 100%; height: auto;
+    background: #0d0f12;
+    object-fit: contain;
+    max-height: 320px;
+  }
+  .app-shots figcaption {
+    text-align: center; font-size: .9rem; color: var(--ink-soft); margin-top: .55rem;
+  }
+  .app-shots figcaption strong {
+    display: block; color: var(--ink); font-size: 1rem; margin-bottom: .15rem;
+  }
+
   /* ---- install ---- */
   .steps { margin-top: 2.2rem; display: grid; gap: 1.1rem; }
   .step {
@@ -226,7 +245,8 @@
   <nav>
     <a href="#features">Features</a>
     <a href="#apps">Apps</a>
-    <a href="#screenshots">Screenshots</a>
+    <a href="#screenshots">Desktop</a>
+    <a href="#app-gallery">Gallery</a>
     <a href="#install">Install</a>
   </nav>
   <a class="gh" href="https://github.com/Zadagast/ooze">GitHub&nbsp;→</a>
@@ -298,34 +318,89 @@
 
   <section id="apps">
     <h2>First-party apps</h2>
-    <p class="lead">A complete set of system apps, all wearing the same Gel.</p>
+    <p class="lead">A complete set of system apps, all wearing the same Ooze Gel.</p>
     <div class="grid">
       <div class="card"><h3>Spot</h3><p>File manager with places sidebar, column (Miller) and grid views, and theme-aware surfaces.</p></div>
       <div class="card"><h3>Ooze Command</h3><p>VTE terminal with tabs, Ooze Gel header bar, and global menu support.</p></div>
       <div class="card"><h3>Ooze Eye</h3><p>Lightweight image viewer — the default handler for images in the nest.</p></div>
       <div class="card"><h3>Ooze King</h3><p>System apps launcher: one place to open every Ooze app.</p></div>
-      <div class="card"><h3>Ooze Torrent</h3><p>BitTorrent client linking a static libtransmission, with pause / resume / magnet support.</p></div>
+      <div class="card"><h3>Themes</h3><p>Appearance, icons, cursors, and launch-scoped WhiteSur for foreign GTK apps.</p></div>
       <div class="card"><h3>Ooze Monitor</h3><p>Display layout and resolution via Mutter’s DisplayConfig D-Bus API.</p></div>
       <div class="card"><h3>Ooze Ear</h3><p>Sound preferences backed by PipeWire.</p></div>
       <div class="card"><h3>Ooze Pak</h3><p>Flatpak package browser for installing more software.</p></div>
+      <div class="card"><h3>Ooze Torrent</h3><p>BitTorrent client linking a static libtransmission, with pause / resume / magnet support.</p></div>
       <div class="card"><h3>About This Computer</h3><p>System overview with the Ooze look.</p></div>
     </div>
   </section>
 
   <section id="screenshots">
-    <h2>Screenshots</h2>
+    <h2>Desktop</h2>
+    <p class="lead">Nested session overview — menu bar, dock, and apps sharing one look.</p>
     <div class="shots">
       <figure>
         <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Dark</b></div><img src="assets/ooze-dark.png" alt="Ooze desktop in dark mode"></div>
-        <figcaption>Dark mode</figcaption>
+        <figcaption>Dark mode desktop</figcaption>
       </figure>
       <figure>
         <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Light</b></div><img src="assets/ooze-light.png" alt="Ooze desktop in light mode"></div>
-        <figcaption>Light mode</figcaption>
+        <figcaption>Light mode desktop</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="app-gallery">
+    <h2>Apps in action</h2>
+    <p class="lead">Every first-party Ooze app — current builds with Ooze Gel and OozeKit finishes.</p>
+    <div class="app-shots">
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Spot</b></div>
+          <img src="assets/apps/spot.png" alt="Spot file manager"></div>
+        <figcaption><strong>Spot</strong>File manager</figcaption>
       </figure>
       <figure>
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Spot</b></div><img src="assets/ooze-spot.png" alt="Spot file manager running in Ooze"></div>
-        <figcaption>Spot file manager, running headless in CI-style verification</figcaption>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Command</b></div>
+          <img src="assets/apps/command.png" alt="Ooze Command terminal"></div>
+        <figcaption><strong>Ooze Command</strong>Terminal with tabs</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Eye</b></div>
+          <img src="assets/apps/eye.png" alt="Ooze Eye image viewer"></div>
+        <figcaption><strong>Ooze Eye</strong>Image viewer</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>King</b></div>
+          <img src="assets/apps/king.png" alt="Ooze King system launcher"></div>
+        <figcaption><strong>Ooze King</strong>System apps launcher</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Themes</b></div>
+          <img src="assets/apps/themes.png" alt="Themes appearance settings"></div>
+        <figcaption><strong>Themes</strong>Appearance, icons, cursors</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Monitor</b></div>
+          <img src="assets/apps/monitor.png" alt="Ooze Monitor display settings"></div>
+        <figcaption><strong>Ooze Monitor</strong>Displays</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Ear</b></div>
+          <img src="assets/apps/ear.png" alt="Ooze Ear sound settings"></div>
+        <figcaption><strong>Ooze Ear</strong>Sound</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Pak</b></div>
+          <img src="assets/apps/pak.png" alt="Ooze Pak Flatpak browser"></div>
+        <figcaption><strong>Ooze Pak</strong>Flatpak software</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Torrent</b></div>
+          <img src="assets/apps/torrent.png" alt="Ooze Torrent client"></div>
+        <figcaption><strong>Ooze Torrent</strong>BitTorrent client</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>About</b></div>
+          <img src="assets/apps/about.png" alt="About This Computer"></div>
+        <figcaption><strong>About This Computer</strong>System overview</figcaption>
       </figure>
     </div>
   </section>
