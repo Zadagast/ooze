@@ -173,7 +173,7 @@ Build a single-file nested demo (binaries + icons; **host Mutter 18** still requ
 Or let **GitHub Actions** build it in an Ubuntu 26.04 container:
 
 - **Manual:** Actions → **AppImage** → Run workflow (downloads as a workflow artifact)
-- **Release:** `git push origin v0.2.0` — CI builds and attaches the AppImage to that GitHub Release
+- **Release:** `git push origin v0.2.1` — CI builds and attaches the AppImage to that GitHub Release
 
 The AppImage puts Spot, Command, King, Ear, and Pak on `PATH` inside the nested session. It does not replace your login desktop.
 
@@ -183,7 +183,7 @@ Build a system package that installs under `/usr`:
 
 ```bash
 ./scripts/build-deb.sh
-sudo apt install ./dist/ooze_0.2.0_amd64.deb
+sudo apt install ./dist/ooze_0.2.1_amd64.deb
 ```
 
 **Native login (Wayland):** log out, and at GDM pick **Ooze**. That runs `ooze-wayland-session` → `ooze --wayland` on real displays (no `--devkit`). Xwayland stays enabled unless you set `OOZE_NO_X11=1`.

@@ -1,5 +1,5 @@
 project('ooze', 'c', 'cpp',
-  version: '0.2.0',
+  version: '0.2.1',
   meson_version: '>= 1.0.0',
   default_options: [
     'c_std=c11',
@@ -49,13 +49,16 @@ c_args += '-DOOZE_VERSION="@0@"'.format(meson.project_version())
 install_icons_script = meson.project_source_root() / 'scripts' / 'install-elementary-icons.sh'
 
 # Elementary icons are fetched only by an explicit target or install.
+# Meson names the Ninja rule after the output file; alias so
+# `ninja elementary-icons` matches scripts/README.
 
-custom_target(
+elementary_icons = custom_target(
   'elementary-icons',
   output: 'elementary-icons.stamp',
   command: [find_program('bash'), install_icons_script, '@OUTPUT@'],
   build_by_default: false,
 )
+alias_target('elementary-icons', elementary_icons)
 
 # The install script fetches missing icons and copies them under the install prefix.
 meson.add_install_script(
