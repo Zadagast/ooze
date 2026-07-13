@@ -218,28 +218,11 @@
     padding: .05rem .55rem; margin-bottom: .55rem;
   }
 
-  .shots { margin-top: 2.2rem; display: grid; gap: 1.4rem; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .shots { margin-top: 2.2rem; display: grid; gap: 1.8rem; }
   .shots figure { margin: 0; }
-  .shots figcaption { text-align: center; font-size: .9rem; color: var(--ink-soft); margin-top: .5rem; }
-
-  .app-shots {
-    margin-top: 2.2rem;
-    display: grid; gap: 1.5rem;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  }
-  .app-shots figure { margin: 0; }
-  .app-shots .frame img {
-    width: 100%; height: auto;
-    background: #0d0f12;
-    object-fit: contain;
-    max-height: 320px;
-  }
-  .app-shots figcaption {
-    text-align: center; font-size: .9rem; color: var(--ink-soft); margin-top: .55rem;
-  }
-  .app-shots figcaption strong {
-    display: block; color: var(--ink); font-size: 1rem; margin-bottom: .15rem;
-  }
+  .shots .frame { margin: 0 auto; max-width: 920px; }
+  .shots .frame img { aspect-ratio: 16 / 9; object-fit: cover; object-position: top; }
+  .shots figcaption { text-align: center; font-size: .9rem; color: var(--ink-soft); margin-top: .6rem; }
 
   /* ---- install ---- */
   .steps { margin-top: 2.2rem; display: grid; gap: 1.1rem; }
@@ -270,7 +253,6 @@
     <a href="#features">Features</a>
     <a href="#apps">Apps</a>
     <a href="#screenshots">Desktop</a>
-    <a href="#app-gallery">Gallery</a>
     <a href="#install">Install</a>
     <a href="https://github.com/Zadagast/ooze"><span class="gh-label">GitHub</span>&nbsp;→</a>
     <button id="theme-toggle" title="Toggle light / dark mode" aria-label="Toggle light / dark mode">🌙</button>
@@ -369,69 +351,13 @@
         <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Light</b></div><img src="assets/ooze-light.png" alt="Ooze desktop in light mode"></div>
         <figcaption>Light mode desktop</figcaption>
       </figure>
-      <figure style="grid-column: 1 / -1;">
+      <figure>
         <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Spot — Columns</b></div><img src="assets/ooze-spot.png" alt="Spot file manager in Miller columns view with scrollbars"></div>
         <figcaption>Spot's Miller columns — drill through folders with scrollable panes</figcaption>
       </figure>
     </div>
   </section>
 
-  <section id="app-gallery">
-    <h2>Apps in action</h2>
-    <p class="lead">Every first-party Ooze app — current builds with Ooze Gel and OozeKit finishes.</p>
-    <div class="app-shots">
-      <figure>
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Spot</b></div>
-          <img src="assets/apps/spot.png" alt="Spot file manager"></div>
-        <figcaption><strong>Spot</strong>File manager</figcaption>
-      </figure>
-      <figure>
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Command</b></div>
-          <img src="assets/apps/command.png" alt="Ooze Command terminal"></div>
-        <figcaption><strong>Ooze Command</strong>Terminal with tabs</figcaption>
-      </figure>
-      <figure>
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Eye</b></div>
-          <img src="assets/apps/eye.png" alt="Ooze Eye image viewer"></div>
-        <figcaption><strong>Ooze Eye</strong>Image viewer</figcaption>
-      </figure>
-      <figure>
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>King</b></div>
-          <img src="assets/apps/king.png" alt="Ooze King system launcher"></div>
-        <figcaption><strong>Ooze King</strong>System apps launcher</figcaption>
-      </figure>
-      <figure>
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Themes</b></div>
-          <img src="assets/apps/themes.png" alt="Themes appearance settings"></div>
-        <figcaption><strong>Themes</strong>Appearance, icons, cursors</figcaption>
-      </figure>
-      <figure>
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Monitor</b></div>
-          <img src="assets/apps/monitor.png" alt="Ooze Monitor display settings"></div>
-        <figcaption><strong>Ooze Monitor</strong>Displays</figcaption>
-      </figure>
-      <figure>
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Ear</b></div>
-          <img src="assets/apps/ear.png" alt="Ooze Ear sound settings"></div>
-        <figcaption><strong>Ooze Ear</strong>Sound</figcaption>
-      </figure>
-      <figure>
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Pak</b></div>
-          <img src="assets/apps/pak.png" alt="Ooze Pak Flatpak browser"></div>
-        <figcaption><strong>Ooze Pak</strong>Flatpak software</figcaption>
-      </figure>
-      <figure>
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Torrent</b></div>
-          <img src="assets/apps/torrent.png" alt="Ooze Torrent client"></div>
-        <figcaption><strong>Ooze Torrent</strong>BitTorrent client</figcaption>
-      </figure>
-      <figure>
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>About</b></div>
-          <img src="assets/apps/about.png" alt="About This Computer"></div>
-        <figcaption><strong>About This Computer</strong>System overview</figcaption>
-      </figure>
-    </div>
-  </section>
 
   <section id="install">
     <h2>Get Ooze</h2>
