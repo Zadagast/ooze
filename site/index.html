@@ -8,7 +8,14 @@
 <meta property="og:title" content="Ooze — an Aqua-inspired Wayland desktop">
 <meta property="og:description" content="A Wayland desktop environment built on Mutter, with a global menu bar, floating dock, and first-party GTK4 apps sharing one visual system.">
 <meta property="og:image" content="assets/ooze-dark.png">
-<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/ooze-splat.png">
+<script>
+  (function () {
+    var saved = localStorage.getItem('ooze-theme');
+    var theme = saved || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
 <style>
   :root {
     --ink: #1c1e22;
@@ -21,7 +28,39 @@
     --accent-deep: #1c5fc4;
     --dark: #14161a;
     --radius: 14px;
+    --pinstripe: rgba(0,0,0,.018);
+    --bar-hi: #fbfcfd;
+    --bar-lo: #e6e9ee;
+    --card-hi: #ffffff;
+    --card-lo: #f0f2f5;
+    --card-shadow: rgba(0,0,0,.06);
+    --chip-bg: #e3edfd;
+    --chip-border: #c3d8f8;
+    --chip-ink: #1c5fc4;
+    --frame-shadow: rgba(20,30,50,.25);
+    --link: #1c5fc4;
     font-size: 16px;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --ink: #e8eaee;
+    --ink-soft: #a4abb6;
+    --paper: #17191d;
+    --alu-hi: #202329;
+    --alu-lo: #17191d;
+    --line: #33373f;
+    --pinstripe: rgba(255,255,255,.022);
+    --bar-hi: #2b2f36;
+    --bar-lo: #1e2126;
+    --card-hi: #23262c;
+    --card-lo: #1c1f24;
+    --card-shadow: rgba(0,0,0,.35);
+    --chip-bg: #1c2a44;
+    --chip-border: #2c4470;
+    --chip-ink: #7fb0f7;
+    --frame-shadow: rgba(0,0,0,.6);
+    --link: #7fb0f7;
+    color-scheme: dark;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html { scroll-behavior: smooth; }
@@ -29,23 +68,24 @@
     font-family: -apple-system, "SF Pro Text", "Helvetica Neue", "Segoe UI", Ubuntu, Cantarell, sans-serif;
     color: var(--ink);
     background:
-      repeating-linear-gradient(0deg, rgba(0,0,0,.018) 0 1px, transparent 1px 4px),
+      repeating-linear-gradient(0deg, var(--pinstripe) 0 1px, transparent 1px 4px),
       linear-gradient(180deg, var(--alu-hi), var(--paper));
     line-height: 1.6;
   }
-  a { color: var(--accent-deep); }
+  a { color: var(--link); }
 
   /* ---- menu-bar style header ---- */
   header {
     position: sticky; top: 0; z-index: 10;
     display: flex; align-items: center; gap: 1.4rem;
     padding: .45rem 1.4rem;
-    background: linear-gradient(180deg, #fbfcfd, #e6e9ee);
+    background: linear-gradient(180deg, var(--bar-hi), var(--bar-lo));
     border-bottom: 1px solid var(--line);
     box-shadow: 0 1px 6px rgba(0,0,0,.08);
     font-size: .95rem;
   }
   header .brand {
+    display: inline-flex; align-items: center; gap: .4rem;
     font-weight: 700;
     padding: .1rem .7rem;
     border-radius: 6px;
@@ -55,21 +95,35 @@
     text-decoration: none;
     text-shadow: 0 1px 1px rgba(0,0,0,.35);
   }
+  header .brand img { width: 1.05em; height: 1.05em; }
   header nav { display: flex; gap: 1.1rem; flex-wrap: wrap; }
   header nav a { color: var(--ink-soft); text-decoration: none; }
   header nav a:hover { color: var(--ink); }
   header .gh { margin-left: auto; }
+  #theme-toggle {
+    cursor: pointer; font: inherit; line-height: 1;
+    padding: .25rem .6rem; border-radius: 999px;
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--card-hi), var(--card-lo));
+    color: var(--ink);
+  }
+  #theme-toggle:hover { filter: brightness(1.06); }
 
   main { max-width: 1060px; margin: 0 auto; padding: 0 1.4rem 4rem; }
 
   /* ---- hero ---- */
   .hero { text-align: center; padding: 4.2rem 0 2.6rem; }
+  .hero .logo {
+    display: block; margin: 0 auto .6rem;
+    width: clamp(3.4rem, 9vw, 5rem); height: auto;
+    filter: drop-shadow(0 4px 10px rgba(0,0,0,.25));
+  }
   .hero h1 {
     font-size: clamp(2.4rem, 6vw, 3.8rem);
     letter-spacing: -.02em;
     line-height: 1.1;
   }
-  .hero h1 span { color: var(--accent-deep); }
+  .hero h1 span { color: var(--link); }
   .hero p.tag {
     margin: 1rem auto 0; max-width: 42rem;
     font-size: 1.2rem; color: var(--ink-soft);
@@ -84,9 +138,9 @@
     box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 2px 6px rgba(31,95,196,.35);
   }
   .btn.alt {
-    background: linear-gradient(180deg, #ffffff, #e7eaef);
+    background: linear-gradient(180deg, var(--card-hi), var(--card-lo));
     color: var(--ink); border-color: var(--line); text-shadow: none;
-    box-shadow: inset 0 1px 0 #fff, 0 1px 4px rgba(0,0,0,.12);
+    box-shadow: 0 1px 4px rgba(0,0,0,.12);
   }
   .btn:hover { filter: brightness(1.05); }
 
@@ -95,14 +149,14 @@
     margin: 2.6rem auto 0; max-width: 920px;
     border-radius: var(--radius); overflow: hidden;
     border: 1px solid var(--line);
-    box-shadow: 0 18px 50px rgba(20,30,50,.25);
-    background: #e9ebef;
+    box-shadow: 0 18px 50px var(--frame-shadow);
+    background: var(--bar-lo);
   }
   .frame .bar {
     display: flex; align-items: center; gap: .45rem;
     padding: .5rem .8rem;
-    background: repeating-linear-gradient(0deg, rgba(0,0,0,.02) 0 1px, transparent 1px 3px),
-                linear-gradient(180deg, #f7f8fa, #dfe2e8);
+    background: repeating-linear-gradient(0deg, var(--pinstripe) 0 1px, transparent 1px 3px),
+                linear-gradient(180deg, var(--bar-hi), var(--bar-lo));
     border-bottom: 1px solid var(--line);
   }
   .frame .bar i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
@@ -125,18 +179,18 @@
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   }
   .card {
-    background: linear-gradient(180deg, #ffffff, #f0f2f5);
+    background: linear-gradient(180deg, var(--card-hi), var(--card-lo));
     border: 1px solid var(--line); border-radius: var(--radius);
     padding: 1.2rem 1.3rem;
-    box-shadow: inset 0 1px 0 #fff, 0 2px 8px rgba(0,0,0,.06);
+    box-shadow: 0 2px 8px var(--card-shadow);
   }
   .card h3 { font-size: 1.05rem; margin-bottom: .35rem; }
   .card p { font-size: .95rem; color: var(--ink-soft); }
   .card .chip {
     display: inline-block; font-size: .72rem; font-weight: 700;
     letter-spacing: .04em; text-transform: uppercase;
-    color: var(--accent-deep); background: #e3edfd;
-    border: 1px solid #c3d8f8; border-radius: 999px;
+    color: var(--chip-ink); background: var(--chip-bg);
+    border: 1px solid var(--chip-border); border-radius: 999px;
     padding: .05rem .55rem; margin-bottom: .55rem;
   }
 
@@ -161,14 +215,14 @@
     border-top: 1px solid var(--line);
     padding: 2rem 1.4rem; text-align: center;
     color: var(--ink-soft); font-size: .9rem;
-    background: linear-gradient(180deg, #eef0f3, #e2e5ea);
+    background: linear-gradient(180deg, var(--bar-hi), var(--bar-lo));
   }
 </style>
 </head>
 <body>
 
 <header>
-  <a class="brand" href="#">Ooze</a>
+  <a class="brand" href="#"><img src="assets/ooze-splat.png" alt="">Ooze</a>
   <nav>
     <a href="#features">Features</a>
     <a href="#apps">Apps</a>
@@ -176,10 +230,12 @@
     <a href="#install">Install</a>
   </nav>
   <a class="gh" href="https://github.com/Zadagast/ooze">GitHub&nbsp;→</a>
+  <button id="theme-toggle" title="Toggle light / dark mode" aria-label="Toggle light / dark mode">🌙</button>
 </header>
 
 <main>
   <div class="hero">
+    <img class="logo" src="assets/ooze-splat.png" alt="Ooze splat logo">
     <h1>A desktop that <span>flows</span>.</h1>
     <p class="tag">
       Ooze is a Wayland desktop environment built on Mutter — a cohesive Aqua-inspired
@@ -311,5 +367,20 @@ sudo apt install ./dist/ooze_0.1.0_amd64.deb</span></code></pre>
   <p>Ooze — built on <a href="https://gitlab.gnome.org/GNOME/mutter">Mutter</a> · <a href="https://github.com/Zadagast/ooze">Source on GitHub</a></p>
 </footer>
 
+<script>
+  (function () {
+    var btn = document.getElementById('theme-toggle');
+    function paint() {
+      btn.textContent = document.documentElement.dataset.theme === 'dark' ? '☀️' : '🌙';
+    }
+    btn.addEventListener('click', function () {
+      var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem('ooze-theme', next);
+      paint();
+    });
+    paint();
+  })();
+</script>
 </body>
 </html>
