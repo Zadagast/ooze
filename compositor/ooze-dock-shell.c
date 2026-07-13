@@ -3,8 +3,11 @@
 #include "ooze-aqua-draw.h"
 #include "ooze-aqua-menu.h"
 #include "ooze-dnd-bridge.h"
+#include "ooze-foreign-gtk.h"
+#include "ooze-icon-lookup.h"
 #include "ooze-shared-appmenu.h"
 #include "ooze-shared-icons.h"
+#include "ooze-stall.h"
 #include "ooze-theme.h"
 
 #define __COGL_H_INSIDE__
@@ -13,11 +16,8 @@
 
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <gio/gdesktopappinfo.h>
-#include <png.h>
 
-#include <errno.h>
 #include <math.h>
-#include <stdio.h>
 #include <string.h>
 
 #include <meta/meta-backend.h>
@@ -170,6 +170,11 @@ static gboolean ooze_dock_window_skippable_for_temp (MetaWindow *window);
 static void ooze_dock_launch_desktop_info (GDesktopAppInfo *app_info);
 static void ooze_dock_handle_desktop_click (MetaDisplay     *display,
                                             GDesktopAppInfo *app_info);
+static CoglTexture *ooze_dock_texture_from_pixbuf (ClutterActor *actor,
+                                                   GdkPixbuf    *pixbuf);
+static void ooze_dock_on_icon_theme_changed (GSettings   *settings,
+                                             const char  *key,
+                                             gpointer     user_data);
 
 typedef struct _OozeDockUnpinAnim {
   ClutterActor *container;
@@ -855,26 +860,45 @@ ooze_dock_create_desktop_launcher (ClutterActor    *stage,
 
   /* g_app_info_get_icon is transfer-none — do not unref. */
   icon = g_app_info_get_icon (G_APP_INFO (app_info));
-  if (G_IS_THEMED_ICON (icon))
+  if (icon)
     {
-      const char * const *names = g_themed_icon_get_names (G_THEMED_ICON (icon));
-      int i;
+      g_autoptr (GdkPixbuf) pixbuf = NULL;
+      int load_size = ooze_aqua_icon_texture_size (display, logical);
 
-      for (i = 0; names && names[i] && n_names < 3; i++)
-        icon_names[n_names++] = names[i];
+      pixbuf = ooze_icon_lookup_from_gicon (icon, load_size);
+      if (pixbuf)
+        {
+          g_autoptr (CoglTexture) texture =
+            ooze_dock_texture_from_pixbuf (stage, pixbuf);
+
+          if (texture)
+            content = clutter_texture_content_new_from_texture (texture, NULL);
+        }
     }
-  else
+
+  if (!content)
     {
-      icon_key = g_desktop_app_info_get_string (app_info, "Icon");
-      if (icon_key && *icon_key && icon_key[0] != '/')
-        icon_names[n_names++] = icon_key;
-    }
-  if (app_id && n_names < 3)
-    icon_names[n_names++] = app_id;
-  icon_names[n_names] = NULL;
+      if (G_IS_THEMED_ICON (icon))
+        {
+          const char * const *names = g_themed_icon_get_names (G_THEMED_ICON (icon));
+          int i;
 
-  if (n_names > 0)
-    content = ooze_dock_themed_icon_content (stage, display, icon_names, logical);
+          for (i = 0; names && names[i] && n_names < 3; i++)
+            icon_names[n_names++] = names[i];
+        }
+      else
+        {
+          icon_key = g_desktop_app_info_get_string (app_info, "Icon");
+          if (icon_key && *icon_key)
+            icon_names[n_names++] = icon_key;
+        }
+      if (app_id && n_names < 3)
+        icon_names[n_names++] = app_id;
+      icon_names[n_names] = NULL;
+
+      if (n_names > 0)
+        content = ooze_dock_themed_icon_content (stage, display, icon_names, logical);
+    }
   if (!content)
     content = ooze_aqua_dock_icon_content (stage, texture, 0.40f, 0.45f, 0.55f);
 
@@ -1701,6 +1725,7 @@ ooze_dock_fill_icons (ClutterActor *container,
 static void
 ooze_dock_rebuild_icons (ClutterActor *container)
 {
+  g_autoptr (OozeStallScope) stall = NULL;
   MetaDisplay *display;
   ClutterActor *stage;
 
@@ -1709,6 +1734,9 @@ ooze_dock_rebuild_icons (ClutterActor *container)
   if (!display || !stage)
     return;
 
+  /* Freedesktop icon walks for every launcher — never call from the
+   * GSettings/click stack; only via ooze_dock_schedule_rebuild_icons. */
+  stall = ooze_stall_begin ("dock-rebuild-icons");
   ooze_dock_fill_icons (container, display, stage);
   ooze_dock_notify_changed (container);
 }
@@ -2301,390 +2329,24 @@ ooze_dock_texture_from_pixbuf (ClutterActor *actor,
   return texture;
 }
 
-static GdkPixbuf *
-ooze_dock_load_png_pixbuf (const char  *path,
-                         int          size,
-                         GError     **error)
-{
-  g_autoptr (GdkPixbuf) pixbuf = NULL;
-  GdkPixbuf *scaled;
-  FILE *fp;
-  png_structp png;
-  png_infop info;
-  png_byte header[8];
-  png_uint_32 width;
-  png_uint_32 height;
-  png_bytep *rows = NULL;
-  guchar *pixels;
-  int rowstride;
-  png_uint_32 png_rowbytes;
-  int y;
-
-  fp = fopen (path, "rb");
-  if (!fp)
-    {
-      g_set_error (error,
-                   G_FILE_ERROR,
-                   g_file_error_from_errno (errno),
-                   "Failed to open %s: %s",
-                   path,
-                   g_strerror (errno));
-      return NULL;
-    }
-
-  if (fread (header, 1, 8, fp) != 8 || png_sig_cmp (header, 0, 8))
-    {
-      fclose (fp);
-      g_set_error_literal (error,
-                           GDK_PIXBUF_ERROR,
-                           GDK_PIXBUF_ERROR_CORRUPT_IMAGE,
-                           "Not a PNG file");
-      return NULL;
-    }
-
-  png = png_create_read_struct (PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-  info = png_create_info_struct (png);
-  if (!png || !info)
-    {
-      fclose (fp);
-      png_destroy_read_struct (&png, &info, NULL);
-      g_set_error_literal (error,
-                           GDK_PIXBUF_ERROR,
-                           GDK_PIXBUF_ERROR_INSUFFICIENT_MEMORY,
-                           "Failed to allocate PNG decoder");
-      return NULL;
-    }
-
-  if (setjmp (png_jmpbuf (png)))
-    {
-      g_free (rows);
-      png_destroy_read_struct (&png, &info, NULL);
-      fclose (fp);
-      g_set_error_literal (error,
-                           GDK_PIXBUF_ERROR,
-                           GDK_PIXBUF_ERROR_CORRUPT_IMAGE,
-                           "Failed to decode PNG");
-      return NULL;
-    }
-
-  png_init_io (png, fp);
-  png_set_sig_bytes (png, 8);
-  png_read_info (png, info);
-
-  width = png_get_image_width (png, info);
-  height = png_get_image_height (png, info);
-
-  if (png_get_bit_depth (png, info) == 16)
-    png_set_strip_16 (png);
-  if (png_get_color_type (png, info) == PNG_COLOR_TYPE_PALETTE)
-    png_set_palette_to_rgb (png);
-  if (png_get_color_type (png, info) == PNG_COLOR_TYPE_GRAY &&
-      png_get_bit_depth (png, info) < 8)
-    png_set_expand_gray_1_2_4_to_8 (png);
-  if (png_get_valid (png, info, PNG_INFO_tRNS))
-    png_set_tRNS_to_alpha (png);
-  if (png_get_color_type (png, info) == PNG_COLOR_TYPE_RGB ||
-      png_get_color_type (png, info) == PNG_COLOR_TYPE_GRAY ||
-      png_get_color_type (png, info) == PNG_COLOR_TYPE_PALETTE)
-    png_set_filler (png, 0xff, PNG_FILLER_AFTER);
-  if (png_get_color_type (png, info) == PNG_COLOR_TYPE_GRAY ||
-      png_get_color_type (png, info) == PNG_COLOR_TYPE_GRAY_ALPHA)
-    png_set_gray_to_rgb (png);
-
-  png_read_update_info (png, info);
-  png_rowbytes = png_get_rowbytes (png, info);
-
-  rows = g_new0 (png_bytep, height);
-  for (y = 0; y < (int) height; y++)
-    rows[y] = g_new (png_byte, png_rowbytes);
-
-  png_read_image (png, rows);
-  png_read_end (png, NULL);
-  fclose (fp);
-  png_destroy_read_struct (&png, &info, NULL);
-
-  pixbuf = gdk_pixbuf_new (GDK_COLORSPACE_RGB,
-                           TRUE,
-                           8,
-                           (int) width,
-                           (int) height);
-  pixels = gdk_pixbuf_get_pixels (pixbuf);
-  rowstride = gdk_pixbuf_get_rowstride (pixbuf);
-
-  for (y = 0; y < (int) height; y++)
-    {
-      memcpy (pixels + y * rowstride, rows[y], png_rowbytes);
-      g_free (rows[y]);
-    }
-  g_free (rows);
-
-  if ((int) width != size || (int) height != size)
-    {
-      scaled = gdk_pixbuf_scale_simple (pixbuf, size, size, GDK_INTERP_BILINEAR);
-      if (!scaled)
-        {
-          g_set_error_literal (error,
-                               GDK_PIXBUF_ERROR,
-                               GDK_PIXBUF_ERROR_FAILED,
-                               "Failed to scale PNG");
-          return NULL;
-        }
-      return scaled;
-    }
-
-  return g_steal_pointer (&pixbuf);
-}
-
-static GdkPixbuf *
-ooze_dock_try_load_icon_file (const char *path,
-                            int         size)
-{
-  g_autoptr (GError) error = NULL;
-
-  if (g_str_has_suffix (path, ".png"))
-    return ooze_dock_load_png_pixbuf (path, size, &error);
-
-  if (!g_file_test (path, G_FILE_TEST_EXISTS))
-    return NULL;
-
-  return gdk_pixbuf_new_from_file_at_scale (path,
-                                            size,
-                                            size,
-                                            TRUE,
-                                            &error);
-}
-
-static GdkPixbuf *
-ooze_dock_try_icon_in_dir (const char *dir,
-                         const char *icon_name,
-                         int         size)
-{
-  static const char *extensions[] = { ".png", ".svg", ".xpm", NULL };
-  gsize e;
-
-  for (e = 0; extensions[e] != NULL; e++)
-    {
-      g_autofree char *path =
-        g_strdup_printf ("%s/%s%s", dir, icon_name, extensions[e]);
-      GdkPixbuf *pixbuf = ooze_dock_try_load_icon_file (path, size);
-
-      if (pixbuf)
-        return pixbuf;
-    }
-
-  return NULL;
-}
-
-static char *
-ooze_dock_get_icon_theme (void)
-{
-  g_autoptr (GSettings) settings = NULL;
-
-  settings = g_settings_new ("org.gnome.desktop.interface");
-  return g_settings_get_string (settings, "icon-theme");
-}
-
-static GdkPixbuf *
-ooze_dock_try_theme_paths (const char *icon_base,
-                         const char *theme,
-                         const char *icon_name,
-                         int         size)
-{
-  static const char *contexts[] = {
-    "actions",
-    "apps",
-    "devices",
-    "places",
-    "mimes",
-    "mimetypes",
-    "categories",
-    "status",
-    "emblems",
-    NULL,
-  };
-  static const int sizes[] = { 256, 128, 96, 64, 48, 32, 24, 16, 0 };
-  gsize c;
-  gsize s;
-
-  if (!theme || theme[0] == '\0')
-    return NULL;
-
-  /* Icon theme layout: theme/context/size/icon (elementary, Adwaita). */
-  for (c = 0; contexts[c] != NULL; c++)
-    {
-      g_autofree char *dir = NULL;
-      GdkPixbuf *pixbuf;
-
-      dir = g_strdup_printf ("%s/%s/%s/%d",
-                             icon_base,
-                             theme,
-                             contexts[c],
-                             size);
-      pixbuf = ooze_dock_try_icon_in_dir (dir, icon_name, size);
-      if (pixbuf)
-        return pixbuf;
-    }
-
-  for (s = 0; sizes[s] != 0; s++)
-    {
-      for (c = 0; contexts[c] != NULL; c++)
-        {
-          g_autofree char *dir = NULL;
-          GdkPixbuf *pixbuf;
-          int found_w;
-
-          if (sizes[s] == size)
-            continue;
-
-          dir = g_strdup_printf ("%s/%s/%s/%d",
-                                 icon_base,
-                                 theme,
-                                 contexts[c],
-                                 sizes[s]);
-          pixbuf = ooze_dock_try_icon_in_dir (dir, icon_name, sizes[s]);
-          if (!pixbuf)
-            continue;
-
-          found_w = gdk_pixbuf_get_width (pixbuf);
-          if (found_w > size)
-            {
-              GdkPixbuf *scaled;
-
-              scaled = gdk_pixbuf_scale_simple (pixbuf,
-                                                size,
-                                                size,
-                                                GDK_INTERP_HYPER);
-              g_object_unref (pixbuf);
-              return scaled;
-            }
-
-          return pixbuf;
-        }
-    }
-
-  /* Legacy hicolor layout: theme/sizexsize/context/icon. */
-  for (c = 0; contexts[c] != NULL; c++)
-    {
-      g_autofree char *dir = NULL;
-      GdkPixbuf *pixbuf;
-
-      dir = g_strdup_printf ("%s/%s/%dx%d/%s",
-                             icon_base,
-                             theme,
-                             size,
-                             size,
-                             contexts[c]);
-      pixbuf = ooze_dock_try_icon_in_dir (dir, icon_name, size);
-      if (pixbuf)
-        return pixbuf;
-    }
-
-  for (s = 0; sizes[s] != 0; s++)
-    {
-      for (c = 0; contexts[c] != NULL; c++)
-        {
-          g_autofree char *dir = NULL;
-          GdkPixbuf *pixbuf;
-          int found_w;
-
-          if (sizes[s] == size)
-            continue;
-
-          dir = g_strdup_printf ("%s/%s/%dx%d/%s",
-                                 icon_base,
-                                 theme,
-                                 sizes[s],
-                                 sizes[s],
-                                 contexts[c]);
-          pixbuf = ooze_dock_try_icon_in_dir (dir, icon_name, sizes[s]);
-          if (!pixbuf)
-            continue;
-
-          found_w = gdk_pixbuf_get_width (pixbuf);
-          if (found_w > size)
-            {
-              GdkPixbuf *scaled;
-
-              scaled = gdk_pixbuf_scale_simple (pixbuf,
-                                                size,
-                                                size,
-                                                GDK_INTERP_HYPER);
-              g_object_unref (pixbuf);
-              return scaled;
-            }
-
-          return pixbuf;
-        }
-    }
-
-  for (c = 0; contexts[c] != NULL; c++)
-    {
-      g_autoptr (GdkPixbuf) pixbuf = NULL;
-      g_autofree char *dir = NULL;
-
-      dir = g_strdup_printf ("%s/%s/scalable/%s", icon_base, theme, contexts[c]);
-      pixbuf = ooze_dock_try_icon_in_dir (dir, icon_name, size);
-      if (pixbuf)
-        return g_steal_pointer (&pixbuf);
-
-      dir = g_strdup_printf ("%s/%s/symbolic/%s", icon_base, theme, contexts[c]);
-      pixbuf = ooze_dock_try_icon_in_dir (dir, icon_name, size);
-      if (pixbuf)
-        return g_steal_pointer (&pixbuf);
-    }
-
-  return NULL;
-}
 
 static GdkPixbuf *
 ooze_dock_load_themed_icon (const char *icon_name,
                           int         size)
 {
-  g_autofree char *user_theme = ooze_dock_get_icon_theme ();
-  g_autofree char *local_icons = ooze_icons_get_icons_dir ();
   const char *alias;
-  const char *icon_bases[] = {
-    local_icons,
-    "/usr/share/icons",
-    NULL,
-  };
-  const char *themes[] = {
-    user_theme,
-    OOZE_ICON_THEME,
-    "elementary",
-    "Adwaita",
-    "Yaru",
-    "hicolor",
-    NULL,
-  };
-  gsize b;
-  gsize t;
   GdkPixbuf *pixbuf;
 
   if (!icon_name || icon_name[0] == '\0')
     return NULL;
 
-  for (b = 0; icon_bases[b] != NULL; b++)
-    {
-      if (!icon_bases[b] || icon_bases[b][0] == '\0')
-        continue;
-      if (!g_file_test (icon_bases[b], G_FILE_TEST_IS_DIR))
-        continue;
-
-      for (t = 0; themes[t] != NULL; t++)
-        {
-          pixbuf = ooze_dock_try_theme_paths (icon_bases[b],
-                                            themes[t],
-                                            icon_name,
-                                            size);
-          if (pixbuf)
-            return pixbuf;
-        }
-    }
+  pixbuf = ooze_icon_lookup_load (icon_name, size);
+  if (pixbuf)
+    return pixbuf;
 
   alias = ooze_dock_icon_alias (icon_name);
   if (alias && g_strcmp0 (alias, icon_name) != 0)
-    return ooze_dock_load_themed_icon (alias, size);
+    return ooze_icon_lookup_load (alias, size);
 
   return NULL;
 }
@@ -2928,6 +2590,17 @@ ooze_dock_populate_container (MetaContext   *context,
 
   ooze_dock_fill_icons (container, display, stage);
 
+  if (!g_object_get_data (G_OBJECT (container), "dock-icon-settings"))
+    {
+      GSettings *settings = g_settings_new ("org.gnome.desktop.interface");
+
+      /* Icon packs only — cursor-theme must not rebuild dock icons. */
+      g_signal_connect (settings, "changed::icon-theme",
+                        G_CALLBACK (ooze_dock_on_icon_theme_changed), container);
+      g_object_set_data_full (G_OBJECT (container), "dock-icon-settings",
+                              settings, g_object_unref);
+    }
+
   if (!g_object_get_data (G_OBJECT (container), "indicator-timer"))
     {
       indicator_ctx = g_new0 (OozeDockIndicatorCtx, 1);
@@ -2953,6 +2626,45 @@ ooze_dock_populate_container (MetaContext   *context,
                              GINT_TO_POINTER (1));
         }
     }
+}
+
+static gboolean
+ooze_dock_rebuild_icons_idle (gpointer user_data)
+{
+  ClutterActor *container = CLUTTER_ACTOR (user_data);
+
+  g_object_set_data (G_OBJECT (container), "dock-icon-rebuild-idle", NULL);
+  if (CLUTTER_IS_ACTOR (container))
+    ooze_dock_rebuild_icons (container);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+ooze_dock_schedule_rebuild_icons (ClutterActor *container)
+{
+  guint id;
+
+  if (!CLUTTER_IS_ACTOR (container))
+    return;
+  if (g_object_get_data (G_OBJECT (container), "dock-icon-rebuild-idle"))
+    return;
+
+  id = g_idle_add_full (G_PRIORITY_DEFAULT_IDLE,
+                        ooze_dock_rebuild_icons_idle,
+                        g_object_ref (container),
+                        g_object_unref);
+  g_object_set_data (G_OBJECT (container), "dock-icon-rebuild-idle",
+                     GUINT_TO_POINTER (id));
+}
+
+static void
+ooze_dock_on_icon_theme_changed (GSettings   *settings G_GNUC_UNUSED,
+                                 const char  *key G_GNUC_UNUSED,
+                                 gpointer     user_data)
+{
+  /* Idle so GSettings churn / Themes UI writes do not block the compositor
+   * click that changed the pack (heavy Freedesktop walk per dock icon). */
+  ooze_dock_schedule_rebuild_icons (CLUTTER_ACTOR (user_data));
 }
 
 gboolean

@@ -19,6 +19,9 @@ void ooze_panel_update_clock       (OozePlugin *plugin);
 /* Rebuild the menu bar labels from the current app/shell menu. */
 void ooze_panel_rebuild_menu_bar   (OozePlugin *plugin);
 
+/* Recolor existing menu bar + clock labels for a Light↔Dark swap (no rebuild). */
+void ooze_panel_recolor_menu_bar   (OozePlugin *plugin);
+
 /* Re-lay out menu bar label positions after a resize. */
 void ooze_panel_layout_labels      (OozePlugin *plugin);
 

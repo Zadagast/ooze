@@ -1,5 +1,6 @@
 #include "ooze-xsettings.h"
 #include "ooze-theme.h"
+#include "ooze-stall.h"
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -104,7 +105,7 @@ ooze_xsettings_append_string (GByteArray *buf,
 static const char *
 ooze_xsettings_current_gtk_theme (void)
 {
-  const char *foreign;
+  static char *foreign;
 
   /*
    * XSETTINGS is only consumed by X11 / Xwayland clients. Foreign GTK apps
@@ -113,6 +114,7 @@ ooze_xsettings_current_gtk_theme (void)
    * Do NOT mirror this into org.gnome.desktop.interface gtk-theme — Wayland
    * Ooze apps read GSettings and WhiteSur there breaks Ooze Gel / OozeKit.
    */
+  g_free (foreign);
   foreign = ooze_theme_foreign_gtk_theme_for_session ();
   if (foreign)
     return foreign;
@@ -154,7 +156,13 @@ ooze_xsettings_build_blob (guint32 serial)
 static void
 ooze_xsettings_publish (OozeXsettings *xs)
 {
-  g_autoptr (GByteArray) blob = ooze_xsettings_build_blob (xs->serial);
+  g_autoptr (OozeStallScope) stall = NULL;
+  g_autoptr (GByteArray) blob = NULL;
+
+  /* XSync can block against nest Xwayland — callers must idle-defer off
+   * the GSettings/click stack (see ooze_theme_schedule_xsettings_republish). */
+  stall = ooze_stall_begin ("xsettings-publish");
+  blob = ooze_xsettings_build_blob (xs->serial);
 
   XChangeProperty (xs->dpy,
                    xs->window,

@@ -12,6 +12,18 @@
  * asserts !is_display_singleton and crashes.  We only add the extra search
  * path directly on the theme object, which IS allowed on the singleton.
  */
+static char *
+ooze_icons_gtk_preferred_theme_name (void)
+{
+  g_autoptr (GSettings) settings = g_settings_new ("org.gnome.desktop.interface");
+  g_autofree char *name = g_settings_get_string (settings, "icon-theme");
+
+  if (name && name[0] != '\0')
+    return g_steal_pointer (&name);
+
+  return g_strdup (OOZE_ICON_THEME);
+}
+
 static void
 ooze_icons_ensure_search_path (GtkIconTheme *theme)
 {
@@ -26,8 +38,11 @@ on_icon_theme_changed (GtkIconTheme *theme,
                        gpointer      user_data G_GNUC_UNUSED)
 {
   /*
-   * After a theme change (e.g. Adwaita resetting the theme name) re-apply
-   * via GtkSettings so the theme name is correct, then re-add our path.
+   * After a theme change re-sync GtkSettings from GSettings, then re-add
+   * our search path. Do not force elementary over the user's pack.
+   * Only write gtk-icon-theme-name when it differs — GtkSettings syncs to
+   * GSettings and a no-op set still churns changed::icon-theme, which made
+   * the compositor rebuild the dock on every Light↔Dark restyle.
    */
   GdkDisplay *display = gdk_display_get_default ();
   if (display)
@@ -35,10 +50,19 @@ on_icon_theme_changed (GtkIconTheme *theme,
       GtkSettings *settings = gtk_settings_get_for_display (display);
       if (settings)
         {
-          g_signal_handlers_block_by_func (theme, on_icon_theme_changed, user_data);
-          g_object_set (settings, "gtk-icon-theme-name", OOZE_ICON_THEME, NULL);
+          g_autofree char *name = ooze_icons_gtk_preferred_theme_name ();
+          g_autofree char *current = NULL;
+
+          g_object_get (settings, "gtk-icon-theme-name", &current, NULL);
+          if (g_strcmp0 (current, name) != 0)
+            {
+              g_signal_handlers_block_by_func (theme, on_icon_theme_changed,
+                                               user_data);
+              g_object_set (settings, "gtk-icon-theme-name", name, NULL);
+              g_signal_handlers_unblock_by_func (theme, on_icon_theme_changed,
+                                                 user_data);
+            }
           ooze_icons_ensure_search_path (theme);
-          g_signal_handlers_unblock_by_func (theme, on_icon_theme_changed, user_data);
         }
     }
 }
@@ -49,6 +73,7 @@ ooze_icons_configure_gtk (void)
   GdkDisplay *display;
   GtkIconTheme *theme;
   GtkSettings *settings;
+  g_autofree char *name = NULL;
 
   ooze_icons_apply ();
 
@@ -56,10 +81,12 @@ ooze_icons_configure_gtk (void)
   if (!display)
     return;
 
+  name = ooze_icons_gtk_preferred_theme_name ();
+
   /* Theme name must be set via GtkSettings – direct API on singleton crashes. */
   settings = gtk_settings_get_for_display (display);
   if (settings)
-    g_object_set (settings, "gtk-icon-theme-name", OOZE_ICON_THEME, NULL);
+    g_object_set (settings, "gtk-icon-theme-name", name, NULL);
 
   /* Add extra search path (allowed on singleton). */
   theme = gtk_icon_theme_get_for_display (display);

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Themes
+GenericName=Appearance Settings
+Comment=Ooze Themes — appearance, icons, cursors, and foreign GTK apps
+Exec=ooze-themes
+Icon=preferences-desktop-theme
+Terminal=false
+Type=Application
+Categories=Settings;GTK;
+StartupWMClass=org.ooze.Themes

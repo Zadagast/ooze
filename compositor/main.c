@@ -1,5 +1,6 @@
 #include "ooze-plugin.h"
 #include "ooze-theme.h"
+#include "ooze-stall.h"
 
 #include "ooze-shared-appmenu.h"
 #include "ooze-shared-icons.h"
@@ -167,6 +168,14 @@ main (int argc, char **argv)
 {
   g_autoptr (MetaContext) context = NULL;
   int status;
+
+  /*
+   * Never inherit session-wide GTK_THEME into the compositor. Foreign apps
+   * get WhiteSur only via launch helpers / XSETTINGS — not this process.
+   */
+  g_unsetenv ("GTK_THEME");
+
+  ooze_stall_init ();
 
   /*
    * Nested --devkit only: virtual monitor modes for the nest window.

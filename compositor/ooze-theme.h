@@ -50,8 +50,8 @@ void ooze_theme_toggle (OozeTheme *theme);
  * X11 foreign apps get WhiteSur through XSETTINGS + launch-scoped GTK_THEME. */
 const char *ooze_theme_foreign_gtk_name (gboolean dark);
 gboolean    ooze_theme_foreign_gtk_installed (gboolean dark);
-/* Prefer-dark aware installed WhiteSur name, or NULL if missing. */
-const char *ooze_theme_foreign_gtk_theme_for_session (void);
+/* Returns an allocated selected foreign GTK theme, or NULL if missing. */
+char       *ooze_theme_foreign_gtk_theme_for_session (void);
 void        ooze_theme_recover_ooze_from_foreign_gtk (void);
 void        ooze_theme_apply_foreign_gtk_to_launcher (GSubprocessLauncher *launcher);
 void        ooze_theme_apply_foreign_gtk_to_launch_context (GAppLaunchContext *ctx);

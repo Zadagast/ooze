@@ -30,6 +30,7 @@ static const OozeAppCatalogEntry ooze_apps[] = {
   { "Ooze Eye",     "ooze-eye",     "org.ooze.Eye",     "Image viewer" },
   { "Ooze Command", "ooze-command", "org.ooze.Command", "Terminal emulator" },
   { "Ooze King",    "ooze-king",    "org.ooze.King",    "System Settings" },
+  { "Ooze Themes",  "ooze-themes",  "org.ooze.Themes",  "Appearance and theme settings" },
   { "Ooze Ear",     "ooze-ear",     "org.ooze.Ear",     "Sound Settings" },
   { "Ooze Pak",     "ooze-pak",     "org.ooze.Pak",     "Software installer" },
   { "Ooze About",   "ooze-about",   "org.ooze.About",   "About This Computer" },

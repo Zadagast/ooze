@@ -38,6 +38,10 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 DESTDIR="$STAGE" ninja -C "$BUILD_DIR" install
 
+echo "==> Bundling WhiteSur foreign GTK themes"
+OOZE_THEMES_DEST="$STAGE/usr/share/ooze/themes" \
+  "$ROOT/scripts/install-whitesur-theme.sh"
+
 # Nested launcher (Applications menu) + native GDM Wayland session
 install -d "$STAGE/usr/bin"
 install -m 0755 "$ROOT/packaging/deb/ooze-session" "$STAGE/usr/bin/ooze-session"
@@ -49,6 +53,20 @@ install -m 0644 "$ROOT/packaging/deb/ooze-session.desktop" \
 install -d "$STAGE/usr/share/wayland-sessions"
 install -m 0644 "$ROOT/data/wayland-sessions/ooze.desktop" \
   "$STAGE/usr/share/wayland-sessions/ooze.desktop"
+
+# Ooze-owned portal preference + UseIn=ooze wrappers (backends stay gtk/gnome)
+install -d "$STAGE/usr/share/xdg-desktop-portal/portals"
+install -m 0644 "$ROOT/data/xdg-desktop-portal/ooze-portals.conf" \
+  "$STAGE/usr/share/xdg-desktop-portal/ooze-portals.conf"
+install -m 0644 "$ROOT/data/xdg-desktop-portal/portals/ooze-gtk.portal" \
+  "$STAGE/usr/share/xdg-desktop-portal/portals/ooze-gtk.portal"
+install -m 0644 "$ROOT/data/xdg-desktop-portal/portals/ooze-gnome.portal" \
+  "$STAGE/usr/share/xdg-desktop-portal/portals/ooze-gnome.portal"
+install -m 0644 "$ROOT/data/xdg-desktop-portal/portals/ooze-gnome-keyring.portal" \
+  "$STAGE/usr/share/xdg-desktop-portal/portals/ooze-gnome-keyring.portal"
+install -d "$STAGE/usr/share/ooze"
+install -m 0755 "$ROOT/packaging/deb/ooze-session-env.sh" \
+  "$STAGE/usr/share/ooze/ooze-session-env.sh"
 
 # Prefer a simple branded icon if present
 if [[ -f "$ROOT/data/spot-logo.svg" ]]; then

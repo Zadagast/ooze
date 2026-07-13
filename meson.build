@@ -84,9 +84,12 @@ executable('ooze',
   'compositor/ooze-window.c',
   'compositor/ooze-magic-lamp.c',
   'compositor/ooze-transition.c',
+  'compositor/ooze-stall.c',
   'shared/ooze-shared-icons.c',
   'shared/ooze-shared-appmenu.c',
   'shared/ooze-dnd-bridge.c',
+  'shared/ooze-icon-lookup.c',
+  'shared/ooze-foreign-gtk.c',
   'common/aqua-traffic.c',
   c_args: c_args,
   include_directories: [inc_common, inc_compositor, inc_shared],
@@ -115,6 +118,24 @@ install_data('data/wayland-sessions/ooze.desktop',
 
 install_data('packaging/deb/ooze-wayland-session',
   install_dir: get_option('bindir'),
+  install_mode: 'rwxr-xr-x',
+)
+
+install_data('data/xdg-desktop-portal/ooze-portals.conf',
+  install_dir: get_option('datadir') / 'xdg-desktop-portal',
+)
+
+install_data(
+  [
+    'data/xdg-desktop-portal/portals/ooze-gtk.portal',
+    'data/xdg-desktop-portal/portals/ooze-gnome.portal',
+    'data/xdg-desktop-portal/portals/ooze-gnome-keyring.portal',
+  ],
+  install_dir: get_option('datadir') / 'xdg-desktop-portal' / 'portals',
+)
+
+install_data('packaging/deb/ooze-session-env.sh',
+  install_dir: get_option('datadir') / 'ooze',
   install_mode: 'rwxr-xr-x',
 )
 
@@ -172,6 +193,8 @@ ooze_shared_sources = [
   'shared/ooze-shared-icons-gtk.c',
   'shared/ooze-shared-appmenu.c',
   'shared/ooze-dnd-bridge.c',
+  'shared/ooze-icon-lookup.c',
+  'shared/ooze-foreign-gtk.c',
 ]
 
 ooze_app_inc = [inc_shared]
@@ -302,6 +325,28 @@ if gtk4_dep.found() and adw_dep.found()
   )
 
   install_data('data/org.ooze.Monitor.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
+  executable('ooze-themes',
+    'ooze-themes/main.c',
+    'ooze-themes/ooze-themes-window.c',
+    'ooze-themes/ooze-themes-pane.c',
+    ooze_shared_sources,
+    include_directories: ooze_app_inc + [include_directories('ooze-themes')],
+    dependencies: [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.Themes.desktop',
     install_dir: get_option('datadir') / 'applications',
   )
 
