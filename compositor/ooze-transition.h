@@ -6,8 +6,9 @@
 G_BEGIN_DECLS
 
 /*
- * GNOME/elementary-style appearance transition:
- * snapshot the stage, swap light/dark underneath, fade the snapshot out.
+ * Appearance transition: opaque color overlay, swap light/dark underneath,
+ * fade out. Intentionally avoids clutter_stage_paint_to_content() — a full
+ * stage snapshot stalls the main thread and breaks dock/desktop launches.
  */
 void ooze_screen_transition_run (MetaPlugin *plugin);
 

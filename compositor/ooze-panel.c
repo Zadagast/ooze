@@ -618,6 +618,8 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
                                           (gfloat) palette->menu_text_b);
       g_object_set_data (G_OBJECT (label), "ooze-menu-top",
                          GSIZE_TO_POINTER ((gsize) i));
+      g_object_set_data_full (G_OBJECT (label), "ooze-menu-label-text",
+                              g_strdup (text), g_free);
       if (from_app || !ooze_global_menu_get_x11_launch_hint (plugin->global_menu))
         {
           g_signal_connect (label, "button-press-event",
@@ -632,6 +634,62 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
       plugin->menu_bar_labels[plugin->n_menu_bar_labels++] = label;
     }
 
+  ooze_panel_layout_labels (plugin);
+}
+
+void
+ooze_panel_recolor_menu_bar (OozePlugin *plugin)
+{
+  const OozeAquaPalette *palette;
+  guint i;
+  gboolean missing_text = FALSE;
+
+  if (!plugin->panel)
+    return;
+
+  palette = ooze_theme_get_palette (NULL);
+
+  for (i = 0; i < plugin->n_menu_bar_labels; i++)
+    {
+      ClutterActor *bin = plugin->menu_bar_labels[i];
+      ClutterActor *label;
+      const char *text;
+      gfloat label_w;
+      gfloat label_h;
+
+      if (!bin)
+        continue;
+
+      text = g_object_get_data (G_OBJECT (bin), "ooze-menu-label-text");
+      label = clutter_actor_get_first_child (bin);
+      if (!text || !*text || !label)
+        {
+          missing_text = TRUE;
+          break;
+        }
+
+      panel_set_text_label (label,
+                            OOZE_UI_FONT,
+                            text,
+                            (gfloat) palette->menu_text_r,
+                            (gfloat) palette->menu_text_g,
+                            (gfloat) palette->menu_text_b);
+      label_w = clutter_actor_get_width (label);
+      label_h = clutter_actor_get_height (label);
+      panel_make_click_target (bin, label_w, MENU_BAR_HIT_HEIGHT);
+      clutter_actor_set_position (label,
+                                  0.0f,
+                                  panel_vertical_center (MENU_BAR_HIT_HEIGHT,
+                                                         label_h));
+    }
+
+  if (missing_text)
+    {
+      ooze_panel_rebuild_menu_bar (plugin);
+      return;
+    }
+
+  ooze_panel_update_clock (plugin);
   ooze_panel_layout_labels (plugin);
 }
 

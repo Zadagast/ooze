@@ -13,6 +13,7 @@
 #include "ooze-theme.h"
 #include "ooze-window.h"
 #include "ooze-xsettings.h"
+#include "ooze-stall.h"
 
 #include "../common/aqua-chrome.h"
 #include "../common/ooze-font.h"
@@ -590,32 +591,56 @@ ooze_plugin_update_layout (OozePlugin *plugin, MetaDisplay *display)
 }
 
 static void
-ooze_plugin_refresh_theme (OozePlugin *plugin)
+ooze_plugin_refresh_wallpapers (OozePlugin *plugin)
 {
+  ClutterActor *child;
+
+  if (!plugin->background_group)
+    return;
+
+  /*
+   * Repaint wallpaper cloth for the new palette only. Do NOT call
+   * ooze_plugin_on_monitors_changed here — that destroys desktop icons and
+   * reloads every themed icon on the main thread, which freezes launches
+   * after Light↔Dark (clicks still reach clients under the fade overlay).
+   */
+  for (child = clutter_actor_get_first_child (plugin->background_group);
+       child != NULL;
+       child = clutter_actor_get_next_sibling (child))
+    {
+      g_autoptr (ClutterContent) wallpaper = NULL;
+      int width = (int) clutter_actor_get_width (child);
+      int height = (int) clutter_actor_get_height (child);
+
+      if (width < 1 || height < 1)
+        continue;
+
+      wallpaper = ooze_aqua_wallpaper_content (child, width, height);
+      if (wallpaper)
+        ooze_aqua_actor_set_content (child,
+                                     g_steal_pointer (&wallpaper),
+                                     width,
+                                     height);
+    }
+}
+
+static guint chrome_theme_idle_id;
+
+static gboolean
+ooze_plugin_chrome_theme_idle (gpointer user_data)
+{
+  OozePlugin *plugin = OOZE_PLUGIN (user_data);
   MetaDisplay *display;
   GList *windows;
   GList *l;
 
-  if (!plugin->panel)
-    return;
+  chrome_theme_idle_id = 0;
 
   display = meta_plugin_get_display (META_PLUGIN (plugin));
+  if (!display)
+    return G_SOURCE_REMOVE;
 
-  plugin->last_panel_width = 0;
-  plugin->last_dock_plate_width = 0;
-  if (plugin->aux_panel_widths && plugin->n_aux_panels > 0)
-    memset (plugin->aux_panel_widths, 0,
-            sizeof (int) * plugin->n_aux_panels);
-
-  ooze_panel_refresh_ooze_button (plugin);
-  ooze_panel_rebuild_menu_bar (plugin);
-  ooze_panel_update_clock (plugin);
-  ooze_plugin_update_layout (plugin, display);
-  ooze_plugin_sync_dock_reflections (plugin);
-
-  if (plugin->monitor_manager)
-    ooze_plugin_on_monitors_changed (plugin->monitor_manager, plugin);
-
+  /* Only SSD Gel frames — skip clients without compositor chrome. */
   windows = meta_display_list_all_windows (display);
   for (l = windows; l != NULL; l = l->next)
     {
@@ -625,10 +650,58 @@ ooze_plugin_refresh_theme (OozePlugin *plugin)
       actor = META_WINDOW_ACTOR (meta_window_get_compositor_private (window));
       if (!actor || meta_window_actor_is_destroyed (actor))
         continue;
+      if (!g_object_get_data (G_OBJECT (actor), "ooze-window-chrome"))
+        continue;
 
       ooze_window_chrome_invalidate (actor);
     }
   g_list_free (windows);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+ooze_plugin_schedule_chrome_theme_refresh (OozePlugin *plugin)
+{
+  if (chrome_theme_idle_id != 0)
+    return;
+
+  chrome_theme_idle_id =
+    g_idle_add_full (G_PRIORITY_LOW,
+                     ooze_plugin_chrome_theme_idle,
+                     plugin,
+                     NULL);
+}
+
+static void
+ooze_plugin_refresh_theme (OozePlugin *plugin)
+{
+  g_autoptr (OozeStallScope) stall = NULL;
+  MetaDisplay *display;
+
+  if (!plugin->panel)
+    return;
+
+  stall = ooze_stall_begin ("theme-refresh");
+  display = meta_plugin_get_display (META_PLUGIN (plugin));
+
+  /*
+   * Keep this path cheap. Do NOT:
+   *  - rebuild dock icons / destroy aqua_dock_icons (MetaContext lives there)
+   *  - sync dock reflections (cairo+cogl download per icon; icons unchanged)
+   *  - full menu-bar destroy/recreate (recolor in place)
+   *  - sync Gel decorations on the click/GSettings stack (idle below)
+   */
+  plugin->last_panel_width = 0;
+  plugin->last_dock_plate_width = 0;
+  if (plugin->aux_panel_widths && plugin->n_aux_panels > 0)
+    memset (plugin->aux_panel_widths, 0,
+            sizeof (int) * plugin->n_aux_panels);
+
+  ooze_panel_refresh_ooze_button (plugin);
+  ooze_panel_recolor_menu_bar (plugin);
+  ooze_plugin_update_layout (plugin, display);
+  ooze_plugin_refresh_wallpapers (plugin);
+  ooze_plugin_schedule_chrome_theme_refresh (plugin);
 }
 
 static void
@@ -1535,6 +1608,12 @@ ooze_plugin_dispose (GObject *object)
 
   ooze_theme_unwatch_will_change (NULL, ooze_plugin_on_theme_will_change, plugin);
   ooze_theme_unwatch (NULL, ooze_plugin_on_theme_changed, plugin);
+
+  if (chrome_theme_idle_id != 0)
+    {
+      g_source_remove (chrome_theme_idle_id);
+      chrome_theme_idle_id = 0;
+    }
 
   {
     MetaDisplay *display = meta_plugin_get_display (META_PLUGIN (plugin));

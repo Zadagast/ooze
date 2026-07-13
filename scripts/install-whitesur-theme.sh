@@ -3,6 +3,8 @@
 #
 # Usage:
 #   ./scripts/install-whitesur-theme.sh
+#   DESTDIR=/tmp/package-root ./scripts/install-whitesur-theme.sh
+#   OOZE_THEMES_DEST=/path/to/themes ./scripts/install-whitesur-theme.sh
 #
 # Installs into the user theme path (does NOT touch ~/.config/gtk-4.0):
 #   ~/.local/share/themes/WhiteSur-Light
@@ -20,7 +22,17 @@ CACHE="${ROOT}/.cache/whitesur-gtk-theme"
 REPO_URL="https://github.com/vinceliuice/WhiteSur-gtk-theme.git"
 
 XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-THEMES_DEST="${XDG_DATA_HOME}/themes"
+if [[ -n "${OOZE_THEMES_DEST:-}" ]]; then
+  THEMES_DEST="$OOZE_THEMES_DEST"
+elif [[ -n "${DESTDIR:-}" ]]; then
+  THEMES_DEST="${DESTDIR%/}/usr/share/ooze/themes"
+else
+  THEMES_DEST="${XDG_DATA_HOME}/themes"
+fi
+SYSTEM_INSTALL=0
+if [[ "$THEMES_DEST" != "${XDG_DATA_HOME}/themes" ]]; then
+  SYSTEM_INSTALL=1
+fi
 OOZE_WS="${XDG_DATA_HOME}/ooze/whitesur"
 MARKER="${OOZE_WS}/.ooze-managed"
 GTK4_CONFIG="${HOME}/.config/gtk-4.0"
@@ -112,8 +124,11 @@ need_cmd git
 need_cmd sassc
 need_cmd glib-compile-resources
 
-mkdir -p "$THEMES_DEST" "$OOZE_WS" "$ROOT/.cache"
-clear_managed_gtk4_link
+mkdir -p "$THEMES_DEST" "$ROOT/.cache"
+if [[ "$SYSTEM_INSTALL" == 0 ]]; then
+  mkdir -p "$OOZE_WS"
+  clear_managed_gtk4_link
+fi
 
 if [[ ! -d "$CACHE/.git" ]]; then
   log "Cloning WhiteSur into $CACHE"
@@ -135,18 +150,27 @@ if [[ ! -d "$THEMES_DEST/WhiteSur-Light" ]]; then
   exit 1
 fi
 
+if [[ "$STASH_LIBADWAITA" == 1 && "$SYSTEM_INSTALL" == 1 ]]; then
+  echo "error: --stash-libadwaita is only available for a user installation" >&2
+  exit 2
+fi
+
 if [[ "$STASH_LIBADWAITA" == 1 ]]; then
   log "Stashing libadwaita GTK4 configs (NOT linking ~/.config/gtk-4.0)"
   capture_libadwaita light "$GTK4_LIGHT"
   capture_libadwaita dark "$GTK4_DARK"
 fi
 
-# Ensure we never leave a global gtk-4.0 override in place.
-clear_managed_gtk4_link
+# Ensure a user install never leaves a global gtk-4.0 override in place.
+if [[ "$SYSTEM_INSTALL" == 0 ]]; then
+  clear_managed_gtk4_link
+fi
 
-date -Iseconds > "$MARKER"
-echo "WhiteSur" >> "$MARKER"
-echo "no-global-gtk4" >> "$MARKER"
+if [[ "$SYSTEM_INSTALL" == 0 ]]; then
+  date -Iseconds > "$MARKER"
+  echo "WhiteSur" >> "$MARKER"
+  echo "no-global-gtk4" >> "$MARKER"
+fi
 
 log "Done."
 log "  Themes: $THEMES_DEST/WhiteSur-{Light,Dark}"

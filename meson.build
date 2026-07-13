@@ -1,5 +1,5 @@
 project('ooze', 'c', 'cpp',
-  version: '0.1.0',
+  version: '0.2.2',
   meson_version: '>= 1.0.0',
   default_options: [
     'c_std=c11',
@@ -49,13 +49,16 @@ c_args += '-DOOZE_VERSION="@0@"'.format(meson.project_version())
 install_icons_script = meson.project_source_root() / 'scripts' / 'install-elementary-icons.sh'
 
 # Elementary icons are fetched only by an explicit target or install.
+# Meson names the Ninja rule after the output file; alias so
+# `ninja elementary-icons` matches scripts/README.
 
-custom_target(
+elementary_icons = custom_target(
   'elementary-icons',
   output: 'elementary-icons.stamp',
   command: [find_program('bash'), install_icons_script, '@OUTPUT@'],
   build_by_default: false,
 )
+alias_target('elementary-icons', elementary_icons)
 
 # The install script fetches missing icons and copies them under the install prefix.
 meson.add_install_script(
@@ -84,9 +87,12 @@ executable('ooze',
   'compositor/ooze-window.c',
   'compositor/ooze-magic-lamp.c',
   'compositor/ooze-transition.c',
+  'compositor/ooze-stall.c',
   'shared/ooze-shared-icons.c',
   'shared/ooze-shared-appmenu.c',
   'shared/ooze-dnd-bridge.c',
+  'shared/ooze-icon-lookup.c',
+  'shared/ooze-foreign-gtk.c',
   'common/aqua-traffic.c',
   c_args: c_args,
   include_directories: [inc_common, inc_compositor, inc_shared],
@@ -115,6 +121,24 @@ install_data('data/wayland-sessions/ooze.desktop',
 
 install_data('packaging/deb/ooze-wayland-session',
   install_dir: get_option('bindir'),
+  install_mode: 'rwxr-xr-x',
+)
+
+install_data('data/xdg-desktop-portal/ooze-portals.conf',
+  install_dir: get_option('datadir') / 'xdg-desktop-portal',
+)
+
+install_data(
+  [
+    'data/xdg-desktop-portal/portals/ooze-gtk.portal',
+    'data/xdg-desktop-portal/portals/ooze-gnome.portal',
+    'data/xdg-desktop-portal/portals/ooze-gnome-keyring.portal',
+  ],
+  install_dir: get_option('datadir') / 'xdg-desktop-portal' / 'portals',
+)
+
+install_data('packaging/deb/ooze-session-env.sh',
+  install_dir: get_option('datadir') / 'ooze',
   install_mode: 'rwxr-xr-x',
 )
 
@@ -172,6 +196,8 @@ ooze_shared_sources = [
   'shared/ooze-shared-icons-gtk.c',
   'shared/ooze-shared-appmenu.c',
   'shared/ooze-dnd-bridge.c',
+  'shared/ooze-icon-lookup.c',
+  'shared/ooze-foreign-gtk.c',
 ]
 
 ooze_app_inc = [inc_shared]
@@ -302,6 +328,28 @@ if gtk4_dep.found() and adw_dep.found()
   )
 
   install_data('data/org.ooze.Monitor.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
+  executable('ooze-themes',
+    'ooze-themes/main.c',
+    'ooze-themes/ooze-themes-window.c',
+    'ooze-themes/ooze-themes-pane.c',
+    ooze_shared_sources,
+    include_directories: ooze_app_inc + [include_directories('ooze-themes')],
+    dependencies: [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.Themes.desktop',
     install_dir: get_option('datadir') / 'applications',
   )
 

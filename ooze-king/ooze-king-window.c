@@ -40,6 +40,9 @@ static const char * const king_icon_ear[] = {
 static const char * const king_icon_monitor[] = {
   "org.ooze.Monitor", "video-display", "preferences-desktop-display", NULL
 };
+static const char * const king_icon_themes[] = {
+  "org.ooze.Themes", "preferences-desktop-theme", "preferences-desktop", NULL
+};
 static const char * const king_icon_about[] = {
   "org.ooze.About", "help-about", "dialog-information", NULL
 };
@@ -53,6 +56,7 @@ static const char * const king_icon_torrent[] = {
 static const KingAppEntry king_apps[] = {
   { king_icon_about,   "About This Computer", "ooze-about" },
   { king_icon_monitor, "Displays",            "ooze-monitor" },
+  { king_icon_themes,  "Themes",              "ooze-themes" },
   { king_icon_spot,    "File Manager",        "spot" },
   { king_icon_command, "Terminal",       "ooze-command" },
   { king_icon_ear,     "Sound Settings", "ooze-ear" },

@@ -1,14 +1,18 @@
 #include "ooze-transition.h"
+#include "ooze-theme.h"
 
 #include <meta/compositor.h>
 #include <meta/display.h>
 #include <meta/meta-backend.h>
 #include <meta/meta-context.h>
-#include <mtk/mtk.h>
 
-/* Slower than GNOME Shell — hold briefly so apps restyle, then a soft fade. */
-#define SCREEN_TRANSITION_DELAY_MS    180
-#define SCREEN_TRANSITION_DURATION_MS 1100
+/*
+ * Opaque color fade — never clutter_stage_paint_to_content(). A full-stage
+ * snapshot blocks the main thread long enough that dock/desktop launches
+ * appear frozen after Light↔Dark.
+ */
+#define SCREEN_TRANSITION_DELAY_MS    60
+#define SCREEN_TRANSITION_DURATION_MS 420
 
 typedef struct
 {
@@ -77,15 +81,12 @@ ooze_screen_transition_run (MetaPlugin *plugin)
   MetaContext *context;
   MetaBackend *backend;
   ClutterActor *stage_actor;
-  ClutterStage *stage;
-  ClutterContent *content = NULL;
   ClutterActor *overlay;
   OozeScreenTransition *st;
-  MtkRectangle rect;
+  const OozeAquaPalette *palette;
+  CoglColor color;
   gfloat width;
   gfloat height;
-  float scale;
-  g_autoptr (GError) error = NULL;
 
   g_return_if_fail (META_IS_PLUGIN (plugin));
 
@@ -113,37 +114,25 @@ ooze_screen_transition_run (MetaPlugin *plugin)
   if (!CLUTTER_IS_STAGE (stage_actor))
     return;
 
-  stage = CLUTTER_STAGE (stage_actor);
   width = clutter_actor_get_width (stage_actor);
   height = clutter_actor_get_height (stage_actor);
   if (width < 1.0f || height < 1.0f)
     return;
 
-  scale = clutter_actor_get_resource_scale (stage_actor);
-  if (scale < 1.0f)
-    scale = 1.0f;
-
-  rect = MTK_RECTANGLE_INIT (0, 0, (int) width, (int) height);
-  content = clutter_stage_paint_to_content (stage,
-                                            &rect,
-                                            scale,
-                                            clutter_actor_get_color_state (stage_actor),
-                                            CLUTTER_PAINT_FLAG_NO_CURSORS,
-                                            &error);
-  if (!content)
-    {
-      g_warning ("Ooze: screen transition snapshot failed: %s",
-                 error ? error->message : "unknown");
-      return;
-    }
+  /* will_change fires before palette flips — cover with the outgoing look. */
+  palette = ooze_theme_get_palette (NULL);
+  cogl_color_init_from_4f (&color,
+                           (float) palette->wallpaper_mid_r,
+                           (float) palette->wallpaper_mid_g,
+                           (float) palette->wallpaper_mid_b,
+                           1.0f);
 
   overlay = clutter_actor_new ();
   clutter_actor_set_size (overlay, width, height);
   clutter_actor_set_position (overlay, 0.0f, 0.0f);
   clutter_actor_set_reactive (overlay, FALSE);
-  clutter_actor_set_content (overlay, content);
+  clutter_actor_set_background_color (overlay, &color);
   clutter_actor_set_opacity (overlay, 255);
-  g_object_unref (content);
 
   clutter_actor_add_child (stage_actor, overlay);
   clutter_actor_set_child_above_sibling (stage_actor, overlay, NULL);
@@ -152,6 +141,6 @@ ooze_screen_transition_run (MetaPlugin *plugin)
   st->overlay = overlay;
   active_transition = st;
 
-  /* Theme refresh runs next under this overlay; delay covers app restyle. */
+  /* Theme refresh runs next under this overlay. */
   ooze_screen_transition_start_fade (st);
 }

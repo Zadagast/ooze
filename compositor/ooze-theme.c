@@ -1,4 +1,5 @@
 #include "ooze-theme.h"
+#include "ooze-foreign-gtk.h"
 #include "ooze-xsettings.h"
 
 #include <gio/gio.h>
@@ -44,6 +45,7 @@ struct _OozeTheme
   GSettings *settings;
   gulong color_scheme_handler;
   gulong gtk_theme_handler;
+  GFileMonitor *foreign_gtk_monitor;
   gboolean dark;
   GSList *watchers;
   GSList *will_change_watchers;
@@ -60,14 +62,7 @@ ooze_theme_foreign_gtk_name (gboolean dark)
 gboolean
 ooze_theme_foreign_gtk_installed (gboolean dark)
 {
-  g_autofree char *path = NULL;
-
-  path = g_build_filename (g_get_user_data_dir (),
-                           "themes",
-                           ooze_theme_foreign_gtk_name (dark),
-                           "index.theme",
-                           NULL);
-  return g_file_test (path, G_FILE_TEST_EXISTS);
+  return ooze_foreign_gtk_variant_installed (dark);
 }
 
 static gboolean
@@ -128,54 +123,28 @@ ooze_theme_recover_ooze_from_foreign_gtk (void)
   ooze_xsettings_republish ();
 }
 
-const char *
+char *
 ooze_theme_foreign_gtk_theme_for_session (void)
 {
-  gboolean dark = FALSE;
-  g_autoptr (GSettings) iface = NULL;
-
-  iface = g_settings_new ("org.gnome.desktop.interface");
-  if (iface)
-    {
-      g_autofree char *scheme = g_settings_get_string (iface, "color-scheme");
-
-      dark = (g_strcmp0 (scheme, "prefer-dark") == 0);
-    }
-
-  if (!ooze_theme_foreign_gtk_installed (dark))
-    {
-      if (!ooze_theme_foreign_gtk_installed (!dark))
-        return NULL;
-      dark = !dark;
-    }
-
-  return ooze_theme_foreign_gtk_name (dark);
+  return ooze_foreign_gtk_theme_for_session ();
 }
 
 void
 ooze_theme_apply_foreign_gtk_to_launcher (GSubprocessLauncher *launcher)
 {
-  const char *name;
-
   if (!launcher)
     return;
 
-  name = ooze_theme_foreign_gtk_theme_for_session ();
-  if (name)
-    g_subprocess_launcher_setenv (launcher, "GTK_THEME", name, TRUE);
+  ooze_foreign_gtk_apply_to_launcher (launcher);
 }
 
 void
 ooze_theme_apply_foreign_gtk_to_launch_context (GAppLaunchContext *ctx)
 {
-  const char *name;
-
   if (!ctx)
     return;
 
-  name = ooze_theme_foreign_gtk_theme_for_session ();
-  if (name)
-    g_app_launch_context_setenv (ctx, "GTK_THEME", name);
+  ooze_foreign_gtk_apply_to_launch_context (ctx);
 }
 
 /* Legacy entry used by older call sites — recovers session bleed only. */
@@ -225,6 +194,28 @@ ooze_theme_emit_watchers (GSList *watchers)
     }
 }
 
+static guint xsettings_republish_idle_id;
+
+static gboolean
+ooze_theme_xsettings_republish_idle (gpointer data G_GNUC_UNUSED)
+{
+  xsettings_republish_idle_id = 0;
+  ooze_xsettings_republish ();
+  return G_SOURCE_REMOVE;
+}
+
+static void
+ooze_theme_schedule_xsettings_republish (void)
+{
+  /* Defer off the GSettings notify stack / Clutter click handler so XSync
+   * does not run re-entrantly against nest Xwayland on the same turn. */
+  if (xsettings_republish_idle_id != 0)
+    return;
+
+  xsettings_republish_idle_id =
+    g_idle_add (ooze_theme_xsettings_republish_idle, NULL);
+}
+
 static void
 ooze_theme_apply (OozeTheme *theme)
 {
@@ -236,16 +227,41 @@ ooze_theme_apply (OozeTheme *theme)
 
   ooze_theme_emit_watchers (theme->will_change_watchers);
   theme->dark = dark;
-  ooze_xsettings_republish ();
   ooze_theme_emit_watchers (theme->watchers);
 }
 
 static void
-ooze_theme_on_setting_changed (GSettings   *settings G_GNUC_UNUSED,
-                             const char  *key G_GNUC_UNUSED,
-                             OozeTheme     *theme)
+ooze_theme_on_color_scheme_changed (GSettings *settings G_GNUC_UNUSED,
+                                    const char *key G_GNUC_UNUSED,
+                                    OozeTheme *theme)
 {
+  /*
+   * Appearance toggle only. Do not call recover_ooze_from_foreign_gtk here —
+   * that resets gtk-theme and can churn icon/theme paths on the same turn.
+   */
   ooze_theme_apply (theme);
+  ooze_theme_schedule_xsettings_republish ();
+}
+
+static void
+ooze_theme_on_gtk_theme_changed (GSettings *settings G_GNUC_UNUSED,
+                                 const char *key G_GNUC_UNUSED,
+                                 OozeTheme *theme)
+{
+  /* Fallback when color-scheme is "default"; otherwise dark is unchanged. */
+  ooze_theme_apply (theme);
+  ooze_theme_schedule_xsettings_republish ();
+}
+
+static void
+ooze_theme_on_foreign_gtk_changed (GFileMonitor      *monitor G_GNUC_UNUSED,
+                                   GFile             *file G_GNUC_UNUSED,
+                                   GFile             *other_file G_GNUC_UNUSED,
+                                   GFileMonitorEvent  event_type G_GNUC_UNUSED,
+                                   OozeTheme         *theme G_GNUC_UNUSED)
+{
+  /* Pref file only affects foreign launch / XSETTINGS — not Ooze appearance. */
+  ooze_theme_schedule_xsettings_republish ();
 }
 
 OozeTheme *
@@ -260,13 +276,23 @@ ooze_theme_new (void)
   theme->color_scheme_handler =
     g_signal_connect (theme->settings,
                       "changed::color-scheme",
-                      G_CALLBACK (ooze_theme_on_setting_changed),
+                      G_CALLBACK (ooze_theme_on_color_scheme_changed),
                       theme);
   theme->gtk_theme_handler =
     g_signal_connect (theme->settings,
                       "changed::gtk-theme",
-                      G_CALLBACK (ooze_theme_on_setting_changed),
+                      G_CALLBACK (ooze_theme_on_gtk_theme_changed),
                       theme);
+  {
+    g_autofree char *pref_path = ooze_foreign_gtk_pref_path ();
+    g_autoptr (GFile) pref_file = g_file_new_for_path (pref_path);
+
+    theme->foreign_gtk_monitor =
+      g_file_monitor_file (pref_file, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
+    if (theme->foreign_gtk_monitor)
+      g_signal_connect (theme->foreign_gtk_monitor, "changed",
+                        G_CALLBACK (ooze_theme_on_foreign_gtk_changed), theme);
+  }
 
   /* One-shot recovery from the earlier global WhiteSur experiment. */
   ooze_theme_recover_ooze_from_foreign_gtk ();
@@ -399,11 +425,18 @@ ooze_theme_free (OozeTheme *theme)
   if (theme == default_theme)
     default_theme = NULL;
 
+  if (xsettings_republish_idle_id != 0)
+    {
+      g_source_remove (xsettings_republish_idle_id);
+      xsettings_republish_idle_id = 0;
+    }
+
   if (theme->color_scheme_handler)
     g_signal_handler_disconnect (theme->settings, theme->color_scheme_handler);
   if (theme->gtk_theme_handler)
     g_signal_handler_disconnect (theme->settings, theme->gtk_theme_handler);
 
+  g_clear_object (&theme->foreign_gtk_monitor);
   g_clear_object (&theme->settings);
   g_slist_free_full (theme->watchers, g_free);
   g_slist_free_full (theme->will_change_watchers, g_free);

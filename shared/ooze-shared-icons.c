@@ -184,17 +184,75 @@ ooze_icons_theme_is_available (void)
   return ooze_icons_has_index_theme ("/usr/share/icons/" OOZE_ICON_THEME);
 }
 
+static gboolean
+ooze_icons_theme_name_usable (const char *theme_name)
+{
+  g_autofree char *local = NULL;
+  g_autofree char *system = NULL;
+
+  if (!theme_name || theme_name[0] == '\0')
+    return FALSE;
+
+  local = g_build_filename (g_get_user_data_dir (),
+                            "icons",
+                            theme_name,
+                            "index.theme",
+                            NULL);
+  if (g_file_test (local, G_FILE_TEST_IS_REGULAR))
+    return TRUE;
+
+  system = g_build_filename ("/usr/share/icons",
+                             theme_name,
+                             "index.theme",
+                             NULL);
+  if (g_file_test (system, G_FILE_TEST_IS_REGULAR))
+    return TRUE;
+
+  {
+    g_autofree char *ooze = NULL;
+    g_autofree char *data_root = ooze_icons_get_data_root ();
+
+    if (data_root && data_root[0] != '\0')
+      {
+        ooze = g_build_filename (data_root,
+                                 "icons",
+                                 theme_name,
+                                 "index.theme",
+                                 NULL);
+        if (g_file_test (ooze, G_FILE_TEST_IS_REGULAR))
+          return TRUE;
+      }
+  }
+
+  return g_file_test ("/usr/share/ooze/icons/" OOZE_ICON_THEME "/index.theme",
+                      G_FILE_TEST_IS_REGULAR) &&
+         g_strcmp0 (theme_name, OOZE_ICON_THEME) == 0;
+}
+
 void
 ooze_icons_apply (void)
 {
   g_autoptr (GSettings) settings = NULL;
+  g_autofree char *icon_theme = NULL;
+  g_autofree char *cursor_theme = NULL;
+  int cursor_size;
 
   ooze_icons_setup_environment ();
 
   settings = g_settings_new ("org.gnome.desktop.interface");
-  g_settings_set_string (settings, "icon-theme", OOZE_ICON_THEME);
-  g_settings_set_string (settings, "cursor-theme", OOZE_CURSOR_THEME);
-  g_settings_set_int (settings, "cursor-size", OOZE_CURSOR_SIZE);
+  icon_theme = g_settings_get_string (settings, "icon-theme");
+  cursor_theme = g_settings_get_string (settings, "cursor-theme");
+  cursor_size = g_settings_get_int (settings, "cursor-size");
+
+  /* Only seed defaults — never clobber a user-chosen Mint/Papirus/etc pack. */
+  if (!ooze_icons_theme_name_usable (icon_theme))
+    g_settings_set_string (settings, "icon-theme", OOZE_ICON_THEME);
+
+  if (!cursor_theme || cursor_theme[0] == '\0')
+    g_settings_set_string (settings, "cursor-theme", OOZE_CURSOR_THEME);
+
+  if (cursor_size <= 0)
+    g_settings_set_int (settings, "cursor-size", OOZE_CURSOR_SIZE);
 
   if (!ooze_icons_theme_is_available ())
     g_warning ("Ooze: elementary icon theme not found; run ninja -C build to fetch icons");

@@ -1,4 +1,5 @@
 #include "ooze-shared-appmenu.h"
+#include "ooze-foreign-gtk.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -118,64 +119,14 @@ ooze_appmenu_force_wayland_backend (GSubprocessLauncher *launcher)
   g_subprocess_launcher_unsetenv (launcher, "GTK_THEME");
 }
 
-static gboolean
-ooze_appmenu_theme_index_exists (const char *name)
-{
-  g_autofree char *user_path = NULL;
-  g_autofree char *home_path = NULL;
-  g_autofree char *system_path = NULL;
-
-  if (!name || !*name)
-    return FALSE;
-
-  user_path = g_build_filename (g_get_user_data_dir (), "themes", name,
-                                "index.theme", NULL);
-  if (g_file_test (user_path, G_FILE_TEST_EXISTS))
-    return TRUE;
-
-  home_path = g_build_filename (g_get_home_dir (), ".themes", name,
-                                "index.theme", NULL);
-  if (g_file_test (home_path, G_FILE_TEST_EXISTS))
-    return TRUE;
-
-  system_path = g_build_filename ("/usr/share/themes", name, "index.theme", NULL);
-  return g_file_test (system_path, G_FILE_TEST_EXISTS);
-}
-
-static const char *
-ooze_appmenu_foreign_gtk_theme (void)
-{
-  g_autoptr (GSettings) iface = NULL;
-  gboolean dark = FALSE;
-  const char *name;
-
-  iface = g_settings_new ("org.gnome.desktop.interface");
-  if (iface)
-    {
-      g_autofree char *scheme = g_settings_get_string (iface, "color-scheme");
-
-      dark = (g_strcmp0 (scheme, "prefer-dark") == 0);
-    }
-
-  name = dark ? "WhiteSur-Dark" : "WhiteSur-Light";
-  if (ooze_appmenu_theme_index_exists (name))
-    return name;
-
-  name = dark ? "WhiteSur-Light" : "WhiteSur-Dark";
-  if (ooze_appmenu_theme_index_exists (name))
-    return name;
-
-  return NULL;
-}
-
 void
 ooze_appmenu_force_x11_backend (GSubprocessLauncher *launcher)
 {
-  const char *theme;
+  g_autofree char *theme = NULL;
 
   g_return_if_fail (launcher != NULL);
   g_subprocess_launcher_setenv (launcher, "GDK_BACKEND", "x11", TRUE);
-  theme = ooze_appmenu_foreign_gtk_theme ();
+  theme = ooze_foreign_gtk_theme_for_session ();
   if (theme)
     g_subprocess_launcher_setenv (launcher, "GTK_THEME", theme, TRUE);
 }
@@ -185,7 +136,7 @@ ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx)
 {
   const char *modules;
   const char *proxy;
-  const char *theme;
+  g_autofree char *theme = NULL;
 
   g_return_if_fail (G_IS_APP_LAUNCH_CONTEXT (ctx));
 
@@ -201,7 +152,7 @@ ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx)
 
   /* Classic GtkMenuBar exporters only speak AppMenu on X11. */
   g_app_launch_context_setenv (ctx, "GDK_BACKEND", "x11");
-  theme = ooze_appmenu_foreign_gtk_theme ();
+  theme = ooze_foreign_gtk_theme_for_session ();
   if (theme)
     g_app_launch_context_setenv (ctx, "GTK_THEME", theme);
   ooze_appmenu_ensure_shell_shows_menubar ();
@@ -246,7 +197,7 @@ ooze_appmenu_environ_for_foreign (char **envp)
 {
   const char *modules;
   const char *proxy;
-  const char *theme;
+  g_autofree char *theme = NULL;
 
   ooze_appmenu_setup_environment ();
   modules = g_getenv ("GTK_MODULES");
@@ -260,7 +211,7 @@ ooze_appmenu_environ_for_foreign (char **envp)
   if (proxy && *proxy)
     envp = g_environ_setenv (envp, "UBUNTU_MENUPROXY", proxy, TRUE);
   envp = g_environ_setenv (envp, "GDK_BACKEND", "x11", TRUE);
-  theme = ooze_appmenu_foreign_gtk_theme ();
+  theme = ooze_foreign_gtk_theme_for_session ();
   if (theme)
     envp = g_environ_setenv (envp, "GTK_THEME", theme, TRUE);
   ooze_appmenu_ensure_shell_shows_menubar ();

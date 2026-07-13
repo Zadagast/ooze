@@ -14,7 +14,7 @@
 | --- | --- |
 | **Shell** | Global menu bar, dock, desktop icons, system appearance |
 | **Spot** | File manager with sidebar, column, and grid views |
-| **Ooze King** | System apps launcher (Spot, Command, Ear, Monitor, Pak, Torrent) |
+| **Ooze King** | System apps launcher (Spot, Command, Ear, Monitor, Themes, Pak, Torrent) |
 | **Ooze Command** | Terminal with tabs, Ooze Gel, and global menu support |
 | **Ooze Eye** | Image viewer (default handler for images in the nest) |
 | **Ooze Torrent** | BitTorrent client (links static libtransmission; GPL binary) |
@@ -38,8 +38,11 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 - Floating dock with Spot, Command, and other Ooze apps
 - Running-app indicators with focus / minimize on dock click
 - Magic-lamp minimize animation into the dock
-- Desktop icons with the elementary icon theme
+- Desktop icons follow the selected icon theme
 - Optional WhiteSur GTK theme for **foreign** apps only (launch-scoped `GTK_THEME`, never a session-wide gtk-4.0 override)
+- **Ooze Themes** applies light/dark appearance, icon packs, cursor themes, and
+  the launch-scoped foreign GTK preference. Install icon packs in
+  `~/.local/share/icons`; WhiteSur never uses a global `~/.config/gtk-4.0` override.
 
 ### Spot
 - Places sidebar, toolbar, and status bar
@@ -50,7 +53,7 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 
 ### Ooze King
 - Icon + label launcher for Ooze system apps
-- Opens Spot, Ooze Command, Ooze Ear, Ooze Monitor, Ooze Pak, and Ooze Torrent
+- Opens Spot, Ooze Command, Ooze Ear, Ooze Monitor, Ooze Themes, Ooze Pak, and Ooze Torrent
 
 ### Ooze Command
 - VTE terminal with multiple tabs and New Tab control
@@ -70,6 +73,20 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 ### Ooze Monitor
 - Display layout and resolution via Mutter’s DisplayConfig D-Bus API
 - Nest-friendly mode list (`OOZE_DISPLAY_MODES` / `MUTTER_DEBUG_DUMMY_MODE_SPECS`)
+
+## Stability
+
+Ooze’s panel, dock, and desktop icons run **inside** the Mutter compositor (same model as GNOME Shell on Wayland). Apps are separate processes; the shell is not.
+
+| What happened | What it means |
+|---------------|---------------|
+| Session feels frozen; clicks work but folders/apps don’t open | Usually a **main-thread stall** in the compositor (heavy sync work on Light↔Dark or icon rebuild) |
+| Themes / Spot window disappears with `Bail out!` | **Client abort** — one app died; the session should keep running |
+| Entire nest dies / back to GDM | **Compositor death** — on Wayland there is no live respawn without losing apps |
+
+What we promise today: don’t freeze the compositor on appearance toggle; don’t take the session down for first-party UI bugs; foreign WhiteSur is launch/XSETTINGS only. We do **not** promise “restart Ooze without losing open windows” on Wayland.
+
+When reporting freezes, include log lines around `OozeStall:`, `OozeDock:`, theme toggle, and Themes.
 
 ### Ooze Gel
 - `ooze-header-bar` — titled bar with traffic lights
@@ -158,9 +175,9 @@ Build a single-file nested demo (binaries + icons; **host Mutter 18** still requ
 Or let **GitHub Actions** build it in an Ubuntu 26.04 container:
 
 - **Manual:** Actions → **AppImage** → Run workflow (downloads as a workflow artifact)
-- **Release:** `git push origin v0.1.0` — CI builds and attaches the AppImage to that GitHub Release
+- **Release:** `git push origin v0.2.2` — CI builds and attaches the AppImage to that GitHub Release
 
-The AppImage puts Spot, Command, King, Ear, and Pak on `PATH` inside the nested session. It does not replace your login desktop.
+The AppImage puts the compositor (`ooze`) plus Spot, Command, King, Ear, Pak, Themes, Eye, Monitor, and About on `PATH` inside the nested session. It does not replace your login desktop.
 
 ### `.deb` (native GDM session + nested tester)
 
@@ -168,7 +185,7 @@ Build a system package that installs under `/usr`:
 
 ```bash
 ./scripts/build-deb.sh
-sudo apt install ./dist/ooze_0.1.0_amd64.deb
+sudo apt install ./dist/ooze_0.2.2_amd64.deb
 ```
 
 **Native login (Wayland):** log out, and at GDM pick **Ooze**. That runs `ooze-wayland-session` → `ooze --wayland` on real displays (no `--devkit`). Xwayland stays enabled unless you set `OOZE_NO_X11=1`.
@@ -177,12 +194,13 @@ sudo apt install ./dist/ooze_0.1.0_amd64.deb
 
 Global menus for classic GTK3 apps (Inkscape) need Xwayland (on by default in both launchers).
 
-Caveats for the native session: there is no `gnome-session` wrapper yet, so expect gaps around xdg-desktop-portal backends, idle/lock integration, and some GNOME session autostarts. PipeWire / systemd `--user` services from the host still apply.
+Portals: the package installs `ooze-portals.conf` plus `UseIn=ooze` wrappers that still talk to **xdg-desktop-portal-gtk** / **xdg-desktop-portal-gnome** (FileChooser themed via session `GTK_THEME=WhiteSur-*` when WhiteSur is installed). A full Ooze Gel portal daemon is not shipped yet. Other gaps: idle/lock and some GNOME autostarts without a full `gnome-session` wrapper.
 
 **Runtime packages (Ubuntu 26.04 / Mutter 18)** — install before or with the `.deb`:
 
 ```bash
 sudo apt install mutter libmutter-18-0 xwayland dbus-user-session \
+  xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-gnome gnome-keyring \
   libgtk-4-1 libadwaita-1-0 \
   libvte-2.91-gtk4-0 libgtop-2.0-11 libudisks2-0 libpipewire-0.3-0t64 \
   libgdk-pixbuf-2.0-0 libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libx11-6 \
@@ -194,6 +212,9 @@ sudo apt install mutter libmutter-18-0 xwayland dbus-user-session \
 | `mutter` / `libmutter-18-0` | Compositor host libraries |
 | `xwayland` | X11 path for Inkscape / appmenu |
 | `dbus-user-session` | Session bus + AppMenu registrar |
+| `xdg-desktop-portal` | Portal front-end (**Depends**) |
+| `xdg-desktop-portal-gtk` / `-gnome` | FileChooser / ScreenCast backends (**Recommends**) |
+| `gnome-keyring` | Secret portal (**Recommends**) |
 | `libgtk-4-1`, `libadwaita-1-0` | First-party apps |
 | `libvte-2.91-gtk4-0` | Ooze Command |
 | `libgtop-2.0-11`, `libudisks2-0` | Ooze King |

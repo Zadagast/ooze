@@ -247,12 +247,16 @@ make_target_dropdown (OozeSoundPane         *self,
         selected = i + 1;
     }
 
-  drop = gtk_drop_down_new (G_LIST_MODEL (strings), NULL);
+  drop = gtk_drop_down_new (NULL, NULL);
+  /* Empty first, then set_model — avoids GTK list-item-manager Bail out
+   * when a live model is passed to gtk_drop_down_new and later replaced. */
+  gtk_drop_down_set_model (GTK_DROP_DOWN (drop), G_LIST_MODEL (strings));
+  g_object_unref (strings);
   gtk_drop_down_set_selected (GTK_DROP_DOWN (drop), selected);
   gtk_widget_set_size_request (drop, 180, -1);
   g_object_set_data (G_OBJECT (drop), "node-id", GUINT_TO_POINTER (stream->id));
 
-  model = G_LIST_MODEL (strings);
+  model = gtk_drop_down_get_model (GTK_DROP_DOWN (drop));
   {
     GtkStringObject *item0 = g_list_model_get_item (model, 0);
     if (item0)

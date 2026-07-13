@@ -3,13 +3,29 @@
 # Runs ooze as the session compositor (not nested --devkit).
 set -euo pipefail
 
-export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-Ooze}"
-export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-Ooze}"
-export DESKTOP_SESSION="${DESKTOP_SESSION:-Ooze}"
+# Resolve shared env helper (installed or from source tree).
+_OOZE_ENV="${OOZE_SESSION_ENV:-}"
+if [[ -z "$_OOZE_ENV" ]]; then
+  for _cand in \
+    /usr/share/ooze/ooze-session-env.sh \
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ooze-session-env.sh"
+  do
+    if [[ -f "$_cand" ]]; then
+      _OOZE_ENV="$_cand"
+      break
+    fi
+  done
+fi
+# shellcheck source=/dev/null
+source "$_OOZE_ENV"
+
 export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
 export GSETTINGS_SCHEMA_DIR="${GSETTINGS_SCHEMA_DIR:-/usr/share/glib-2.0/schemas}"
 export OOZE_DATA_DIR="${OOZE_DATA_DIR:-/usr/share/ooze}"
 export XDG_DATA_DIRS="${OOZE_DATA_DIR}${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+
+ooze_export_foreign_gtk_theme
+ooze_export_appmenu_modules
 
 # Never force nest virtual modes on a real login session.
 unset MUTTER_DEBUG_DUMMY_MODE_SPECS
@@ -20,17 +36,6 @@ if [[ -d /usr/lib/x86_64-linux-gnu/mutter-18 ]]; then
 elif [[ -d /usr/lib64/mutter-18 ]]; then
   export LD_LIBRARY_PATH="/usr/lib64/mutter-18${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
-
-# Classic GtkMenuBar apps (Inkscape) need X11 + appmenu-gtk-module.
-if [[ -n "${GTK_MODULES:-}" ]]; then
-  case ":$GTK_MODULES:" in
-    *:appmenu-gtk-module:*) ;;
-    *) export GTK_MODULES="appmenu-gtk-module:$GTK_MODULES" ;;
-  esac
-else
-  export GTK_MODULES=appmenu-gtk-module
-fi
-export UBUNTU_MENUPROXY="${UBUNTU_MENUPROXY:-1}"
 
 if command -v gsettings >/dev/null 2>&1; then
   gsettings set org.gnome.mutter edge-tiling true 2>/dev/null || true

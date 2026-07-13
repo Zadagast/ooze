@@ -33,23 +33,18 @@ if [[ -d "$ROOT/third-party/libtransmission/sysdeps/lib" ]]; then
 fi
 export OOZE_DATA_DIR="$ROOT/data"
 export XDG_DATA_DIRS="$ROOT/data${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+export OOZE_THEMES_DIR="${OOZE_THEMES_DIR:-$ROOT/data/themes}"
 # Isolated MIME defaults so Spot opens Ooze Eye for images in the nest
 # without rewriting the host user's global mimeapps.list.
 export XDG_CONFIG_HOME="${OOZE_XDG_CONFIG:-$ROOT/data/xdg-config}"
 mkdir -p "$XDG_CONFIG_HOME"
 
-# XFCE/Unity-style GTK3 menu exporter (Inkscape, etc. on Xwayland).
-# Classic GtkMenuBar apps must use X11 — appmenu-gtk-module is not Wayland-native.
-# Ooze GTK4 dock apps force GDK_BACKEND=wayland explicitly.
-if [[ -n "${GTK_MODULES:-}" ]]; then
-  case ":$GTK_MODULES:" in
-    *:appmenu-gtk-module:*) ;;
-    *) export GTK_MODULES="appmenu-gtk-module:$GTK_MODULES" ;;
-  esac
-else
-  export GTK_MODULES=appmenu-gtk-module
-fi
-export UBUNTU_MENUPROXY="${UBUNTU_MENUPROXY:-1}"
+# Portal UseIn=ooze. Do not set GTK_THEME session-wide (compositor/portals);
+# foreign apps get WhiteSur only on their launch environ / XSETTINGS.
+# shellcheck source=/dev/null
+source "$ROOT/packaging/deb/ooze-session-env.sh"
+ooze_export_foreign_gtk_theme
+ooze_export_appmenu_modules
 
 # Nest compositor serves Gtk/ShellShowsMenubar via built-in XSETTINGS when
 # system xsettingsd is absent (see compositor/ooze-xsettings.c).
@@ -71,7 +66,9 @@ if [[ ! -f "$ROOT/data/icons/elementary/index.theme" ]]; then
   ninja -C build elementary-icons.stamp
 fi
 
-if [[ ! -f "${XDG_DATA_HOME:-$HOME/.local/share}/themes/WhiteSur-Light/index.theme" ]]; then
+if [[ ! -f "$OOZE_THEMES_DIR/WhiteSur-Light/index.theme" ]] &&
+   [[ ! -f "${XDG_DATA_HOME:-$HOME/.local/share}/themes/WhiteSur-Light/index.theme" ]] &&
+   [[ ! -f "/usr/share/ooze/themes/WhiteSur-Light/index.theme" ]]; then
   echo "NOTE: WhiteSur theme not installed (Mac traffic lights for foreign GTK apps)."
   echo "  ./scripts/install-whitesur-theme.sh"
 fi
