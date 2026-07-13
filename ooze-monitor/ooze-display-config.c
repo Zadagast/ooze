@@ -1,6 +1,7 @@
 #include "ooze-display-config.h"
 
 #include <gio/gio.h>
+#include <string.h>
 
 #define DC_BUS   "org.gnome.Mutter.DisplayConfig"
 #define DC_PATH  "/org/gnome/Mutter/DisplayConfig"
@@ -13,7 +14,6 @@
 #define MONITORS_FORMAT  "a" MONITOR_FORMAT
 #define LM_FORMAT        "(iiduba(ssss)a{sv})"
 #define LMS_FORMAT       "a" LM_FORMAT
-#define STATE_FORMAT     "(u" MONITORS_FORMAT LMS_FORMAT "a{sv})"
 
 static void
 ooze_display_mode_free (OozeDisplayMode *mode)
@@ -26,20 +26,169 @@ ooze_display_mode_free (OozeDisplayMode *mode)
   g_free (mode);
 }
 
-void
-ooze_display_state_free (OozeDisplayState *state)
+static OozeDisplayMode *
+ooze_display_mode_copy (const OozeDisplayMode *src)
 {
-  if (!state)
+  OozeDisplayMode *mode;
+  guint i;
+
+  if (!src)
+    return NULL;
+
+  mode = g_new0 (OozeDisplayMode, 1);
+  mode->id = g_strdup (src->id);
+  mode->width = src->width;
+  mode->height = src->height;
+  mode->refresh = src->refresh;
+  mode->is_current = src->is_current;
+  mode->is_preferred = src->is_preferred;
+  mode->preferred_scale = src->preferred_scale;
+  mode->supported_scales = g_array_new (FALSE, FALSE, sizeof (double));
+  if (src->supported_scales)
+    {
+      for (i = 0; i < src->supported_scales->len; i++)
+        {
+          double s = g_array_index (src->supported_scales, double, i);
+
+          g_array_append_val (mode->supported_scales, s);
+        }
+    }
+  return mode;
+}
+
+static void
+ooze_display_monitor_free (OozeDisplayMonitor *monitor)
+{
+  if (!monitor)
     return;
 
-  g_free (state->connector);
-  g_free (state->display_name);
-  g_free (state->current_mode_id);
+  g_free (monitor->connector);
+  g_free (monitor->display_name);
+  g_free (monitor->current_mode_id);
+  if (monitor->modes)
+    g_ptr_array_free (monitor->modes, TRUE);
+  g_free (monitor);
+}
 
-  if (state->modes)
-    g_ptr_array_free (state->modes, TRUE);
+static OozeDisplayMonitor *
+ooze_display_monitor_copy (const OozeDisplayMonitor *src)
+{
+  OozeDisplayMonitor *monitor;
+  guint i;
 
-  g_free (state);
+  if (!src)
+    return NULL;
+
+  monitor = g_new0 (OozeDisplayMonitor, 1);
+  monitor->connector = g_strdup (src->connector);
+  monitor->display_name = g_strdup (src->display_name);
+  monitor->layout_x = src->layout_x;
+  monitor->layout_y = src->layout_y;
+  monitor->scale = src->scale;
+  monitor->transform = src->transform;
+  monitor->primary = src->primary;
+  monitor->current_mode_id = g_strdup (src->current_mode_id);
+  monitor->modes = g_ptr_array_new_with_free_func ((GDestroyNotify) ooze_display_mode_free);
+  if (src->modes)
+    {
+      for (i = 0; i < src->modes->len; i++)
+        g_ptr_array_add (monitor->modes,
+                         ooze_display_mode_copy (src->modes->pdata[i]));
+    }
+  return monitor;
+}
+
+void
+ooze_display_config_free (OozeDisplayConfig *config)
+{
+  if (!config)
+    return;
+
+  if (config->monitors)
+    g_ptr_array_free (config->monitors, TRUE);
+  g_free (config);
+}
+
+OozeDisplayConfig *
+ooze_display_config_copy (const OozeDisplayConfig *config)
+{
+  OozeDisplayConfig *copy;
+  guint i;
+
+  if (!config)
+    return NULL;
+
+  copy = g_new0 (OozeDisplayConfig, 1);
+  copy->serial = config->serial;
+  copy->layout_mode = config->layout_mode;
+  copy->supports_changing_layout_mode = config->supports_changing_layout_mode;
+  copy->global_scale_required = config->global_scale_required;
+  copy->monitors = g_ptr_array_new_with_free_func ((GDestroyNotify) ooze_display_monitor_free);
+  if (config->monitors)
+    {
+      for (i = 0; i < config->monitors->len; i++)
+        g_ptr_array_add (copy->monitors,
+                         ooze_display_monitor_copy (config->monitors->pdata[i]));
+    }
+  return copy;
+}
+
+void
+ooze_display_config_set_primary (OozeDisplayConfig *config,
+                                 guint              index)
+{
+  guint i;
+
+  g_return_if_fail (config != NULL);
+  g_return_if_fail (config->monitors != NULL);
+  g_return_if_fail (index < config->monitors->len);
+
+  for (i = 0; i < config->monitors->len; i++)
+    {
+      OozeDisplayMonitor *m = config->monitors->pdata[i];
+
+      m->primary = (i == index);
+    }
+}
+
+const OozeDisplayMode *
+ooze_display_monitor_current_mode (const OozeDisplayMonitor *monitor)
+{
+  guint i;
+
+  if (!monitor || !monitor->modes)
+    return NULL;
+
+  if (monitor->current_mode_id)
+    {
+      for (i = 0; i < monitor->modes->len; i++)
+        {
+          OozeDisplayMode *mode = monitor->modes->pdata[i];
+
+          if (g_strcmp0 (mode->id, monitor->current_mode_id) == 0)
+            return mode;
+        }
+    }
+
+  for (i = 0; i < monitor->modes->len; i++)
+    {
+      OozeDisplayMode *mode = monitor->modes->pdata[i];
+
+      if (mode->is_current)
+        return mode;
+    }
+
+  if (monitor->modes->len > 0)
+    return monitor->modes->pdata[0];
+
+  return NULL;
+}
+
+gboolean
+ooze_display_monitor_is_nest_dummy (const OozeDisplayMonitor *monitor)
+{
+  return monitor && monitor->connector &&
+         g_str_has_prefix (monitor->connector, "Meta-");
 }
 
 static GDBusProxy *
@@ -53,13 +202,6 @@ ooze_display_config_proxy (GError **error)
                                         DC_IFACE,
                                         NULL,
                                         error);
-}
-
-gboolean
-ooze_display_config_is_nest_dummy (const OozeDisplayState *state)
-{
-  return state && state->connector &&
-         g_str_has_prefix (state->connector, "Meta-");
 }
 
 gboolean
@@ -145,20 +287,16 @@ ooze_display_parse_modes (GVariant *modes_variant)
 }
 
 static gboolean
-ooze_display_find_monitor (GVariant   *monitors_variant,
-                           const char *connector,
-                           char      **display_name_out,
-                           GPtrArray **modes_out,
-                           char      **current_mode_out)
+ooze_display_fill_monitor_modes (GVariant            *monitors_variant,
+                                 OozeDisplayMonitor  *monitor)
 {
   GVariantIter monitors_iter;
   GVariant *monitor_tuple;
 
-  g_clear_pointer (display_name_out, g_free);
-  g_clear_pointer (modes_out, g_ptr_array_unref);
-  g_clear_pointer (current_mode_out, g_free);
+  g_return_val_if_fail (monitor != NULL, FALSE);
+  g_return_val_if_fail (monitor->connector != NULL, FALSE);
 
-  if (!monitors_variant || !connector)
+  if (!monitors_variant)
     return FALSE;
 
   g_variant_iter_init (&monitors_iter, monitors_variant);
@@ -170,18 +308,18 @@ ooze_display_find_monitor (GVariant   *monitors_variant,
       const char *serial = NULL;
       g_autoptr (GVariant) modes_v = NULL;
       g_autoptr (GVariant) props = NULL;
+      guint i;
 
       g_variant_get (monitor_tuple, "((&s&s&s&s)@" MODES_FORMAT "@a{sv})",
                      &mon_connector, &vendor, &product, &serial,
                      &modes_v, &props);
 
-      if (g_strcmp0 (mon_connector, connector) != 0)
+      if (g_strcmp0 (mon_connector, monitor->connector) != 0)
         {
           g_variant_unref (monitor_tuple);
           continue;
         }
 
-      /* parse display-name from monitor props */
       if (props)
         {
           GVariantIter piter;
@@ -193,35 +331,33 @@ ooze_display_find_monitor (GVariant   *monitors_variant,
             {
               if (g_strcmp0 (key, "display-name") == 0)
                 {
-                  g_free (*display_name_out);
-                  *display_name_out = g_variant_dup_string (val, NULL);
+                  g_free (monitor->display_name);
+                  monitor->display_name = g_variant_dup_string (val, NULL);
                 }
             }
         }
 
-      if (!*display_name_out || !**display_name_out)
+      if (!monitor->display_name || !*monitor->display_name)
         {
-          g_free (*display_name_out);
-          *display_name_out = (product && *product)
+          g_free (monitor->display_name);
+          monitor->display_name = (product && *product)
             ? g_strdup (product)
             : g_strdup (mon_connector);
         }
 
-      if (modes_out)
+      if (monitor->modes)
+        g_ptr_array_free (monitor->modes, TRUE);
+      monitor->modes = ooze_display_parse_modes (modes_v);
+
+      g_clear_pointer (&monitor->current_mode_id, g_free);
+      for (i = 0; i < monitor->modes->len; i++)
         {
-          guint i;
+          OozeDisplayMode *mode = monitor->modes->pdata[i];
 
-          *modes_out = ooze_display_parse_modes (modes_v);
-
-          for (i = 0; i < (*modes_out)->len; i++)
+          if (mode->is_current)
             {
-              OozeDisplayMode *mode = (*modes_out)->pdata[i];
-
-              if (mode->is_current)
-                {
-                  *current_mode_out = g_strdup (mode->id);
-                  break;
-                }
+              monitor->current_mode_id = g_strdup (mode->id);
+              break;
             }
         }
 
@@ -233,21 +369,20 @@ ooze_display_find_monitor (GVariant   *monitors_variant,
 }
 
 gboolean
-ooze_display_config_load (OozeDisplayState **state_out,
-                          GError           **error)
+ooze_display_config_load (OozeDisplayConfig **config_out,
+                          GError            **error)
 {
   g_autoptr (GDBusProxy) proxy = NULL;
   g_autoptr (GVariant) reply = NULL;
   g_autoptr (GVariant) monitors = NULL;
   g_autoptr (GVariant) logical_monitors = NULL;
   g_autoptr (GVariant) global_props = NULL;
-  OozeDisplayState *state;
+  OozeDisplayConfig *config;
   GVariantIter logical_iter;
   GVariant *logical_tuple;
-  gboolean found = FALSE;
 
-  g_return_val_if_fail (state_out != NULL, FALSE);
-  *state_out = NULL;
+  g_return_val_if_fail (config_out != NULL, FALSE);
+  *config_out = NULL;
 
   proxy = ooze_display_config_proxy (error);
   if (!proxy)
@@ -263,17 +398,16 @@ ooze_display_config_load (OozeDisplayState **state_out,
   if (!reply)
     return FALSE;
 
-  state = g_new0 (OozeDisplayState, 1);
-  state->layout_mode = 1; /* logical by default */
-  state->modes = g_ptr_array_new_with_free_func ((GDestroyNotify) ooze_display_mode_free);
+  config = g_new0 (OozeDisplayConfig, 1);
+  config->layout_mode = 1; /* logical by default */
+  config->monitors = g_ptr_array_new_with_free_func ((GDestroyNotify) ooze_display_monitor_free);
 
   g_variant_get (reply, "(u@" MONITORS_FORMAT "@" LMS_FORMAT "@a{sv})",
-                 &state->serial,
+                 &config->serial,
                  &monitors,
                  &logical_monitors,
                  &global_props);
 
-  /* Parse global properties: layout-mode, supports-changing-layout-mode, global-scale-required */
   if (global_props)
     {
       GVariantIter piter;
@@ -284,39 +418,33 @@ ooze_display_config_load (OozeDisplayState **state_out,
       while (g_variant_iter_loop (&piter, "{&sv}", &key, &val))
         {
           if (g_strcmp0 (key, "layout-mode") == 0)
-            state->layout_mode = g_variant_get_uint32 (val);
+            config->layout_mode = g_variant_get_uint32 (val);
           else if (g_strcmp0 (key, "supports-changing-layout-mode") == 0)
-            state->supports_changing_layout_mode = g_variant_get_boolean (val);
+            config->supports_changing_layout_mode = g_variant_get_boolean (val);
           else if (g_strcmp0 (key, "global-scale-required") == 0)
-            state->global_scale_required = g_variant_get_boolean (val);
+            config->global_scale_required = g_variant_get_boolean (val);
         }
     }
 
-  /* Walk logical monitors; pick primary, or first if none primary */
   g_variant_iter_init (&logical_iter, logical_monitors);
   while ((logical_tuple = g_variant_iter_next_value (&logical_iter)))
     {
+      OozeDisplayMonitor *monitor = g_new0 (OozeDisplayMonitor, 1);
       g_autoptr (GVariant) lm_monitors = NULL;
       GVariantIter lm_mon_iter;
       GVariant *lm_mon_tuple;
       gboolean primary = FALSE;
 
       g_variant_get (logical_tuple, "(iidub@a(ssss)@a{sv})",
-                     &state->layout_x,
-                     &state->layout_y,
-                     &state->scale,
-                     &state->transform,
+                     &monitor->layout_x,
+                     &monitor->layout_y,
+                     &monitor->scale,
+                     &monitor->transform,
                      &primary,
                      &lm_monitors,
                      NULL);
-
-      if (!primary && found)
-        {
-          g_variant_unref (logical_tuple);
-          continue;
-        }
-
-      state->primary = primary;
+      monitor->primary = primary;
+      monitor->modes = g_ptr_array_new_with_free_func ((GDestroyNotify) ooze_display_mode_free);
 
       g_variant_iter_init (&lm_mon_iter, lm_monitors);
       if ((lm_mon_tuple = g_variant_iter_next_value (&lm_mon_iter)))
@@ -324,130 +452,134 @@ ooze_display_config_load (OozeDisplayState **state_out,
           const char *connector = NULL;
 
           g_variant_get (lm_mon_tuple, "(&s&s&s&s)", &connector, NULL, NULL, NULL);
-          g_free (state->connector);
-          state->connector = g_strdup (connector);
+          monitor->connector = g_strdup (connector);
           g_variant_unref (lm_mon_tuple);
         }
 
-      found = TRUE;
+      if (!monitor->connector)
+        {
+          ooze_display_monitor_free (monitor);
+          g_variant_unref (logical_tuple);
+          continue;
+        }
+
+      if (!ooze_display_fill_monitor_modes (monitors, monitor))
+        monitor->display_name = g_strdup (monitor->connector);
+
+      if (!monitor->current_mode_id && monitor->modes->len > 0)
+        {
+          guint i;
+
+          for (i = 0; i < monitor->modes->len; i++)
+            {
+              OozeDisplayMode *mode = monitor->modes->pdata[i];
+
+              if (mode->is_current || mode->is_preferred)
+                {
+                  monitor->current_mode_id = g_strdup (mode->id);
+                  break;
+                }
+            }
+          if (!monitor->current_mode_id)
+            {
+              OozeDisplayMode *first = monitor->modes->pdata[0];
+
+              monitor->current_mode_id = g_strdup (first->id);
+            }
+        }
+
+      g_ptr_array_add (config->monitors, monitor);
       g_variant_unref (logical_tuple);
-      if (state->primary)
-        break;
     }
 
-  if (!found || !state->connector)
+  if (config->monitors->len == 0)
     {
-      ooze_display_state_free (state);
+      ooze_display_config_free (config);
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "No logical monitor found");
       return FALSE;
     }
 
-  if (!ooze_display_find_monitor (monitors,
-                                  state->connector,
-                                  &state->display_name,
-                                  &state->modes,
-                                  &state->current_mode_id))
-    {
-      state->display_name = g_strdup (state->connector);
-    }
-
-  if (!state->current_mode_id && state->modes->len > 0)
-    {
-      guint i;
-
-      for (i = 0; i < state->modes->len; i++)
-        {
-          OozeDisplayMode *mode = state->modes->pdata[i];
-
-          if (mode->is_current || mode->is_preferred)
-            {
-              state->current_mode_id = g_strdup (mode->id);
-              break;
-            }
-        }
-      if (!state->current_mode_id)
-        state->current_mode_id = g_strdup (((OozeDisplayMode *) state->modes->pdata[0])->id);
-    }
-
-  *state_out = state;
+  *config_out = config;
   return TRUE;
 }
 
 gboolean
-ooze_display_config_apply (const OozeDisplayState *state,
-                           const char             *mode_id,
-                           double                  scale,
-                           guint                   transform,
-                           GError                **error)
+ooze_display_config_apply (const OozeDisplayConfig *config,
+                           guint                    method,
+                           GError                 **error)
 {
   g_autoptr (GDBusProxy) proxy = NULL;
   g_autoptr (GVariant) reply = NULL;
-  guint method;
+  GVariantBuilder lm_builder;
+  GVariantBuilder props_builder;
+  g_autoptr (GVariant) params = NULL;
+  guint i;
 
-  g_return_val_if_fail (state != NULL, FALSE);
-  g_return_val_if_fail (mode_id != NULL && *mode_id, FALSE);
+  g_return_val_if_fail (config != NULL, FALSE);
+  g_return_val_if_fail (config->monitors != NULL, FALSE);
+  g_return_val_if_fail (config->monitors->len > 0, FALSE);
+  g_return_val_if_fail (method == OOZE_DISPLAY_APPLY_TEMPORARY ||
+                        method == OOZE_DISPLAY_APPLY_PERSISTENT, FALSE);
+
+  for (i = 0; i < config->monitors->len; i++)
+    {
+      OozeDisplayMonitor *m = config->monitors->pdata[i];
+
+      if (!m->connector || !m->current_mode_id || !*m->current_mode_id)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Monitor %u is missing connector or mode", i);
+          return FALSE;
+        }
+    }
 
   proxy = ooze_display_config_proxy (error);
   if (!proxy)
     return FALSE;
 
-  /* Try persistent (2) first, fall back to temporary (1) — same as GNOME Settings does
-   * (it only does persistent, but we fall back in case policy blocks persistence). */
-  for (method = 2; method >= 1; method--)
-    {
-      GVariantBuilder mon_builder;
-      GVariantBuilder lm_builder;
-      GVariantBuilder props_builder;
-      g_autoptr (GVariant) params = NULL;
-      g_autoptr (GError) call_error = NULL;
+  g_variant_builder_init (&lm_builder, G_VARIANT_TYPE ("a(iiduba(ssa{sv}))"));
 
-      /* Per-monitor: connector + mode id + empty props */
+  for (i = 0; i < config->monitors->len; i++)
+    {
+      OozeDisplayMonitor *m = config->monitors->pdata[i];
+      GVariantBuilder mon_builder;
+
       g_variant_builder_init (&mon_builder, G_VARIANT_TYPE ("a(ssa{sv})"));
       g_variant_builder_open (&mon_builder, G_VARIANT_TYPE ("(ssa{sv})"));
-      g_variant_builder_add (&mon_builder, "s", state->connector);
-      g_variant_builder_add (&mon_builder, "s", mode_id);
+      g_variant_builder_add (&mon_builder, "s", m->connector);
+      g_variant_builder_add (&mon_builder, "s", m->current_mode_id);
       g_variant_builder_open (&mon_builder, G_VARIANT_TYPE ("a{sv}"));
       g_variant_builder_close (&mon_builder);
       g_variant_builder_close (&mon_builder);
 
-      /* Logical monitor */
-      g_variant_builder_init (&lm_builder, G_VARIANT_TYPE ("a(iiduba(ssa{sv}))"));
       g_variant_builder_open (&lm_builder, G_VARIANT_TYPE ("(iiduba(ssa{sv}))"));
-      g_variant_builder_add (&lm_builder, "i", state->layout_x);
-      g_variant_builder_add (&lm_builder, "i", state->layout_y);
-      g_variant_builder_add (&lm_builder, "d", scale);
-      g_variant_builder_add (&lm_builder, "u", transform);
-      g_variant_builder_add (&lm_builder, "b", state->primary);
-      g_variant_builder_add_value (&lm_builder,
-                                   g_variant_builder_end (&mon_builder));
+      g_variant_builder_add (&lm_builder, "i", m->layout_x);
+      g_variant_builder_add (&lm_builder, "i", m->layout_y);
+      g_variant_builder_add (&lm_builder, "d", m->scale);
+      g_variant_builder_add (&lm_builder, "u", m->transform);
+      g_variant_builder_add (&lm_builder, "b", m->primary);
+      g_variant_builder_add_value (&lm_builder, g_variant_builder_end (&mon_builder));
       g_variant_builder_close (&lm_builder);
-
-      /* Global properties — always include layout-mode (echoed from GetCurrentState) */
-      g_variant_builder_init (&props_builder, G_VARIANT_TYPE ("a{sv}"));
-      g_variant_builder_add (&props_builder, "{sv}",
-                             "layout-mode",
-                             g_variant_new_uint32 (state->layout_mode));
-
-      params = g_variant_new ("(uu@a(iiduba(ssa{sv}))@a{sv})",
-                              state->serial,
-                              (guint) method,
-                              g_variant_builder_end (&lm_builder),
-                              g_variant_builder_end (&props_builder));
-
-      reply = g_dbus_proxy_call_sync (proxy,
-                                      "ApplyMonitorsConfig",
-                                      params,
-                                      G_DBUS_CALL_FLAGS_NONE,
-                                      5000,
-                                      NULL,
-                                      &call_error);
-      if (reply)
-        return TRUE;
-
-      if (method == 1 && call_error)
-        g_propagate_error (error, g_steal_pointer (&call_error));
     }
 
-  return FALSE;
+  g_variant_builder_init (&props_builder, G_VARIANT_TYPE ("a{sv}"));
+  g_variant_builder_add (&props_builder, "{sv}",
+                         "layout-mode",
+                         g_variant_new_uint32 (config->layout_mode));
+
+  params = g_variant_new ("(uu@a(iiduba(ssa{sv}))@a{sv})",
+                          config->serial,
+                          method,
+                          g_variant_builder_end (&lm_builder),
+                          g_variant_builder_end (&props_builder));
+
+  reply = g_dbus_proxy_call_sync (proxy,
+                                  "ApplyMonitorsConfig",
+                                  params,
+                                  G_DBUS_CALL_FLAGS_NONE,
+                                  5000,
+                                  NULL,
+                                  error);
+  return reply != NULL;
 }
