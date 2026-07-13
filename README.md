@@ -101,6 +101,8 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 - `libgtk-4-dev`, `libadwaita-1-dev`, `libcairo2-dev`
 - `libvte-2.91-gtk4-dev` (Ooze Command)
 - `libgdk-pixbuf-2.0-dev`, `libpng-dev`
+- `mutter-dev-bin` (provides `/usr/libexec/mutter-devkit`, required by `./run-devkit.sh`)
+- PipeWire running on the session bus (the devkit window cannot start without it)
 - Optional: `appmenu-gtk3-module`, `appmenu-registrar` (GTK3 global menus) — `./scripts/install-appmenu.sh`
 - Optional: WhiteSur GTK theme (foreign-app traffic lights) — `./scripts/install-whitesur-theme.sh`
 
