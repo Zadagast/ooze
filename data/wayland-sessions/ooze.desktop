@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Ooze
+Comment=Ooze desktop environment on Wayland
+Exec=ooze-wayland-session
+TryExec=ooze-wayland-session
+Type=Application
+DesktopNames=Ooze
+Keywords=Ooze;Mutter;Wayland;Desktop;

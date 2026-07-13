@@ -148,6 +148,20 @@ meta_run (MetaContext *context)
   return EXIT_SUCCESS;
 }
 
+static gboolean
+ooze_argv_has_devkit (int argc, char **argv)
+{
+  int i;
+
+  for (i = 1; i < argc; i++)
+    {
+      if (g_strcmp0 (argv[i], "--devkit") == 0)
+        return TRUE;
+    }
+
+  return FALSE;
+}
+
 int
 main (int argc, char **argv)
 {
@@ -155,10 +169,13 @@ main (int argc, char **argv)
   int status;
 
   /*
-   * Nest default modes (overridden by run-devkit.sh). Prefer ≥1600 wide so
-   * Mutter side-tile works for large-min apps like Inkscape.
+   * Nested --devkit only: virtual monitor modes for the nest window.
+   * Primary Wayland sessions (GDM) must leave this unset so Mutter drives
+   * real outputs. Prefer ≥1600 wide so side-tile works for Inkscape.
+   * run-devkit.sh / ooze-session may already set OOZE_DISPLAY_MODES.
    */
-  if (!g_getenv ("MUTTER_DEBUG_DUMMY_MODE_SPECS"))
+  if (ooze_argv_has_devkit (argc, argv) &&
+      !g_getenv ("MUTTER_DEBUG_DUMMY_MODE_SPECS"))
     g_setenv ("MUTTER_DEBUG_DUMMY_MODE_SPECS",
                "1600x900:1920x1080:2560x1440:1280x720",
                TRUE);

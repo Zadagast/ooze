@@ -160,18 +160,22 @@ Or let **GitHub Actions** build it in an Ubuntu 26.04 container:
 
 The AppImage puts Spot, Command, King, Ear, and Pak on `PATH` inside the nested session. It does not replace your login desktop.
 
-### `.deb` (nested daily-driver test)
+### `.deb` (native GDM session + nested tester)
 
-Build a system package that installs under `/usr` and adds **Ooze (nested)** to the applications menu:
+Build a system package that installs under `/usr`:
 
 ```bash
 ./scripts/build-deb.sh
 sudo apt install ./dist/ooze_0.1.0_amd64.deb
 ```
 
-Or launch after install with `ooze-session`.
+**Native login (Wayland):** log out, and at GDM pick **Ooze**. That runs `ooze-wayland-session` → `ooze --wayland` on real displays (no `--devkit`). Xwayland stays enabled unless you set `OOZE_NO_X11=1`.
 
-This is still a **nested** Mutter window on top of your existing Ubuntu login — not a full GDM/login desktop yet. Global menus for classic GTK3 apps (Inkscape) need Xwayland (enabled by default in `ooze-session`).
+**Nested tester:** from an existing Ubuntu login, launch **Ooze (nested)** from the applications menu, or run `ooze-session` (`ooze --wayland --devkit` in a nest window). Useful for day-to-day shell work without leaving GNOME.
+
+Global menus for classic GTK3 apps (Inkscape) need Xwayland (on by default in both launchers).
+
+Caveats for the native session: there is no `gnome-session` wrapper yet, so expect gaps around xdg-desktop-portal backends, idle/lock integration, and some GNOME session autostarts. PipeWire / systemd `--user` services from the host still apply.
 
 **Runtime packages (Ubuntu 26.04 / Mutter 18)** — install before or with the `.deb`:
 
@@ -187,7 +191,7 @@ sudo apt install mutter libmutter-18-0 xwayland dbus-user-session \
 | --- | --- |
 | `mutter` / `libmutter-18-0` | Compositor host libraries |
 | `xwayland` | X11 path for Inkscape / appmenu |
-| `dbus-user-session` | Nested session bus + AppMenu registrar |
+| `dbus-user-session` | Session bus + AppMenu registrar |
 | `libgtk-4-1`, `libadwaita-1-0` | First-party apps |
 | `libvte-2.91-gtk4-0` | Ooze Command |
 | `libgtop-2.0-11`, `libudisks2-0` | Ooze King |

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Primary Wayland session launcher for GDM / wayland-sessions.
+# Runs ooze as the session compositor (not nested --devkit).
+set -euo pipefail
+
+export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-Ooze}"
+export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-Ooze}"
+export DESKTOP_SESSION="${DESKTOP_SESSION:-Ooze}"
+export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
+export GSETTINGS_SCHEMA_DIR="${GSETTINGS_SCHEMA_DIR:-/usr/share/glib-2.0/schemas}"
+export OOZE_DATA_DIR="${OOZE_DATA_DIR:-/usr/share/ooze}"
+export XDG_DATA_DIRS="${OOZE_DATA_DIR}${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+
+# Never force nest virtual modes on a real login session.
+unset MUTTER_DEBUG_DUMMY_MODE_SPECS
+
+# Mutter private libs (clutter/cogl/mtk) live next to libmutter.
+if [[ -d /usr/lib/x86_64-linux-gnu/mutter-18 ]]; then
+  export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/mutter-18${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+elif [[ -d /usr/lib64/mutter-18 ]]; then
+  export LD_LIBRARY_PATH="/usr/lib64/mutter-18${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
+# Classic GtkMenuBar apps (Inkscape) need X11 + appmenu-gtk-module.
+if [[ -n "${GTK_MODULES:-}" ]]; then
+  case ":$GTK_MODULES:" in
+    *:appmenu-gtk-module:*) ;;
+    *) export GTK_MODULES="appmenu-gtk-module:$GTK_MODULES" ;;
+  esac
+else
+  export GTK_MODULES=appmenu-gtk-module
+fi
+export UBUNTU_MENUPROXY="${UBUNTU_MENUPROXY:-1}"
+
+if command -v gsettings >/dev/null 2>&1; then
+  gsettings set org.gnome.mutter edge-tiling true 2>/dev/null || true
+  gsettings set org.gnome.desktop.peripherals.mouse drag-threshold 20 2>/dev/null || true
+  gsettings set org.gnome.mutter.keybindings toggle-tiled-left "['<Super>Left']" 2>/dev/null || true
+  gsettings set org.gnome.mutter.keybindings toggle-tiled-right "['<Super>Right']" 2>/dev/null || true
+fi
+
+OOZE_BIN="${OOZE_BIN:-ooze}"
+if ! command -v "$OOZE_BIN" >/dev/null 2>&1; then
+  echo "ooze-wayland-session: '$OOZE_BIN' not found on PATH" >&2
+  exit 1
+fi
+
+# Primary compositor: --wayland without --devkit. Xwayland stays on unless
+# the user opts out (classic GTK3 global menus need it).
+desktop_args=(--wayland)
+if [[ "${OOZE_NO_X11:-}" == "1" ]]; then
+  desktop_args+=(--no-x11)
+fi
+
+# GDM / systemd --user already provide a session bus; do not wrap in
+# dbus-run-session (that would nest a second bus over the login session).
+exec "$OOZE_BIN" "${desktop_args[@]}" "$@"

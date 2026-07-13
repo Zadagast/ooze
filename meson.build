@@ -109,6 +109,15 @@ executable('ooze',
   install: true,
 )
 
+install_data('data/wayland-sessions/ooze.desktop',
+  install_dir: get_option('datadir') / 'wayland-sessions',
+)
+
+install_data('packaging/deb/ooze-wayland-session',
+  install_dir: get_option('bindir'),
+  install_mode: 'rwxr-xr-x',
+)
+
 install_data('data/spot-logo.svg',
   install_dir: ooze_data_dir,
 )

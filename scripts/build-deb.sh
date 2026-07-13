@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build an amd64 .deb for nested Ooze daily-driver testing.
+# Build an amd64 .deb for Ooze (native GDM Wayland session + nested tester).
 #
 # Ships installed binaries + data under /usr. Host must provide Mutter 18
 # and the Depends listed in packaging/deb/control.in.
@@ -38,12 +38,17 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 DESTDIR="$STAGE" ninja -C "$BUILD_DIR" install
 
-# Session launcher + Applications menu entry
+# Nested launcher (Applications menu) + native GDM Wayland session
 install -d "$STAGE/usr/bin"
 install -m 0755 "$ROOT/packaging/deb/ooze-session" "$STAGE/usr/bin/ooze-session"
+install -m 0755 "$ROOT/packaging/deb/ooze-wayland-session" \
+  "$STAGE/usr/bin/ooze-wayland-session"
 install -d "$STAGE/usr/share/applications"
 install -m 0644 "$ROOT/packaging/deb/ooze-session.desktop" \
   "$STAGE/usr/share/applications/org.ooze.Desktop.desktop"
+install -d "$STAGE/usr/share/wayland-sessions"
+install -m 0644 "$ROOT/data/wayland-sessions/ooze.desktop" \
+  "$STAGE/usr/share/wayland-sessions/ooze.desktop"
 
 # Prefer a simple branded icon if present
 if [[ -f "$ROOT/data/spot-logo.svg" ]]; then
