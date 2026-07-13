@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ooze — an Aqua-inspired Wayland desktop</title>
+<meta name="description" content="Ooze is a Wayland desktop environment built on Mutter: a cohesive Aqua-inspired shell with menu bar, dock, Ooze Gel, and first-party GTK4 apps.">
+<meta property="og:title" content="Ooze — an Aqua-inspired Wayland desktop">
+<meta property="og:description" content="A Wayland desktop environment built on Mutter, with a global menu bar, floating dock, and first-party GTK4 apps sharing one visual system.">
+<meta property="og:image" content="assets/ooze-dark.png">
+<link rel="icon" type="image/png" href="assets/ooze-splat.png">
+<script>
+  (function () {
+    var saved = localStorage.getItem('ooze-theme');
+    var theme = saved || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
+<style>
+  :root {
+    --ink: #1c1e22;
+    --ink-soft: #4a4f57;
+    --paper: #f4f5f7;
+    --alu-hi: #fdfdfe;
+    --alu-lo: #d9dce1;
+    --line: #c3c7cf;
+    --accent: #2f7ff0;
+    --accent-deep: #1c5fc4;
+    --dark: #14161a;
+    --radius: 14px;
+    --pinstripe: rgba(0,0,0,.018);
+    --bar-hi: #fbfcfd;
+    --bar-lo: #e6e9ee;
+    --card-hi: #ffffff;
+    --card-lo: #f0f2f5;
+    --card-shadow: rgba(0,0,0,.06);
+    --chip-bg: #e3edfd;
+    --chip-border: #c3d8f8;
+    --chip-ink: #1c5fc4;
+    --frame-shadow: rgba(20,30,50,.25);
+    --link: #1c5fc4;
+    font-size: 16px;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --ink: #e8eaee;
+    --ink-soft: #a4abb6;
+    --paper: #17191d;
+    --alu-hi: #202329;
+    --alu-lo: #17191d;
+    --line: #33373f;
+    --pinstripe: rgba(255,255,255,.022);
+    --bar-hi: #2b2f36;
+    --bar-lo: #1e2126;
+    --card-hi: #23262c;
+    --card-lo: #1c1f24;
+    --card-shadow: rgba(0,0,0,.35);
+    --chip-bg: #1c2a44;
+    --chip-border: #2c4470;
+    --chip-ink: #7fb0f7;
+    --frame-shadow: rgba(0,0,0,.6);
+    --link: #7fb0f7;
+    color-scheme: dark;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "Helvetica Neue", "Segoe UI", Ubuntu, Cantarell, sans-serif;
+    color: var(--ink);
+    background:
+      repeating-linear-gradient(0deg, var(--pinstripe) 0 1px, transparent 1px 4px),
+      linear-gradient(180deg, var(--alu-hi), var(--paper));
+    line-height: 1.6;
+  }
+  a { color: var(--link); }
+
+  /* ---- menu-bar style header ---- */
+  header {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 1.4rem;
+    padding: .45rem 1.4rem;
+    background: linear-gradient(180deg, var(--bar-hi), var(--bar-lo));
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 1px 6px rgba(0,0,0,.08);
+    font-size: .95rem;
+  }
+  header .brand {
+    display: inline-flex; align-items: center; gap: .4rem;
+    font-weight: 700;
+    padding: .1rem .7rem;
+    border-radius: 6px;
+    color: #eafbe7;
+    background: linear-gradient(180deg, #57b94c, #2e7d32);
+    border: 1px solid #256428;
+    text-decoration: none;
+    text-shadow: 0 1px 1px rgba(0,0,0,.35);
+  }
+  header .brand img { width: 1.05em; height: 1.05em; }
+  header nav { display: flex; gap: 1.1rem; flex-wrap: wrap; }
+  header nav a { color: var(--ink-soft); text-decoration: none; }
+  header nav a:hover { color: var(--ink); }
+  header .gh { margin-left: auto; }
+  #theme-toggle {
+    cursor: pointer; font: inherit; line-height: 1;
+    padding: .25rem .6rem; border-radius: 999px;
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--card-hi), var(--card-lo));
+    color: var(--ink);
+  }
+  #theme-toggle:hover { filter: brightness(1.06); }
+
+  main { max-width: 1060px; margin: 0 auto; padding: 0 1.4rem 4rem; }
+
+  /* ---- hero ---- */
+  .hero { text-align: center; padding: 4.2rem 0 2.6rem; }
+  .hero .logo {
+    display: block; margin: 0 auto .6rem;
+    width: clamp(3.4rem, 9vw, 5rem); height: auto;
+    filter: drop-shadow(0 4px 10px rgba(0,0,0,.25));
+  }
+  .hero h1 {
+    font-size: clamp(2.4rem, 6vw, 3.8rem);
+    letter-spacing: -.02em;
+    line-height: 1.1;
+  }
+  .hero h1 span { color: var(--link); }
+  .hero p.tag {
+    margin: 1rem auto 0; max-width: 42rem;
+    font-size: 1.2rem; color: var(--ink-soft);
+  }
+  .cta { margin-top: 1.8rem; display: flex; gap: .9rem; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: .65rem 1.5rem;
+    border-radius: 999px; text-decoration: none; font-weight: 600;
+    border: 1px solid var(--accent-deep);
+    background: linear-gradient(180deg, #5b9bf5, var(--accent));
+    color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.25);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 2px 6px rgba(31,95,196,.35);
+  }
+  .btn.alt {
+    background: linear-gradient(180deg, var(--card-hi), var(--card-lo));
+    color: var(--ink); border-color: var(--line); text-shadow: none;
+    box-shadow: 0 1px 4px rgba(0,0,0,.12);
+  }
+  .btn:hover { filter: brightness(1.05); }
+
+  /* ---- window-chrome media frame ---- */
+  .frame {
+    margin: 2.6rem auto 0; max-width: 920px;
+    border-radius: var(--radius); overflow: hidden;
+    border: 1px solid var(--line);
+    box-shadow: 0 18px 50px var(--frame-shadow);
+    background: var(--bar-lo);
+  }
+  .frame .bar {
+    display: flex; align-items: center; gap: .45rem;
+    padding: .5rem .8rem;
+    background: repeating-linear-gradient(0deg, var(--pinstripe) 0 1px, transparent 1px 3px),
+                linear-gradient(180deg, var(--bar-hi), var(--bar-lo));
+    border-bottom: 1px solid var(--line);
+  }
+  .frame .bar i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .frame .bar i:nth-child(1) { background: radial-gradient(circle at 35% 30%, #ff9a8f, #e5473b); }
+  .frame .bar i:nth-child(2) { background: radial-gradient(circle at 35% 30%, #ffe08a, #e5a53b); }
+  .frame .bar i:nth-child(3) { background: radial-gradient(circle at 35% 30%, #b0f0a0, #4bb543); }
+  .frame .bar b { margin: 0 auto; font-size: .85rem; font-weight: 600; color: var(--ink-soft); transform: translateX(-24px); }
+  .frame video, .frame img { display: block; width: 100%; }
+
+  /* ---- sections ---- */
+  section { padding-top: 4rem; }
+  section > h2 {
+    font-size: 1.9rem; letter-spacing: -.01em; text-align: center;
+  }
+  section > p.lead { text-align: center; color: var(--ink-soft); max-width: 46rem; margin: .6rem auto 0; }
+
+  .grid {
+    margin-top: 2.2rem;
+    display: grid; gap: 1.1rem;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  }
+  .card {
+    background: linear-gradient(180deg, var(--card-hi), var(--card-lo));
+    border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 1.2rem 1.3rem;
+    box-shadow: 0 2px 8px var(--card-shadow);
+  }
+  .card h3 { font-size: 1.05rem; margin-bottom: .35rem; }
+  .card p { font-size: .95rem; color: var(--ink-soft); }
+  .card .chip {
+    display: inline-block; font-size: .72rem; font-weight: 700;
+    letter-spacing: .04em; text-transform: uppercase;
+    color: var(--chip-ink); background: var(--chip-bg);
+    border: 1px solid var(--chip-border); border-radius: 999px;
+    padding: .05rem .55rem; margin-bottom: .55rem;
+  }
+
+  .shots { margin-top: 2.2rem; display: grid; gap: 1.4rem; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .shots figure { margin: 0; }
+  .shots figcaption { text-align: center; font-size: .9rem; color: var(--ink-soft); margin-top: .5rem; }
+
+  /* ---- install ---- */
+  .steps { margin-top: 2.2rem; display: grid; gap: 1.1rem; }
+  .step {
+    background: var(--dark); color: #dfe4ea;
+    border-radius: var(--radius); border: 1px solid #2a2e36;
+    padding: 1.1rem 1.3rem; overflow-x: auto;
+  }
+  .step h3 { color: #fff; font-size: 1rem; margin-bottom: .5rem; }
+  .step p { font-size: .9rem; color: #9aa3ae; margin-bottom: .6rem; }
+  .step pre { font-family: "SF Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; font-size: .87rem; line-height: 1.55; }
+  .step code .c { color: #7d8794; }
+  .step code .p { color: #7fd18b; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 2rem 1.4rem; text-align: center;
+    color: var(--ink-soft); font-size: .9rem;
+    background: linear-gradient(180deg, var(--bar-hi), var(--bar-lo));
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="#"><img src="assets/ooze-splat.png" alt="">Ooze</a>
+  <nav>
+    <a href="#features">Features</a>
+    <a href="#apps">Apps</a>
+    <a href="#screenshots">Screenshots</a>
+    <a href="#install">Install</a>
+  </nav>
+  <a class="gh" href="https://github.com/Zadagast/ooze">GitHub&nbsp;→</a>
+  <button id="theme-toggle" title="Toggle light / dark mode" aria-label="Toggle light / dark mode">🌙</button>
+</header>
+
+<main>
+  <div class="hero">
+    <img class="logo" src="assets/ooze-splat.png" alt="Ooze splat logo">
+    <h1>A desktop that <span>flows</span>.</h1>
+    <p class="tag">
+      Ooze is a Wayland desktop environment built on Mutter — a cohesive Aqua-inspired
+      shell with a global menu bar, floating dock, and first-party GTK4 apps that share
+      one visual system.
+    </p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/Zadagast/ooze/releases">Download AppImage</a>
+      <a class="btn alt" href="https://github.com/Zadagast/ooze#build">Build from source</a>
+    </div>
+
+    <div class="frame">
+      <div class="bar"><i></i><i></i><i></i><b>Ooze — nested session demo</b></div>
+      <video autoplay muted loop playsinline poster="assets/ooze-dark.png">
+        <source src="assets/ooze-desktop-demo.mp4" type="video/mp4">
+        <img src="assets/ooze-desktop-demo.gif" alt="Ooze desktop demo">
+      </video>
+    </div>
+  </div>
+
+  <section id="features">
+    <h2>One design language, everywhere</h2>
+    <p class="lead">
+      Aluminum surfaces, subtle pinstripes, custom traffic lights, and automatic
+      light / dark mode — from the compositor down to every app.
+    </p>
+    <div class="grid">
+      <div class="card">
+        <span class="chip">Shell</span>
+        <h3>Global menu bar</h3>
+        <p>App menus from native GTK4 and classic GTK3 / Xwayland apps, with shell File / Edit / View / Go / Window / Help menus.</p>
+      </div>
+      <div class="card">
+        <span class="chip">Shell</span>
+        <h3>Floating dock</h3>
+        <p>Running-app indicators, focus and minimize on click, and a magic-lamp minimize animation into the dock.</p>
+      </div>
+      <div class="card">
+        <span class="chip">Compositor</span>
+        <h3>Mutter-based Wayland</h3>
+        <p>A real Wayland compositor built on Mutter 18 — with Xwayland support, edge tiling, and desktop icons.</p>
+      </div>
+      <div class="card">
+        <span class="chip">Ooze Gel</span>
+        <h3>Signature window frame</h3>
+        <p>Header bar, traffic lights, drag and edge-resize grips — shared by every first-party app.</p>
+      </div>
+      <div class="card">
+        <span class="chip">OozeKit</span>
+        <h3>Shared drawing library</h3>
+        <p>Surfaces, pinstripes, separators, and button finishes from one palette, in light and dark.</p>
+      </div>
+      <div class="card">
+        <span class="chip">Theming</span>
+        <h3>Foreign apps welcome</h3>
+        <p>Optional WhiteSur theme for non-Ooze apps — launch-scoped, never a session-wide override.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="apps">
+    <h2>First-party apps</h2>
+    <p class="lead">A complete set of system apps, all wearing the same Gel.</p>
+    <div class="grid">
+      <div class="card"><h3>Spot</h3><p>File manager with places sidebar, column (Miller) and grid views, and theme-aware surfaces.</p></div>
+      <div class="card"><h3>Ooze Command</h3><p>VTE terminal with tabs, Ooze Gel header bar, and global menu support.</p></div>
+      <div class="card"><h3>Ooze Eye</h3><p>Lightweight image viewer — the default handler for images in the nest.</p></div>
+      <div class="card"><h3>Ooze King</h3><p>System apps launcher: one place to open every Ooze app.</p></div>
+      <div class="card"><h3>Ooze Torrent</h3><p>BitTorrent client linking a static libtransmission, with pause / resume / magnet support.</p></div>
+      <div class="card"><h3>Ooze Monitor</h3><p>Display layout and resolution via Mutter’s DisplayConfig D-Bus API.</p></div>
+      <div class="card"><h3>Ooze Ear</h3><p>Sound preferences backed by PipeWire.</p></div>
+      <div class="card"><h3>Ooze Pak</h3><p>Flatpak package browser for installing more software.</p></div>
+      <div class="card"><h3>About This Computer</h3><p>System overview with the Ooze look.</p></div>
+    </div>
+  </section>
+
+  <section id="screenshots">
+    <h2>Screenshots</h2>
+    <div class="shots">
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Dark</b></div><img src="assets/ooze-dark.png" alt="Ooze desktop in dark mode"></div>
+        <figcaption>Dark mode</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Light</b></div><img src="assets/ooze-light.png" alt="Ooze desktop in light mode"></div>
+        <figcaption>Light mode</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><b>Spot</b></div><img src="assets/ooze-spot.png" alt="Spot file manager running in Ooze"></div>
+        <figcaption>Spot file manager, running headless in CI-style verification</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>Get Ooze</h2>
+    <p class="lead">Runs on Ubuntu 26.04 (Mutter 18). Try it nested first — it never replaces your login desktop unless you ask it to.</p>
+    <div class="steps">
+      <div class="step">
+        <h3>1 · Try it — AppImage</h3>
+        <p>Single file, nested session. Host Mutter 18 required.</p>
+        <pre><code><span class="c"># download from GitHub Releases, then:</span>
+<span class="p">chmod +x Ooze-*-x86_64.AppImage
+./Ooze-*-x86_64.AppImage</span></code></pre>
+      </div>
+      <div class="step">
+        <h3>2 · Build from source</h3>
+        <pre><code><span class="c"># dependencies (Ubuntu 26.04)</span>
+<span class="p">sudo apt install meson ninja-build pkg-config libmutter-18-dev \
+  libgtk-4-dev libadwaita-1-dev libcairo2-dev libvte-2.91-gtk4-dev \
+  libgdk-pixbuf-2.0-dev libpng-dev</span>
+
+<span class="c"># build and run a nested session</span>
+<span class="p">meson setup build
+ninja -C build
+./run-devkit.sh</span></code></pre>
+      </div>
+      <div class="step">
+        <h3>3 · Install — native session</h3>
+        <p>Build a .deb, install it, then pick “Ooze” at the GDM login screen.</p>
+        <pre><code><span class="p">./scripts/build-deb.sh
+sudo apt install ./dist/ooze_0.1.0_amd64.deb</span></code></pre>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p>Ooze — built on <a href="https://gitlab.gnome.org/GNOME/mutter">Mutter</a> · <a href="https://github.com/Zadagast/ooze">Source on GitHub</a></p>
+</footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById('theme-toggle');
+    function paint() {
+      btn.textContent = document.documentElement.dataset.theme === 'dark' ? '☀️' : '🌙';
+    }
+    btn.addEventListener('click', function () {
+      var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem('ooze-theme', next);
+      paint();
+    });
+    paint();
+  })();
+</script>
+</body>
+</html>

@@ -45,7 +45,7 @@ ninja -C "$BUILD_DIR"
 
 if [[ ! -f "$ROOT/data/icons/elementary/index.theme" ]]; then
   echo "==> Fetching elementary icons"
-  ninja -C "$BUILD_DIR" elementary-icons
+  ninja -C "$BUILD_DIR" elementary-icons.stamp
 fi
 
 for bin in "${BINARIES[@]}"; do

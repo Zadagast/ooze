@@ -63,7 +63,7 @@ gsettings set org.gnome.mutter.keybindings toggle-tiled-left "['<Super>Left']" 2
 gsettings set org.gnome.mutter.keybindings toggle-tiled-right "['<Super>Right']" 2>/dev/null || true
 
 if [[ ! -f "$ROOT/data/icons/elementary/index.theme" ]]; then
-  ninja -C build elementary-icons
+  ninja -C build elementary-icons.stamp
 fi
 
 if [[ ! -f "$OOZE_THEMES_DIR/WhiteSur-Light/index.theme" ]] &&
