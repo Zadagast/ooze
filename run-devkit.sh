@@ -44,15 +44,18 @@ mkdir -p "$XDG_CONFIG_HOME"
 # shellcheck source=/dev/null
 source "$ROOT/packaging/deb/ooze-session-env.sh"
 ooze_export_foreign_gtk_theme
+# Foreign AppMenu/X11 modules are off unless OOZE_FOREIGN_GLOBAL_MENU=1
 ooze_export_appmenu_modules
 
-# Nest compositor serves Gtk/ShellShowsMenubar via built-in XSETTINGS when
-# system xsettingsd is absent (see compositor/ooze-xsettings.c).
+# Nest compositor serves XSETTINGS (theme + ShellShowsMenubar when foreign menus on).
 
-if ! [[ -f /usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libappmenu-gtk-module.so ]] && \
-   ! [[ -f /usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libappmenu-gtk3-module.so ]]; then
-  echo "NOTE: appmenu-gtk-module not installed. For Inkscape/GTK3 global menus run:"
-  echo "  ./scripts/install-appmenu.sh"
+if [[ "${OOZE_FOREIGN_GLOBAL_MENU:-}" == "1" ]] || \
+   [[ "${OOZE_FOREIGN_GLOBAL_MENU:-}" == "true" ]]; then
+  if ! [[ -f /usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libappmenu-gtk-module.so ]] && \
+     ! [[ -f /usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libappmenu-gtk3-module.so ]]; then
+    echo "NOTE: appmenu-gtk-module not installed. For Inkscape/GTK3 global menus run:"
+    echo "  ./scripts/install-appmenu.sh"
+  fi
 fi
 
 # Edge snap must be on before Mutter binds prefs (schema default is false).
@@ -73,9 +76,8 @@ if [[ ! -f "$OOZE_THEMES_DIR/WhiteSur-Light/index.theme" ]] &&
   echo "  ./scripts/install-whitesur-theme.sh"
 fi
 
-# Xwayland stays enabled so appmenu-gtk-module (X11 registrar) can serve GTK3
-# apps. Pure Wayland GtkApplication apps still use gtk_shell1 export.
-# Pass OOZE_NO_X11=1 to force --no-x11.
+# Xwayland stays available for X11-only apps. Foreign AppMenu is off by default;
+# Ooze GTK apps use Wayland gtk_shell1. Pass OOZE_NO_X11=1 to force --no-x11.
 desktop_args=(--wayland --devkit)
 if [[ "${OOZE_NO_X11:-}" == "1" ]]; then
   desktop_args+=(--no-x11)

@@ -1,6 +1,7 @@
 #include "ooze-xsettings.h"
 #include "ooze-theme.h"
 #include "ooze-stall.h"
+#include "ooze-shared-appmenu.h"
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -138,8 +139,14 @@ ooze_xsettings_build_blob (guint32 serial)
   ooze_xsettings_append_u32 (buf, serial);
   ooze_xsettings_append_u32 (buf, 5);
 
-  ooze_xsettings_append_int (buf, "Gtk/ShellShowsMenubar", 1, serial);
-  ooze_xsettings_append_int (buf, "Gtk/ShellShowsAppmenu", 1, serial);
+  /* Foreign AppMenu off by default — keep in-window GTK3 menus.
+   * OOZE_FOREIGN_GLOBAL_MENU=1 restores ShellShowsMenubar for dbusmenu. */
+  {
+    int shows = ooze_appmenu_foreign_enabled () ? 1 : 0;
+
+    ooze_xsettings_append_int (buf, "Gtk/ShellShowsMenubar", shows, serial);
+    ooze_xsettings_append_int (buf, "Gtk/ShellShowsAppmenu", shows, serial);
+  }
   /* Match org.gnome.desktop.wm.preferences button-layout (controls on left). */
   ooze_xsettings_append_string (buf, "Gtk/DecorationLayout",
                                 "close,minimize,maximize:", serial);

@@ -18,7 +18,6 @@ typedef struct
 
 typedef struct
 {
-  guint     serial;
   char     *connector;
   char     *display_name;
   int       layout_x;
@@ -28,26 +27,40 @@ typedef struct
   gboolean  primary;
   char     *current_mode_id;
   GPtrArray *modes; /* OozeDisplayMode* */
+} OozeDisplayMonitor;
 
-  /* From GetCurrentState global properties */
-  guint    layout_mode;                   /* 1=logical, 2=physical */
-  gboolean supports_changing_layout_mode;
-  gboolean global_scale_required;
-} OozeDisplayState;
+typedef struct
+{
+  guint     serial;
+  guint     layout_mode; /* 1=logical, 2=physical */
+  gboolean  supports_changing_layout_mode;
+  gboolean  global_scale_required;
+  GPtrArray *monitors; /* OozeDisplayMonitor* */
+} OozeDisplayConfig;
+
+/* ApplyMonitorsConfig method — matches Mutter / GNOME Settings */
+#define OOZE_DISPLAY_APPLY_TEMPORARY  1u
+#define OOZE_DISPLAY_APPLY_PERSISTENT 2u
 
 gboolean ooze_display_config_allowed (void);
 
-gboolean ooze_display_config_is_nest_dummy (const OozeDisplayState *state);
+gboolean ooze_display_monitor_is_nest_dummy (const OozeDisplayMonitor *monitor);
 
-gboolean ooze_display_config_load (OozeDisplayState **state_out,
-                                   GError           **error);
+gboolean ooze_display_config_load (OozeDisplayConfig **config_out,
+                                   GError            **error);
 
-void ooze_display_state_free (OozeDisplayState *state);
+OozeDisplayConfig *ooze_display_config_copy (const OozeDisplayConfig *config);
 
-gboolean ooze_display_config_apply (const OozeDisplayState *state,
-                                    const char             *mode_id,
-                                    double                  scale,
-                                    guint                   transform,
+void ooze_display_config_free (OozeDisplayConfig *config);
+
+void ooze_display_config_set_primary (OozeDisplayConfig *config,
+                                      guint              index);
+
+const OozeDisplayMode *ooze_display_monitor_current_mode (const OozeDisplayMonitor *monitor);
+
+/* Apply the full logical-monitor list. method is TEMPORARY or PERSISTENT. */
+gboolean ooze_display_config_apply (const OozeDisplayConfig *config,
+                                    guint                    method,
                                     GError                 **error);
 
 G_END_DECLS

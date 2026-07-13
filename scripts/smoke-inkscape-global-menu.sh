@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Smoke: nest serves ShellShowsMenubar, then X11 Inkscape binds dbusmenu.
+# Smoke: foreign AppMenu path (debug). Requires OOZE_FOREIGN_GLOBAL_MENU=1.
+# Nest serves ShellShowsMenubar, then X11 Inkscape binds dbusmenu.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+
+export OOZE_FOREIGN_GLOBAL_MENU=1
 
 # Kill prior nests without matching this script's argv (avoid pkill -f self-hit).
 while read -r pid; do

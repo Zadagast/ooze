@@ -1,63 +1,49 @@
 ---
-description: How Ooze global menus wire like Unity/XFCE (GTK shell export)
+description: How Ooze global menus wire (native Wayland vs optional foreign AppMenu)
 globs: compositor/ooze-global-menu.c,compositor/ooze-dbusmenu.c,compositor/ooze-panel.c,shared/ooze-shared-appmenu.c,ooze-command/**,spot/**
 alwaysApply: false
 ---
 
-# Global menu wiring (Unity / XFCE model)
+# Global menu wiring
 
-Ooze is a Mutter Wayland compositor. Match the desktop contracts those DEs use:
+Ooze is a Mutter Wayland compositor.
 
-## Wayland GTK (Spot, Command, modern GTK3/4)
+## Wayland GTK (Spot, Command, other org.ooze.* — always on)
 
 1. Compositor advertises `gtk_shell1` **GLOBAL_APP_MENU** by keeping
-   `meta_prefs_set_show_fallback_app_menu(FALSE)` (see `my_plugin_apply_wm_preferences`).
+   `meta_prefs_set_show_fallback_app_menu(FALSE)`.
 2. Clients export over the session bus; Mutter exposes paths on `MetaWindow`:
    - `gtk-unique-bus-name`
    - `gtk-menubar-object-path` (prefer) or `gtk-app-menu-object-path` (fallback)
    - `gtk-application-object-path` / `gtk-window-object-path` for `app.*` / `win.*`
-3. Shell binds `GDBusMenuModel` + `GDBusActionGroup`, restores focus, then activates
-   (short defer so the client accepts focus — same idea as Unity panel clicks).
+3. Shell binds `GDBusMenuModel` + `GDBusActionGroup`.
 
 Apps must `gtk_application_set_menubar()` once at startup and
 `gtk_application_window_set_show_menubar(..., FALSE)`.
 
-## X11 / XFCE-style GTK modules
+## Foreign / classic GTK3 AppMenu (OFF by default)
 
-Install with `./scripts/install-appmenu.sh` (appmenu-gtk3-module + appmenu-registrar
-+ xsettingsd).
+Sync `GetMenuForWindow` / dbusmenu `GetLayout` on the compositor main thread
+freezes the session (especially Inkscape). **Do not force** `GDK_BACKEND=x11`,
+`appmenu-gtk-module`, or `Gtk/ShellShowsMenubar=1` unless debugging.
 
-Ooze sets `GTK_MODULES=appmenu-gtk-module` and `UBUNTU_MENUPROXY=1` in `run-devkit.sh`
-and forwards them to dock-launched clients. Nested sessions keep **Xwayland** enabled
-(omit `--no-x11`) because the module registers via X11 window IDs.
+Re-enable only with:
 
-Registrar menus are **`com.canonical.dbusmenu`**, not `org.gtk.Menus`. Bind them with
-`ooze-dbusmenu` (`GetLayout` / `Event`), never `GDBusMenuModel` (that yields unlabeled
-"Menu" stubs). Prefer the registrar path when `GetMenuForWindow` succeeds.
+```bash
+OOZE_FOREIGN_GLOBAL_MENU=1
+```
 
-Modern **appmenu-gtk-module** (Ubuntu 25.04+) often skips the registrar and exports
-**`org.gtk.Menus`** via `_GTK_UNIQUE_BUS_NAME` / `_GTK_MENUBAR_OBJECT_PATH` instead.
-For X11, if the registrar has nothing, bind those Mutter gtk-shell props with
-`GDBusMenuModel` (same path as Wayland GTK apps). Do not treat that as the old
-empty-stub fallthrough.
+Then: install `./scripts/install-appmenu.sh`, Xwayland, registrar + dbusmenu bind
+as before. Prefer registrar when `GetMenuForWindow` succeeds; wrap sync calls
+with `OozeStall:`.
 
-**Inkscape / classic GtkMenuBar:** must run on **Xwayland** (`GDK_BACKEND=x11`).
-Spot, Command, dock, and King inject that for foreign apps; Ooze GTK4 apps force
-Wayland. Native Wayland Inkscape **cannot** feed the global menu (`appmenu-gtk-module`
-is not Wayland-native) — the panel shows “Needs X11 (Spot/Command)” instead of stubs.
-
-X11 clients prefer registrar dbusmenu; if absent, bind modern appmenu’s
-`org.gtk.Menus` export via gtk-shell props (not unlabeled stubs).
-
-`Gtk/ShellShowsMenubar` hides the in-window bar. Prefer system `xsettingsd` when
-installed; otherwise the compositor serves XSETTINGS itself (`compositor/ooze-xsettings.c`).
-Optional host install: `./scripts/install-appmenu.sh`.
+Default: foreign apps keep **in-window** menus. XSETTINGS publishes
+`Gtk/ShellShowsMenubar=0` / `ShellShowsAppmenu=0`.
 
 Do not invent a second menubar path per window for Ooze GtkApplication apps —
 set the application menubar once.
-Do not set Inkscape `window/menu` prefs to off — that removes the bar so nothing exports.
 
 ## Popup UX
 
 Menu popups sit above windows with a dim scrim backdrop and a clear shadow so they
-remain readable over light app chrome.
+remain readable over light app surfaces.

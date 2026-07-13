@@ -12,7 +12,7 @@
 - `mutter-dev-bin` (provides `/usr/libexec/mutter-devkit`, required by `./run-devkit.sh`)
 - PipeWire running on the session bus (the devkit window cannot start without it)
 - `fonts-noto-color-emoji` (Unicode 16) — the Ooze menu button glyph 🫟 renders as a blank box without it
-- Optional: `appmenu-gtk3-module`, `appmenu-registrar` (GTK3 global menus) — `./scripts/install-appmenu.sh`
+- Optional: `appmenu-gtk3-module`, `appmenu-registrar` — only if debugging foreign global menus with `OOZE_FOREIGN_GLOBAL_MENU=1` (`./scripts/install-appmenu.sh`)
 - Optional: WhiteSur GTK theme (foreign-app traffic lights) — `./scripts/install-whitesur-theme.sh`
 
 ```bash
@@ -65,7 +65,7 @@ Build a single-file nested demo (binaries + icons; **host Mutter 18** still requ
 Or let **GitHub Actions** build it in an Ubuntu 26.04 container:
 
 - **Manual:** Actions → **AppImage** → Run workflow (downloads as a workflow artifact)
-- **Release:** `git push origin v0.2.2` — CI builds and attaches the AppImage to that GitHub Release
+- **Release:** `git push origin v0.3.0` — CI builds and attaches the AppImage to that GitHub Release
 
 The AppImage puts the compositor (`ooze`) plus Spot, Command, King, Ear, Pak, Themes, Eye, Monitor, and About on `PATH` inside the nested session. It does not replace your login desktop.
 
@@ -75,7 +75,7 @@ Build a system package that installs under `/usr`:
 
 ```bash
 ./scripts/build-deb.sh
-sudo apt install ./dist/ooze_0.2.2_amd64.deb
+sudo apt install ./dist/ooze_0.3.0_amd64.deb
 ```
 
 **Native login (Wayland):** log out, and at GDM pick **Ooze**. That runs `ooze-wayland-session` → `ooze --wayland` on real displays (no `--devkit`). Xwayland stays enabled unless you set `OOZE_NO_X11=1`.

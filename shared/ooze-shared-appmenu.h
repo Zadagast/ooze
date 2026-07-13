@@ -5,38 +5,43 @@
 G_BEGIN_DECLS
 
 /*
- * XFCE / Unity appmenu-gtk-module bridge.
+ * Global menus
+ * ------------
+ * Ooze GTK4 apps use Wayland gtk_shell1 GLOBAL_APP_MENU (always on).
  *
- * GTK3 clients load appmenu-gtk-module, which strips in-window menubars and
- * registers them with com.canonical.AppMenu.Registrar (X11 / Xwayland).
- * Wayland-native GtkApplication menubars still use gtk_shell1 export.
- *
- * Inkscape and other classic GtkMenuBar apps must run on Xwayland
- * (GDK_BACKEND=x11) — the module is not Wayland-native.
+ * Foreign / classic GTK3 AppMenu (Xwayland + appmenu-gtk-module + dbusmenu)
+ * is OFF by default — sync registrar/GetLayout on the compositor main thread
+ * freezes the session (Inkscape focus). Re-enable only for debugging:
+ *   OOZE_FOREIGN_GLOBAL_MENU=1
  */
 
-/* Set GTK_MODULES / UBUNTU_MENUPROXY for this process. */
+/* TRUE when OOZE_FOREIGN_GLOBAL_MENU is set to a truthy value (1/true/yes). */
+gboolean ooze_appmenu_foreign_enabled (void);
+
+/* Set GTK_MODULES / UBUNTU_MENUPROXY when foreign global menus are enabled. */
 void ooze_appmenu_setup_environment (void);
 
 /* Forward module/proxy env to a dock / compositor-spawned subprocess. */
 void ooze_appmenu_apply_to_launcher (GSubprocessLauncher *launcher);
 
 /*
- * Ooze GTK4 apps: prefer native Wayland even if the session defaults
- * foreign GTK3 apps to X11 for appmenu.
+ * Ooze GTK4 apps: prefer native Wayland; never inherit foreign GTK_THEME.
  */
 void ooze_appmenu_force_wayland_backend (GSubprocessLauncher *launcher);
 
 /*
- * Foreign / GTK3 appmenu clients: force Xwayland so appmenu-gtk-module
- * can register menus.
+ * Foreign AppMenu clients (debug only): force Xwayland for appmenu-gtk-module.
  */
 void ooze_appmenu_force_x11_backend (GSubprocessLauncher *launcher);
 
-/* Same X11 + module env for g_app_info_launch / launch_default_for_uri. */
+/*
+ * Foreign launch via g_app_info_launch.
+ * Default: WhiteSur theme only (in-window menus).
+ * With OOZE_FOREIGN_GLOBAL_MENU=1: modules + X11 + ShellShowsMenubar.
+ */
 void ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx);
 
-/* Foreign apps: modules + X11 + WhiteSur on a GSubprocessLauncher. */
+/* Foreign apps on GSubprocessLauncher — same gate as prepare_launch_context. */
 void ooze_appmenu_apply_foreign_to_launcher (GSubprocessLauncher *launcher);
 
 /* Ooze apps via g_app_info_launch: Wayland, never inherit GTK_THEME. */
@@ -47,8 +52,9 @@ void ooze_appmenu_prepare_launch_context_for_info (GAppLaunchContext *ctx,
                                                    GAppInfo          *info);
 
 /*
- * Copy environ and inject module/proxy + GDK_BACKEND=x11 for VTE shells
- * so `inkscape` from Command registers menus. Caller owns the result.
+ * Environ for VTE / Command shells. Default: WhiteSur only.
+ * Debug flag: also inject modules + GDK_BACKEND=x11.
+ * Caller owns the result.
  */
 char **ooze_appmenu_environ_for_foreign (char **envp);
 
@@ -56,15 +62,13 @@ char **ooze_appmenu_environ_for_foreign (char **envp);
 gboolean ooze_appmenu_module_available (void);
 
 /*
- * Ensure appmenu-registrar is on the session bus. Spawns it once if the
- * binary exists and the name is not owned yet. Safe to call repeatedly.
+ * Ensure appmenu-registrar is on the session bus (no-op unless foreign menus on).
  */
 void ooze_appmenu_ensure_registrar (void);
 
 /*
- * Advertise Gtk/ShellShowsMenubar on the nest X11 display (Xwayland),
- * not the host $DISPLAY. Plugin wires Mutter's Display* via my-xsettings;
- * these helpers track the nest display name for republish on app launch.
+ * Advertise Gtk/ShellShowsMenubar on the nest X11 display when foreign menus
+ * are enabled. Plugin wires Mutter's Display* via ooze-xsettings.
  */
 void ooze_appmenu_ensure_shell_shows_menubar (void);
 void ooze_appmenu_ensure_shell_shows_menubar_on_display (const char *display_name);
