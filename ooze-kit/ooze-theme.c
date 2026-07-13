@@ -64,6 +64,29 @@ ooze_theme_ensure (void)
     "}"
     ".ooze-emphasis {"
     "  font-weight: 600;"
+    "}"
+    /*
+     * Shared Ooze Gel CSD — 9px corners + Aqua drop shadow.
+     * Apps opt in with CSS class "spot-finder" (historical name from Spot;
+     * King/Pak/Eye use the same class so every process gets this look via
+     * ooze_theme_ensure, not only when Spot’s own CSS is loaded).
+     */
+    "window.csd.spot-finder > decoration {"
+    "  border-radius: 9px;"
+    "  box-shadow:"
+    "    0 2px  6px rgba(0,0,0,0.22),"
+    "    0 8px 24px rgba(0,0,0,0.40),"
+    "    0 20px 40px rgba(0,0,0,0.20);"
+    "}"
+    "window.csd.spot-finder > decoration:focus {"
+    "  box-shadow:"
+    "    0 2px  6px rgba(0,0,0,0.28),"
+    "    0 10px 30px rgba(0,0,0,0.48),"
+    "    0 22px 44px rgba(0,0,0,0.22);"
+    "}"
+    "window.csd.spot-finder,"
+    ".spot-finder {"
+    "  background: @window_bg_color;"
     "}");
   gtk_style_context_add_provider_for_display (display,
                                               GTK_STYLE_PROVIDER (p),

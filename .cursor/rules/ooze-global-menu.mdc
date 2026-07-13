@@ -1,0 +1,53 @@
+---
+description: How Ooze global menus wire like Unity/XFCE (GTK shell export)
+globs: src/my-global-menu.c,src/my-dbusmenu.c,src/my-appmenu.c,src/my-aqua-menu.c,src/my-plugin.c,ooze-command/**,spot/**
+alwaysApply: false
+---
+
+# Global menu wiring (Unity / XFCE model)
+
+Ooze is a Mutter Wayland compositor. Match the desktop contracts those DEs use:
+
+## Wayland GTK (Spot, Command, modern GTK3/4)
+
+1. Compositor advertises `gtk_shell1` **GLOBAL_APP_MENU** by keeping
+   `meta_prefs_set_show_fallback_app_menu(FALSE)` (see `my_plugin_apply_wm_preferences`).
+2. Clients export over the session bus; Mutter exposes paths on `MetaWindow`:
+   - `gtk-unique-bus-name`
+   - `gtk-menubar-object-path` (prefer) or `gtk-app-menu-object-path` (fallback)
+   - `gtk-application-object-path` / `gtk-window-object-path` for `app.*` / `win.*`
+3. Shell binds `GDBusMenuModel` + `GDBusActionGroup`, restores focus, then activates
+   (short defer so the client accepts focus — same idea as Unity panel clicks).
+
+Apps must `gtk_application_set_menubar()` once at startup and
+`gtk_application_window_set_show_menubar(..., FALSE)`.
+
+## X11 / XFCE-style GTK modules
+
+Install with `./scripts/install-appmenu.sh` (appmenu-gtk3-module + appmenu-registrar
++ xsettingsd).
+
+Ooze sets `GTK_MODULES=appmenu-gtk-module` and `UBUNTU_MENUPROXY=1` in `run-devkit.sh`
+and forwards them to dock-launched clients. Nested sessions keep **Xwayland** enabled
+(omit `--no-x11`) because the module registers via X11 window IDs.
+
+Registrar menus are **`com.canonical.dbusmenu`**, not `org.gtk.Menus`. Bind them with
+`my-dbusmenu` (`GetLayout` / `Event`), never `GDBusMenuModel` (that yields unlabeled
+"Menu" stubs). Prefer the registrar path for X11 clients even when gtk-shell props
+exist.
+
+**Inkscape / classic GtkMenuBar:** must run on **Xwayland** (`GDK_BACKEND=x11`).
+Spot file opens and Command shells inject that; Ooze GTK4 dock apps force Wayland.
+Native Wayland Inkscape will not export to the registrar.
+
+`Gtk/ShellShowsMenubar` hides the in-window bar. Prefer system `xsettingsd` when
+installed; otherwise the compositor serves XSETTINGS itself (`src/my-xsettings.c`).
+Optional host install: `./scripts/install-appmenu.sh`.
+
+Do not invent a second menubar path per window for Ooze GtkApplication apps —
+set the application menubar once.
+
+## Popup UX
+
+Menu popups sit above windows with a dim scrim backdrop and a clear shadow so they
+remain readable over light app chrome.

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Ooze Eye
+GenericName=Image Viewer
+Comment=View images on Ooze Desktop
+Exec=ooze-eye %U
+Icon=image-x-generic
+Terminal=false
+Type=Application
+Categories=Graphics;Viewer;GTK;
+MimeType=image/jpeg;image/png;image/gif;image/webp;image/bmp;image/tiff;image/svg+xml;
+StartupWMClass=org.ooze.Eye

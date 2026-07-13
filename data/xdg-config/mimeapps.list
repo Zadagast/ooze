@@ -1,0 +1,10 @@
+[Default Applications]
+image/jpeg=org.ooze.Eye.desktop
+image/png=org.ooze.Eye.desktop
+image/gif=org.ooze.Eye.desktop
+image/webp=org.ooze.Eye.desktop
+image/bmp=org.ooze.Eye.desktop
+image/tiff=org.ooze.Eye.desktop
+image/svg+xml=org.ooze.Eye.desktop
+image/x-bmp=org.ooze.Eye.desktop
+image/x-png=org.ooze.Eye.desktop

@@ -31,7 +31,8 @@ ooze_popover_monitor_max_height (GtkPopover *popover)
   GtkWidget *widget = GTK_WIDGET (popover);
   GdkDisplay *display;
   GdkSurface *surface = NULL;
-  g_autoptr (GdkMonitor) monitor = NULL;
+  GdkMonitor *monitor = NULL;
+  gboolean owned = FALSE;
   GdkRectangle geom;
   const int margin = 24;
   int max_h = 2000;
@@ -54,16 +55,22 @@ ooze_popover_monitor_max_height (GtkPopover *popover)
     {
       GListModel *monitors = gdk_display_get_monitors (display);
       if (monitors && g_list_model_get_n_items (monitors) > 0)
-        monitor = g_list_model_get_item (monitors, 0);
+        {
+          monitor = g_list_model_get_item (monitors, 0); /* transfer full */
+          owned = TRUE;
+        }
     }
 
-  if (monitor)
+  if (monitor && GDK_IS_MONITOR (monitor))
     {
       gdk_monitor_get_geometry (monitor, &geom);
       max_h = geom.height - margin * 2;
       if (max_h < 120)
         max_h = 120;
     }
+
+  if (owned)
+    g_object_unref (monitor);
 
   return max_h;
 }

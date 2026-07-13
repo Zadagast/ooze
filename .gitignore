@@ -5,10 +5,14 @@ build/
 dist/
 packaging/appimage/tools/
 
-# Bundled elementary icon theme (~38MB, fetched by `ninja -C build`)
+# Expanded elementary icon theme (~38MB). Source archive is tracked:
+#   data/icons/elementary-icons.tar.xz
 data/icons/elementary/
 .cache/
 build-elementary-icons/
+
+# Nest session leftovers (do not commit)
+data/xdg-config/org.gnome.Ptyxis/
 
 # Editor / OS
 *~

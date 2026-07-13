@@ -1,0 +1,24 @@
+---
+description: Avoid shipping libadwaita apps as Ooze defaults; prefer GTK/OozeKit or custom Ooze apps
+alwaysApply: true
+---
+
+# Avoid libadwaita as default OS apps
+
+libadwaita apps (Loupe, many modern GNOME apps) do **not** honor Ooze’s theming story:
+
+- They ignore `GTK_THEME` / WhiteSur for traffic lights and chrome.
+- A global `~/.config/gtk-4.0` override to force Mac skins breaks **Ooze Gel** and **OozeKit**.
+- They draw their own Adwaita CSD, so they never look like first-party Ooze apps.
+
+## Policy
+
+- Do **not** ship libadwaita apps as the default handler for core desktop actions (images, files extras, etc.) when we control the choice.
+- Prefer: existing **Ooze** apps (`org.ooze.*` + Gel), plain **GTK4** (no libadwaita), or classic **GTK3** apps that respect WhiteSur via `GTK_THEME` on foreign launch.
+- **Borrowing code/ideas** from libadwaita apps is fine (algorithms, UX patterns). Do not depend on them as the branded viewer/editor unless there is no practical alternative.
+- If a third-party libadwaita app must be used temporarily, treat it as a stopgap and document that it will look like GNOME, not Ooze / WhiteSur.
+
+## Related
+
+- Ooze apps use Gel + OozeKit — not Adwaita header bars.
+- Foreign theming is launch-scoped (`GTK_THEME=WhiteSur-*`), never a session-wide gtk-4.0 symlink.

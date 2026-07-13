@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Download elementary icon theme (with cursors) into $ROOT/data/icons/elementary.
-# Source: https://github.com/elementary/icons
+# Install elementary icon theme (with cursors) into $ROOT/data/icons/elementary.
+#
+# Prefer the vendored archive (no network). Fall back to building from GitHub
+# or apt only if the archive is missing.
+# Source upstream: https://github.com/elementary/icons
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$ROOT/data/icons/elementary"
+ARCHIVE="$ROOT/data/icons/elementary-icons.tar.xz"
 CACHE="$ROOT/.cache/elementary-icons"
 
 quiet="${MESON_INSTALL_QUIET:-}"
@@ -24,6 +28,18 @@ ensure_icons() {
   fi
 
   mkdir -p "$ROOT/data/icons"
+
+  if [[ -f "$ARCHIVE" ]]; then
+    log "Extracting vendored elementary icons from $ARCHIVE"
+    rm -rf "$DEST"
+    tar -C "$ROOT/data/icons" -xJf "$ARCHIVE"
+    if [[ ! -f "$DEST/index.theme" ]]; then
+      echo "error: archive did not produce $DEST/index.theme" >&2
+      exit 1
+    fi
+    log "Installed elementary icons to $DEST"
+    return
+  fi
 
   if command -v rsvg-convert >/dev/null && command -v xcursorgen >/dev/null; then
     log "Building elementary icons from GitHub..."
@@ -73,4 +89,6 @@ fi
 
 STAMP="${1:-}"
 ensure_icons
-[[ -n "$STAMP" ]] && touch "$STAMP"
+if [[ -n "$STAMP" ]]; then
+  touch "$STAMP"
+fi

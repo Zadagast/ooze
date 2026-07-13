@@ -9,5 +9,6 @@ G_DECLARE_FINAL_TYPE (OozeCommandWindow, ooze_command_window,
                       OOZE, COMMAND_WINDOW, GtkApplicationWindow)
 
 GtkWidget *ooze_command_window_new (GtkApplication *app);
+void       ooze_command_application_setup_menubar (GtkApplication *app);
 
 G_END_DECLS

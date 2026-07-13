@@ -1,6 +1,6 @@
 #include "spot-window.h"
 
-#include "my-icons.h"
+#include "ooze-shared-icons.h"
 #include "ooze-theme.h"
 
 #include <adwaita.h>
@@ -9,7 +9,7 @@ static void
 on_startup (AdwApplication *app,
             gpointer        user_data G_GNUC_UNUSED)
 {
-  my_icons_configure_gtk ();
+  ooze_icons_configure_gtk ();
   ooze_theme_ensure ();
   spot_application_setup_menubar (GTK_APPLICATION (app));
 }
@@ -18,17 +18,13 @@ static void
 on_activate (AdwApplication *app,
              gpointer        user_data G_GNUC_UNUSED)
 {
-  GtkWindow *existing;
   SpotWindow *window;
+  const char *start_path;
 
-  existing = gtk_application_get_active_window (GTK_APPLICATION (app));
-  if (existing)
-    {
-      gtk_window_present (existing);
-      return;
-    }
-
-  window = spot_window_new (app);
+  /* Always open a new window — dock middle-click and a second `spot`
+   * launch should not merely raise the existing one. */
+  start_path = g_object_get_data (G_OBJECT (app), "start-path");
+  window = spot_window_new_for_path (app, start_path);
   gtk_application_add_window (GTK_APPLICATION (app), GTK_WINDOW (window));
   gtk_window_present (GTK_WINDOW (window));
 }
@@ -91,7 +87,7 @@ main (int argc, char **argv)
     { NULL }
   };
 
-  my_icons_apply ();
+  ooze_icons_apply ();
 
   context = g_option_context_new (NULL);
   g_option_context_add_main_entries (context, options, NULL);

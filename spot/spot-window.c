@@ -1,6 +1,7 @@
 #include "spot-window.h"
 
-#include "my-icons.h"
+#include "ooze-shared-appmenu.h"
+#include "ooze-shared-icons.h"
 
 #include "ooze-header-bar.h"
 #include "ooze-gel.h"
@@ -105,7 +106,7 @@ spot_ensure_css (void)
   if (!display)
     return;
 
-  my_icons_configure_gtk ();
+  ooze_icons_configure_gtk ();
   ooze_theme_ensure ();
 
   provider = gtk_css_provider_new ();
@@ -2065,8 +2066,10 @@ static void
 spot_launch_uri (const char *uri)
 {
   g_autoptr (GError) error = NULL;
+  g_autoptr (GAppLaunchContext) ctx = g_app_launch_context_new ();
 
-  if (!g_app_info_launch_default_for_uri (uri, NULL, &error))
+  ooze_appmenu_prepare_launch_context (ctx);
+  if (!g_app_info_launch_default_for_uri (uri, ctx, &error))
     g_warning ("Spot: failed to open %s: %s", uri, error->message);
 }
 

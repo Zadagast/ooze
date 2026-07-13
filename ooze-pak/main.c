@@ -1,6 +1,6 @@
 #include "ooze-pak-window.h"
 
-#include "my-icons.h"
+#include "ooze-shared-icons.h"
 #include "ooze-theme.h"
 
 #include <adwaita.h>
@@ -12,7 +12,7 @@ static void
 on_startup (AdwApplication *app G_GNUC_UNUSED,
             gpointer        user_data G_GNUC_UNUSED)
 {
-  my_icons_configure_gtk ();
+  ooze_icons_configure_gtk ();
   ooze_theme_ensure ();
 }
 
@@ -69,7 +69,7 @@ main (int argc, char **argv)
     { NULL }
   };
 
-  my_icons_apply ();
+  ooze_icons_apply ();
 
   context = g_option_context_new ("[FILE…]");
   g_option_context_add_main_entries (context, options, NULL);

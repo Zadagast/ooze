@@ -14,8 +14,12 @@
 | --- | --- |
 | **Shell** | Global menu bar, dock, desktop icons, system appearance |
 | **Spot** | File manager with sidebar, column, and grid views |
-| **Ooze King** | System apps launcher (Spot, Command, Ear, Pak) |
+| **Ooze King** | System apps launcher (Spot, Command, Ear, Monitor, Pak) |
 | **Ooze Command** | Terminal with tabs, Ooze Gel, and global menu support |
+| **Ooze Eye** | Image viewer (default handler for images in the nest) |
+| **Ooze Monitor** | Display preferences via Mutter DisplayConfig |
+| **Ooze Ear** | Sound preferences (PipeWire) |
+| **Ooze Pak** | Flatpak package browser |
 | **Ooze Gel** | App window frame — header bar, traffic lights, drag and resize |
 | **OozeKit** | Shared drawing library for surfaces, pinstripes, buttons, and palette |
 
@@ -26,27 +30,40 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 ## Features
 
 ### Desktop shell
-- Mutter-based Wayland compositor
-- Global menu bar with appearance toggle
+- Mutter-based Wayland compositor (`compositor/`)
+- Global menu bar with appearance toggle and shell File / Edit / View / Go / Window / Help menus
+- App menus from native GTK4 (`gtk_shell1`) and GTK3 / Xwayland via **appmenu-gtk-module** + dbusmenu
+- Built-in XSETTINGS (menubar / appmenu / left-side decoration layout) when system `xsettingsd` is absent
 - Floating dock with Spot, Command, and other Ooze apps
 - Running-app indicators with focus / minimize on dock click
 - Magic-lamp minimize animation into the dock
 - Desktop icons with the elementary icon theme
+- Optional WhiteSur GTK theme for **foreign** apps only (launch-scoped `GTK_THEME`, never a session-wide gtk-4.0 override)
 
 ### Spot
 - Places sidebar, toolbar, and status bar
 - Column (Miller) and grid views
 - Column browser rooted at the active sidebar place
-- Theme-aware surfaces through OozeKit, Gel, and Adwaita
+- Theme-aware surfaces through OozeKit and Gel
+- Opens images in **Ooze Eye** via nest-local MIME defaults
 
 ### Ooze King
 - Icon + label launcher for Ooze system apps
-- Opens Spot, Ooze Command, Ooze Ear, and Ooze Pak
+- Opens Spot, Ooze Command, Ooze Ear, Ooze Monitor, and Ooze Pak
 
 ### Ooze Command
 - VTE terminal with multiple tabs and New Tab control
 - Shared Ooze Gel header bar and traffic lights
-- Application menu for the shell global menu (GTK apps that export a menubar)
+- Application menu for the shell global menu
+
+### Ooze Eye
+- Lightweight GTK4 image viewer with Ooze Gel
+- Fit-to-window viewing and Open dialog
+- Default image handler inside `./run-devkit.sh` (isolated `mimeapps.list`)
+
+### Ooze Monitor
+- Display layout and resolution via Mutter’s DisplayConfig D-Bus API
+- Nest-friendly mode list (`OOZE_DISPLAY_MODES` / `MUTTER_DEBUG_DUMMY_MODE_SPECS`)
 
 ### Ooze Gel
 - `ooze-header-bar` — titled bar with traffic lights
@@ -78,11 +95,15 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 - `libgtk-4-dev`, `libadwaita-1-dev`, `libcairo2-dev`
 - `libvte-2.91-gtk4-dev` (Ooze Command)
 - `libgdk-pixbuf-2.0-dev`, `libpng-dev`
+- Optional: `appmenu-gtk3-module`, `appmenu-registrar` (GTK3 global menus) — `./scripts/install-appmenu.sh`
+- Optional: WhiteSur GTK theme (foreign-app traffic lights) — `./scripts/install-whitesur-theme.sh`
 
 ```bash
 meson setup build
 ninja -C build
 ```
+
+Elementary icons are vendored as `data/icons/elementary-icons.tar.xz` and expanded on demand (`ninja -C build elementary-icons` or first `./run-devkit.sh`).
 
 ---
 
@@ -95,10 +116,11 @@ ninja -C build
 Launches a nested Mutter session with:
 
 - `build/` on `PATH`
-- Project-local GSettings (does not modify your user dconf)
-- Elementary icons under `data/` (fetched on first build if needed)
+- Project-local GSettings / XDG config under `data/xdg-config/` (does not rewrite your user dconf or host MIME defaults)
+- Elementary icons under `data/` (fetched or extracted on first need)
+- Xwayland enabled by default so GTK3 appmenu clients can register (pass `OOZE_NO_X11=1` to disable)
 
-Toggle light and dark from the **Ooze** menu. Spot and Ooze Command follow automatically.
+Toggle light and dark from the **Ooze** menu. First-party apps follow automatically.
 
 For live rebuilds during development:
 
@@ -127,18 +149,24 @@ The AppImage puts Spot, Command, King, Ear, and Pak on `PATH` inside the nested 
 ## Repository layout
 
 ```
-src/           Compositor shell (panel, dock, theme, menus, desktop icons)
+compositor/    Mutter plugin / shell (panel, dock, menus, theme, desktop icons)
+shared/        Icons + appmenu helpers shared by compositor and GTK apps
 spot/          Spot file manager
+ooze-eye/      Image viewer
+ooze-monitor/  Display preferences
 ooze-king/     System apps launcher
 ooze-command/  Terminal
+ooze-ear/      Sound preferences
+ooze-pak/      Flatpak browser
+ooze-about/    About This Computer
 ooze-kit/      Shared drawing toolkit
 ooze-ui/       Ooze Gel (header bar, traffic lights, drag/resize)
 common/        Shared Gel / traffic-light constants
-data/          Icons, desktop entries, branding
+data/          Icons archive, desktop entries, nest XDG config, branding
 docs/          Screenshots and demo media
 packaging/     AppImage AppRun and desktop entry
-.github/       CI (AppImage build on Ubuntu 26.04)
-scripts/       Install helpers and AppImage builder
+.github/       CI (compile + AppImage on Ubuntu 26.04)
+scripts/       Icon / WhiteSur / appmenu installers and AppImage builder
 ```
 
 ---

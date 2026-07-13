@@ -1,16 +1,17 @@
 #include "ooze-command-window.h"
 
-#include "my-icons.h"
+#include "ooze-shared-icons.h"
 #include "ooze-theme.h"
 
 #include <adwaita.h>
 
 static void
-on_startup (AdwApplication *app G_GNUC_UNUSED,
+on_startup (AdwApplication *app,
             gpointer        user_data G_GNUC_UNUSED)
 {
-  my_icons_configure_gtk ();
+  ooze_icons_configure_gtk ();
   ooze_theme_ensure ();
+  ooze_command_application_setup_menubar (GTK_APPLICATION (app));
 }
 
 static void
@@ -27,7 +28,7 @@ main (int argc, char **argv)
 {
   g_autoptr (AdwApplication) app = NULL;
 
-  my_icons_apply ();
+  ooze_icons_apply ();
 
   app = adw_application_new ("org.ooze.Command", G_APPLICATION_DEFAULT_FLAGS);
   g_signal_connect (app, "startup",  G_CALLBACK (on_startup),  NULL);

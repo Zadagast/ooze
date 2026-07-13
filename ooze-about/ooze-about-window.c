@@ -27,6 +27,7 @@ typedef struct
 
 static const OozeAppCatalogEntry ooze_apps[] = {
   { "Spot",         "spot",         "org.ooze.Spot",    "File manager" },
+  { "Ooze Eye",     "ooze-eye",     "org.ooze.Eye",     "Image viewer" },
   { "Ooze Command", "ooze-command", "org.ooze.Command", "Terminal emulator" },
   { "Ooze King",    "ooze-king",    "org.ooze.King",    "System Settings" },
   { "Ooze Ear",     "ooze-ear",     "org.ooze.Ear",     "Sound Settings" },

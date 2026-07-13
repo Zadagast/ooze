@@ -402,10 +402,29 @@ ooze_gel_ensure_css (void)
                                      ".ooze-edge-grip.corner {"
                                      "  min-width: 12px;"
                                      "  min-height: 12px;"
+                                     "}"
+
+                                     /*
+                                      * WhiteSur / libadwaita gtk-4.0 CSS can inject traffic-light
+                                      * windowcontrols globally. Ooze Gel draws its own buttons —
+                                      * never show a second set on framed Ooze windows.
+                                      */
+                                     "window.ooze-framed-window windowcontrols,"
+                                     "window.ooze-framed-window .titlebutton,"
+                                     ".ooze-framed-window windowcontrols,"
+                                     ".ooze-framed-window .titlebutton {"
+                                     "  opacity: 0;"
+                                     "  min-width: 0;"
+                                     "  min-height: 0;"
+                                     "  padding: 0;"
+                                     "  margin: 0;"
+                                     "  border: none;"
+                                     "  background: none;"
+                                     "  box-shadow: none;"
                                      "}");
   gtk_style_context_add_provider_for_display (display,
                                               GTK_STYLE_PROVIDER (provider),
-                                              GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+                                              GTK_STYLE_PROVIDER_PRIORITY_USER);
   g_object_unref (provider);
   loaded = TRUE;
 }

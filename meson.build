@@ -1,4 +1,4 @@
-project('my-desktop', 'c',
+project('ooze', 'c',
   version: '0.1.0',
   meson_version: '>= 1.0.0',
   default_options: [
@@ -35,10 +35,11 @@ gtk4_dep = dependency('gtk4', required: false)
 adw_dep = dependency('libadwaita-1', required: false)
 cairo_dep = dependency('cairo')
 
-inc_common  = include_directories('common')
-inc_ooze_ui = include_directories('ooze-ui')
-inc_ooze_kit = include_directories('ooze-kit')
-inc_src     = include_directories('src')
+inc_common      = include_directories('common')
+inc_ooze_ui     = include_directories('ooze-ui')
+inc_ooze_kit    = include_directories('ooze-kit')
+inc_compositor  = include_directories('compositor')
+inc_shared      = include_directories('shared')
 
 ooze_data_dir = get_option('prefix') / 'share' / 'ooze'
 c_args += '-DOOZE_DATA_DIR="@0@"'.format(ooze_data_dir)
@@ -64,22 +65,28 @@ meson.add_install_script(
 
 mutter_typelibdir = mutter_dep.get_variable('typelibdir')
 
-executable('my-desktop',
-  'src/main.c',
-  'src/my-icons.c',
-  'src/my-plugin.c',
-  'src/my-aqua-draw.c',
-  'src/my-dock.c',
-  'src/my-desktop-icons.c',
-  'src/my-aqua-menu.c',
-  'src/my-global-menu.c',
-  'src/my-theme.c',
-  'src/my-window.c',
-  'src/my-magic-lamp.c',
-  'src/my-screen-transition.c',
+executable('ooze',
+  'compositor/main.c',
+  'compositor/ooze-xsettings.c',
+  'compositor/ooze-plugin.c',
+  'compositor/ooze-window-chrome.c',
+  'compositor/ooze-panel.c',
+  'compositor/ooze-shell-menu.c',
+  'compositor/ooze-aqua-draw.c',
+  'compositor/ooze-dock-shell.c',
+  'compositor/ooze-desktop-icons.c',
+  'compositor/ooze-aqua-menu.c',
+  'compositor/ooze-global-menu.c',
+  'compositor/ooze-dbusmenu.c',
+  'compositor/ooze-theme.c',
+  'compositor/ooze-window.c',
+  'compositor/ooze-magic-lamp.c',
+  'compositor/ooze-transition.c',
+  'shared/ooze-shared-icons.c',
+  'shared/ooze-shared-appmenu.c',
   'common/aqua-traffic.c',
   c_args: c_args,
-  include_directories: [inc_common, inc_src],
+  include_directories: [inc_common, inc_compositor, inc_shared],
   dependencies: [
     mutter_dep,
     clutter_dep,
@@ -92,6 +99,7 @@ executable('my-desktop',
     cairo_dep,
     dependency('pango'),
     dependency('pangocairo'),
+    dependency('x11'),
     cc.find_library('m', required: true),
   ],
   build_rpath: mutter_typelibdir,
@@ -113,10 +121,9 @@ install_data('data/spot-logo.svg',
 
 vte_dep = dependency('vte-2.91-gtk4', required: false)
 
-# ── OozeKit ─────────────────────────────────────────────────────────────────
-# Shared GTK4/Cairo toolkit used by all Ooze apps.  Built as a static lib
-# so each executable links it in without any shared-lib install step.
-ooze_kit_sources = [
+# ── OozeKit static library ──────────────────────────────────────────────────
+# OozeKit + OozeUI compiled once into a static library; all GTK apps link it.
+ooze_kit_lib = static_library('ooze-kit',
   'ooze-kit/ooze-palette.c',
   'ooze-kit/ooze-draw.c',
   'ooze-kit/ooze-surface.c',
@@ -129,17 +136,32 @@ ooze_kit_sources = [
   'ooze-kit/ooze-pinline.c',
   'ooze-kit/ooze-scroll.c',
   'ooze-kit/ooze-popover.c',
-]
-
-# Shared source list for ooze-ui widgets (header bar, traffic lights, Ooze Gel)
-ooze_ui_sources = [
   'ooze-ui/ooze-traffic-lights.c',
   'ooze-ui/ooze-header-bar.c',
   'ooze-ui/ooze-gel.c',
   'common/aqua-traffic.c',
+  include_directories: [inc_common, inc_ooze_ui, inc_ooze_kit],
+  dependencies: [gtk4_dep, adw_dep, cairo_dep, cc.find_library('m')],
+  c_args: [
+    '-DOOZE_DATA_DIR="@0@"'.format(ooze_data_dir),
+    '-DOOZE_VERSION="@0@"'.format(meson.project_version()),
+  ],
+)
+
+ooze_kit_dep = declare_dependency(
+  link_with: ooze_kit_lib,
+  include_directories: [inc_common, inc_ooze_ui, inc_ooze_kit],
+)
+
+# Core icon/appmenu helpers used by both the compositor and GTK apps.
+# ooze-shared-icons-gtk.c is GTK4-only and is NOT included in the compositor.
+ooze_shared_sources = [
+  'shared/ooze-shared-icons.c',
+  'shared/ooze-shared-icons-gtk.c',
+  'shared/ooze-shared-appmenu.c',
 ]
 
-ooze_app_inc = [inc_common, inc_ooze_ui, inc_ooze_kit, inc_src]
+ooze_app_inc = [inc_shared]
 ooze_app_c_args = [
   '-DOOZE_DATA_DIR="@0@"'.format(ooze_data_dir),
   '-DOOZE_VERSION="@0@"'.format(meson.project_version()),
@@ -149,17 +171,15 @@ if gtk4_dep.found() and adw_dep.found()
   executable('spot',
     'spot/main.c',
     'spot/spot-window.c',
-    'src/my-icons.c',
-    'src/my-icons-gtk.c',
-    ooze_ui_sources,
-    ooze_kit_sources,
+    ooze_shared_sources,
     include_directories: ooze_app_inc,
     dependencies: [
+      ooze_kit_dep,
       gtk4_dep,
       adw_dep,
       gio_dep,
       cairo_dep,
-      cc.find_library('m'),     # libm for ooze-draw (math.h)
+      cc.find_library('m'),
     ],
     c_args: ooze_app_c_args,
     install: true,
@@ -173,12 +193,10 @@ if gtk4_dep.found() and adw_dep.found()
     'ooze-pak/main.c',
     'ooze-pak/ooze-pak-window.c',
     'ooze-pak/ooze-pak-flatpak.c',
-    'src/my-icons.c',
-    'src/my-icons-gtk.c',
-    ooze_ui_sources,
-    ooze_kit_sources,
+    ooze_shared_sources,
     include_directories: ooze_app_inc + [include_directories('ooze-pak')],
     dependencies: [
+      ooze_kit_dep,
       gtk4_dep,
       adw_dep,
       gio_dep,
@@ -206,19 +224,17 @@ if gtk4_dep.found() and adw_dep.found()
     executable('ooze-command',
       'ooze-command/main.c',
       'ooze-command/ooze-command-window.c',
-      'src/my-icons.c',
-      'src/my-icons-gtk.c',
-      ooze_ui_sources,
-      ooze_kit_sources,
+      ooze_shared_sources,
       include_directories: ooze_app_inc,
       dependencies: [
+        ooze_kit_dep,
         gtk4_dep,
         adw_dep,
         vte_dep,
         gio_dep,
         cairo_dep,
         dependency('pango'),
-        cc.find_library('m'),   # libm for ooze-draw
+        cc.find_library('m'),
       ],
       c_args: ooze_app_c_args,
       install: true,
@@ -234,12 +250,10 @@ if gtk4_dep.found() and adw_dep.found()
   executable('ooze-king',
     'ooze-king/main.c',
     'ooze-king/ooze-king-window.c',
-    'src/my-icons.c',
-    'src/my-icons-gtk.c',
-    ooze_ui_sources,
-    ooze_kit_sources,
+    ooze_shared_sources,
     include_directories: ooze_app_inc,
     dependencies: [
+      ooze_kit_dep,
       gtk4_dep,
       adw_dep,
       gio_dep,
@@ -251,6 +265,52 @@ if gtk4_dep.found() and adw_dep.found()
   )
 
   install_data('data/org.ooze.King.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
+  ooze_monitor_inc = ooze_app_inc + [include_directories('ooze-monitor')]
+  executable('ooze-monitor',
+    'ooze-monitor/main.c',
+    'ooze-monitor/ooze-monitor-window.c',
+    'ooze-monitor/ooze-display-pane.c',
+    'ooze-monitor/ooze-display-config.c',
+    ooze_shared_sources,
+    include_directories: ooze_monitor_inc,
+    dependencies: [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.Monitor.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
+  executable('ooze-eye',
+    'ooze-eye/main.c',
+    'ooze-eye/ooze-eye-window.c',
+    ooze_shared_sources,
+    include_directories: ooze_app_inc + [include_directories('ooze-eye')],
+    dependencies: [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      gdk_pixbuf_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.Eye.desktop',
     install_dir: get_option('datadir') / 'applications',
   )
 
@@ -281,12 +341,9 @@ if gtk4_dep.found() and adw_dep.found()
     'ooze-about/main.c',
     'ooze-about/ooze-about-window.c',
     'ooze-about/ooze-system-info.c',
-    'src/my-icons.c',
-    'src/my-icons-gtk.c',
-    ooze_ui_sources,
-    ooze_kit_sources,
+    ooze_shared_sources,
     include_directories: ooze_app_inc + [include_directories('ooze-about')],
-    dependencies: ooze_about_deps,
+    dependencies: ooze_about_deps + [ooze_kit_dep],
     c_args: ooze_about_c_args,
     install: true,
   )
@@ -299,12 +356,10 @@ if gtk4_dep.found() and adw_dep.found()
   executable('ooze-kit-factory',
     'ooze-kit-factory/main.c',
     'ooze-kit-factory/ooze-kit-factory-window.c',
-    'src/my-icons.c',
-    'src/my-icons-gtk.c',
-    ooze_ui_sources,
-    ooze_kit_sources,
+    ooze_shared_sources,
     include_directories: ooze_app_inc + [include_directories('ooze-kit-factory')],
     dependencies: [
+      ooze_kit_dep,
       gtk4_dep,
       adw_dep,
       gio_dep,
@@ -327,12 +382,10 @@ if gtk4_dep.found() and adw_dep.found()
       'ooze-ear/main.c',
       'ooze-ear/ooze-ear-window.c',
       ooze_sound_sources,
-      'src/my-icons.c',
-      'src/my-icons-gtk.c',
-      ooze_ui_sources,
-      ooze_kit_sources,
+      ooze_shared_sources,
       include_directories: ooze_ear_inc,
       dependencies: [
+        ooze_kit_dep,
         gtk4_dep,
         adw_dep,
         gio_dep,

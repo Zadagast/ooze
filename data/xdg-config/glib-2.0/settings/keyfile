@@ -1,0 +1,15 @@
+[org/gnome/mutter]
+edge-tiling=true
+draggable-border-width=12
+
+[org/gnome/desktop/peripherals/mouse]
+drag-threshold=16
+
+[org/gnome/desktop/interface]
+icon-theme='elementary'
+cursor-theme='elementary'
+cursor-size=24
+color-scheme='prefer-light'
+
+[org/gnome/desktop/wm/preferences]
+button-layout='close,minimize,maximize:'

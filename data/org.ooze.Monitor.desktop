@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Display Settings
+GenericName=Display Settings
+Comment=Ooze Monitor — resolution, scale, and orientation
+Exec=ooze-monitor
+Icon=video-display
+Terminal=false
+Type=Application
+Categories=Settings;GTK;
+StartupWMClass=org.ooze.Monitor
