@@ -3,11 +3,15 @@
 #include "ooze-dbusmenu.h"
 
 #include <clutter/clutter.h>
+#include <meta/display.h>
 #include <string.h>
 
 /* Exported by libmutter but not always in public headers. */
 gulong meta_window_x11_get_xwindow (MetaWindow *window);
 gulong meta_window_x11_get_toplevel_xwindow (MetaWindow *window);
+
+#define OOZE_REGISTRAR_RETRY_DEFAULT 20   /* ~5s */
+#define OOZE_REGISTRAR_RETRY_INKSCAPE 60  /* ~15s — lazy dbusmenu tops */
 
 typedef struct
 {
@@ -68,6 +72,9 @@ struct _OozeGlobalMenu
   /* Deferred activate payload (panel focus restore needs a beat). */
   char     *pending_action;
   GVariant *pending_target;
+
+  /* Shown in the panel when a classic GtkMenuBar app is Wayland-native. */
+  char *x11_launch_hint;
 };
 
 static void ooze_global_menu_clear_proxy (OozeGlobalMenu *menu);
@@ -84,6 +91,11 @@ static void ooze_global_menu_schedule_prime (OozeGlobalMenu *menu);
 static void ooze_global_menu_cancel_registrar_retry (OozeGlobalMenu *menu);
 static void ooze_global_menu_schedule_registrar_retry (OozeGlobalMenu *menu,
                                                      MetaWindow   *window);
+static gboolean ooze_global_menu_window_is_inkscape (MetaWindow *window);
+static MetaWindow *ooze_global_menu_find_window_by_xid (OozeGlobalMenu *menu,
+                                                       guint32         xid);
+static void ooze_global_menu_log_registrar_miss (OozeGlobalMenu *menu,
+                                                 MetaWindow     *window);
 static void ooze_global_menu_ensure_registrar_watch (OozeGlobalMenu *menu);
 static gboolean ooze_global_menu_action_sensitive (OozeGlobalMenu *menu,
                                                  const char   *action);
@@ -392,6 +404,7 @@ ooze_global_menu_registrar_retry_cb (gpointer user_data)
 
   if (menu->registrar_retry_left == 0)
     {
+      ooze_global_menu_log_registrar_miss (menu, window);
       menu->registrar_retry_window = NULL;
       return G_SOURCE_REMOVE;
     }
@@ -404,14 +417,16 @@ ooze_global_menu_registrar_retry_cb (gpointer user_data)
     return G_SOURCE_REMOVE;
 
   if (menu->dbusmenu || (menu->menubar &&
-                         g_menu_model_get_n_items (menu->menubar) > 0) ||
-      menu->registrar_retry_left == 0)
+                         g_menu_model_get_n_items (menu->menubar) > 0))
     {
-      if (menu->dbusmenu || (menu->menubar &&
-                             g_menu_model_get_n_items (menu->menubar) > 0))
-        ooze_global_menu_cancel_registrar_retry (menu);
-      else
-        menu->registrar_retry_window = NULL;
+      ooze_global_menu_cancel_registrar_retry (menu);
+      return G_SOURCE_REMOVE;
+    }
+
+  if (menu->registrar_retry_left == 0)
+    {
+      ooze_global_menu_log_registrar_miss (menu, window);
+      menu->registrar_retry_window = NULL;
       return G_SOURCE_REMOVE;
     }
 
@@ -436,7 +451,12 @@ ooze_global_menu_schedule_registrar_retry (OozeGlobalMenu *menu,
     return;
 
   if (menu->registrar_retry_left == 0)
-    menu->registrar_retry_left = 20; /* ~5s for Inkscape late register */
+    {
+      menu->registrar_retry_left =
+        ooze_global_menu_window_is_inkscape (window)
+          ? OOZE_REGISTRAR_RETRY_INKSCAPE
+          : OOZE_REGISTRAR_RETRY_DEFAULT;
+    }
 
   menu->registrar_retry_id =
     g_timeout_add (250, ooze_global_menu_registrar_retry_cb, menu);
@@ -462,19 +482,19 @@ on_appmenu_window_registered (GDBusConnection *connection G_GNUC_UNUSED,
   if (xid == 0)
     return;
 
-  window = menu->watched_window;
+  window = ooze_global_menu_find_window_by_xid (menu, xid);
   if (!window)
-    window = meta_display_get_focus_window (menu->display);
-  if (!window ||
-      meta_window_get_client_type (window) != META_WINDOW_CLIENT_TYPE_X11)
-    return;
-
-  if ((guint32) meta_window_x11_get_xwindow (window) != xid &&
-      (guint32) meta_window_x11_get_toplevel_xwindow (window) != xid)
-    return;
+    {
+      g_print ("Ooze global menu: WindowRegistered xid=%u — no MetaWindow yet\n",
+               xid);
+      return;
+    }
 
   /* Inkscape may have started before ShellShowsMenubar was visible. */
   ooze_appmenu_ensure_shell_shows_menubar ();
+  g_print ("Ooze global menu: WindowRegistered xid=%u → \"%s\"\n",
+           xid,
+           meta_window_get_title (window) ? meta_window_get_title (window) : "?");
   ooze_global_menu_bind_window (menu, window);
 }
 
@@ -650,6 +670,155 @@ ooze_global_menu_watch_window (OozeGlobalMenu *menu,
                       G_CALLBACK (on_watched_gtk_props_changed), menu);
 }
 
+static gboolean
+ooze_global_menu_window_matches_xid (MetaWindow *window,
+                                     guint32     xid)
+{
+  if (!window || xid == 0)
+    return FALSE;
+  if (meta_window_get_client_type (window) != META_WINDOW_CLIENT_TYPE_X11)
+    return FALSE;
+
+  return (guint32) meta_window_x11_get_xwindow (window) == xid ||
+         (guint32) meta_window_x11_get_toplevel_xwindow (window) == xid;
+}
+
+static gboolean
+ooze_global_menu_window_is_inkscape (MetaWindow *window)
+{
+  const char *wm_class;
+
+  if (!window)
+    return FALSE;
+
+  wm_class = meta_window_get_wm_class (window);
+  return wm_class && g_ascii_strcasecmp (wm_class, "Inkscape") == 0;
+}
+
+static MetaWindow *
+ooze_global_menu_find_window_by_xid (OozeGlobalMenu *menu,
+                                     guint32         xid)
+{
+  MetaWindow *focus;
+  MetaWindow *match = NULL;
+  GList *windows;
+  GList *l;
+
+  if (!menu || !menu->display || xid == 0)
+    return NULL;
+
+  focus = meta_display_get_focus_window (menu->display);
+  if (ooze_global_menu_window_matches_xid (focus, xid))
+    return focus;
+
+  if (ooze_global_menu_window_matches_xid (menu->watched_window, xid))
+    return menu->watched_window;
+
+  windows = meta_display_list_all_windows (menu->display);
+  for (l = windows; l != NULL; l = l->next)
+    {
+      MetaWindow *window = l->data;
+
+      if (ooze_global_menu_window_matches_xid (window, xid))
+        {
+          match = window;
+          break;
+        }
+    }
+  g_list_free (windows);
+  return match;
+}
+
+static void
+ooze_global_menu_log_registrar_miss (OozeGlobalMenu *menu,
+                                     MetaWindow     *window)
+{
+  g_autofree char *bus = NULL;
+  g_autofree char *path = NULL;
+  guint32 xid = 0;
+  guint32 toplevel = 0;
+  gboolean have_reg;
+
+  if (!menu || !window)
+    return;
+  if (!ooze_global_menu_window_is_inkscape (window))
+    return;
+  if (meta_window_get_client_type (window) != META_WINDOW_CLIENT_TYPE_X11)
+    return;
+
+  xid = (guint32) meta_window_x11_get_xwindow (window);
+  toplevel = (guint32) meta_window_x11_get_toplevel_xwindow (window);
+  have_reg = ooze_global_menu_query_appmenu_registrar (menu, window, &bus, &path);
+
+  g_warning ("Ooze global menu: no menu export for X11 \"%s\" wm_class=%s "
+             "xid=%u toplevel=%u GetMenuForWindow=%s%s%s "
+             "gtk_bus=%s gtk_menubar=%s — "
+             "in-app bar may remain if ShellShowsMenubar was late",
+             meta_window_get_title (window) ? meta_window_get_title (window) : "?",
+             meta_window_get_wm_class (window)
+               ? meta_window_get_wm_class (window) : "?",
+             xid, toplevel,
+             have_reg ? "yes " : "no",
+             have_reg && bus ? bus : "",
+             have_reg && path ? path : "",
+             meta_window_get_gtk_unique_bus_name (window)
+               ? meta_window_get_gtk_unique_bus_name (window) : "-",
+             meta_window_get_gtk_menubar_object_path (window)
+               ? meta_window_get_gtk_menubar_object_path (window) : "-");
+}
+
+static gboolean
+ooze_global_menu_is_wayland_classic_menubar_app (MetaWindow *window)
+{
+  if (!window ||
+      meta_window_get_client_type (window) != META_WINDOW_CLIENT_TYPE_WAYLAND)
+    return FALSE;
+
+  return ooze_global_menu_window_is_inkscape (window);
+}
+
+static void
+ooze_global_menu_set_x11_launch_hint (OozeGlobalMenu *menu,
+                                      const char     *hint)
+{
+  if (!menu)
+    return;
+
+  if (g_strcmp0 (menu->x11_launch_hint, hint) == 0)
+    return;
+
+  g_free (menu->x11_launch_hint);
+  menu->x11_launch_hint = hint ? g_strdup (hint) : NULL;
+}
+
+static void
+ooze_global_menu_handle_wayland_classic (OozeGlobalMenu *menu,
+                                         MetaWindow     *window)
+{
+  static gboolean warned_wayland_gtk3;
+
+  ooze_global_menu_cancel_registrar_retry (menu);
+  ooze_global_menu_clear_proxy (menu);
+  ooze_global_menu_set_x11_launch_hint (menu, "Needs X11 (Spot/Command)");
+
+  if (!warned_wayland_gtk3)
+    {
+      g_warning ("Ooze global menu: %s is Wayland-native; "
+                 "global menus need Xwayland — relaunch via Spot/Command "
+                 "so GDK_BACKEND=x11 is set",
+                 meta_window_get_wm_class (window)
+                   ? meta_window_get_wm_class (window) : "app");
+      warned_wayland_gtk3 = TRUE;
+    }
+
+  g_print ("Ooze global menu: Wayland classic GtkMenuBar focused "
+           "(wm_class=%s) — no registrar export; use Spot/Command\n",
+           meta_window_get_wm_class (window)
+             ? meta_window_get_wm_class (window) : "?");
+
+  ooze_global_menu_emit_changed (menu);
+}
+
 static void
 ooze_global_menu_bind_window (OozeGlobalMenu *menu,
                             MetaWindow   *window)
@@ -661,6 +830,7 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
   g_autofree char *registrar_bus = NULL;
   g_autofree char *registrar_menubar = NULL;
   gboolean have_export;
+  gboolean is_x11;
 
   ooze_global_menu_watch_window (menu, window);
   ooze_global_menu_ensure_registrar_watch (menu);
@@ -668,6 +838,7 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
   if (!window)
     {
       ooze_global_menu_cancel_registrar_retry (menu);
+      ooze_global_menu_set_x11_launch_hint (menu, NULL);
       if (menu->menubar || menu->dbusmenu)
         {
           ooze_global_menu_clear_proxy (menu);
@@ -676,35 +847,63 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
       return;
     }
 
-  bus = meta_window_get_gtk_unique_bus_name (window);
-  menubar = meta_window_get_gtk_menubar_object_path (window);
-  /* Inkscape / older GTK often export the app-menu path instead of menubar. */
-  if (!menubar || !*menubar)
-    menubar = meta_window_get_gtk_app_menu_object_path (window);
-  app_path = meta_window_get_gtk_application_object_path (window);
-  win_path = meta_window_get_gtk_window_object_path (window);
+  is_x11 = meta_window_get_client_type (window) == META_WINDOW_CLIENT_TYPE_X11;
+
+  /* Native Wayland classic GtkMenuBar (Inkscape): cannot use appmenu registrar. */
+  if (ooze_global_menu_is_wayland_classic_menubar_app (window))
+    {
+      ooze_global_menu_handle_wayland_classic (menu, window);
+      return;
+    }
+
+  ooze_global_menu_set_x11_launch_hint (menu, NULL);
 
   /*
-   * X11 / Xwayland + appmenu-gtk-module: the registrar owns the real menubar
-   * (com.canonical.dbusmenu). Prefer it over gtk-shell props — those often
-   * arrive as unlabeled stub "Menu" entries while the in-window bar remains.
+   * X11 / Xwayland + appmenu-gtk-module:
+   * - Legacy exporters call AppMenu.Registrar (com.canonical.dbusmenu).
+   * - Modern appmenu-gtk-module (Ubuntu 25.04+) exports org.gtk.Menus and sets
+   *   _GTK_UNIQUE_BUS_NAME / _GTK_MENUBAR_OBJECT_PATH — same gtk-shell props
+   *   Mutter exposes on MetaWindow. Prefer registrar when present; otherwise
+   *   bind those props (not empty unlabeled stubs from bare Wayland export).
    */
-  if (meta_window_get_client_type (window) == META_WINDOW_CLIENT_TYPE_X11 &&
-      ooze_global_menu_query_appmenu_registrar (menu, window,
-                                              &registrar_bus,
-                                              &registrar_menubar))
+  if (is_x11)
     {
       ooze_appmenu_ensure_shell_shows_menubar ();
-      bus = registrar_bus;
-      menubar = registrar_menubar;
+      if (ooze_global_menu_query_appmenu_registrar (menu, window,
+                                                  &registrar_bus,
+                                                  &registrar_menubar))
+        {
+          bus = registrar_bus;
+          menubar = registrar_menubar;
+        }
+      else
+        {
+          bus = meta_window_get_gtk_unique_bus_name (window);
+          menubar = meta_window_get_gtk_menubar_object_path (window);
+          if (!menubar || !*menubar)
+            menubar = meta_window_get_gtk_app_menu_object_path (window);
+          app_path = meta_window_get_gtk_application_object_path (window);
+          win_path = meta_window_get_gtk_window_object_path (window);
+        }
     }
-  else if ((!bus || !*bus || !menubar || !*menubar) &&
-           ooze_global_menu_query_appmenu_registrar (menu, window,
-                                                   &registrar_bus,
-                                                   &registrar_menubar))
+  else
     {
-      bus = registrar_bus;
-      menubar = registrar_menubar;
+      bus = meta_window_get_gtk_unique_bus_name (window);
+      menubar = meta_window_get_gtk_menubar_object_path (window);
+      /* Inkscape / older GTK often export the app-menu path instead of menubar. */
+      if (!menubar || !*menubar)
+        menubar = meta_window_get_gtk_app_menu_object_path (window);
+      app_path = meta_window_get_gtk_application_object_path (window);
+      win_path = meta_window_get_gtk_window_object_path (window);
+
+      if ((!bus || !*bus || !menubar || !*menubar) &&
+          ooze_global_menu_query_appmenu_registrar (menu, window,
+                                                  &registrar_bus,
+                                                  &registrar_menubar))
+        {
+          bus = registrar_bus;
+          menubar = registrar_menubar;
+        }
     }
 
   have_export = bus && *bus && menubar && *menubar;
@@ -815,7 +1014,7 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
   menu->app_path = g_strdup (app_path);
   menu->win_path = g_strdup (win_path);
 
-  /* Registrar paths are dbusmenu; gtk-shell paths are org.gtk.Menus. */
+  /* Registrar paths are dbusmenu; gtk-shell / modern appmenu paths are org.gtk.Menus. */
   if (registrar_bus && registrar_menubar)
     {
       OozeDbusmenu *dm = ooze_dbusmenu_new (menu->session,
@@ -847,24 +1046,14 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
       ooze_dbusmenu_items_free (tops, n_tops);
       ooze_dbusmenu_free (dm);
       /* Don't wrap dbusmenu paths as GDBusMenuModel — that yields "Menu" stubs. */
+      g_clear_pointer (&menu->bus_name, g_free);
+      g_clear_pointer (&menu->menubar_path, g_free);
+      g_clear_pointer (&menu->app_path, g_free);
+      g_clear_pointer (&menu->win_path, g_free);
+      menu->bound_window = NULL;
       ooze_global_menu_schedule_registrar_retry (menu, window);
       ooze_global_menu_emit_changed (menu);
       return;
-    }
-
-  if (meta_window_get_client_type (window) == META_WINDOW_CLIENT_TYPE_WAYLAND)
-    {
-      static gboolean warned_wayland_gtk3;
-
-      /* Classic GtkMenuBar apps (Inkscape) on Wayland never hit the registrar. */
-      if (!warned_wayland_gtk3 &&
-          meta_window_get_wm_class (window) &&
-          g_ascii_strcasecmp (meta_window_get_wm_class (window), "Inkscape") == 0)
-        {
-          g_warning ("Ooze global menu: Inkscape is Wayland-native; "
-                     "relaunch via Spot/Command so GDK_BACKEND=x11 is set");
-          warned_wayland_gtk3 = TRUE;
-        }
     }
 
   menu->menubar = G_MENU_MODEL (g_dbus_menu_model_get (menu->session,
@@ -889,12 +1078,13 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
     g_signal_connect (menu->menubar, "items-changed",
                       G_CALLBACK (on_menubar_items_changed), menu);
 
-  g_print ("Ooze global menu: gtk-shell bound (%s %s) title=\"%s\" app_id=%s\n",
+  g_print ("Ooze global menu: gtk-shell bound (%s %s) title=\"%s\" app_id=%s%s\n",
            menu->bus_name,
            menu->menubar_path,
            meta_window_get_title (window) ? meta_window_get_title (window) : "",
            meta_window_get_gtk_application_id (window) ?
-             meta_window_get_gtk_application_id (window) : "?");
+             meta_window_get_gtk_application_id (window) : "?",
+           is_x11 ? " (X11 appmenu GMenu)" : "");
 
   ooze_global_menu_schedule_prime (menu);
   ooze_global_menu_emit_changed (menu);
@@ -945,6 +1135,7 @@ ooze_global_menu_free (OozeGlobalMenu *menu)
 
   ooze_global_menu_unwatch_window (menu);
   ooze_global_menu_clear_proxy (menu);
+  g_clear_pointer (&menu->x11_launch_hint, g_free);
   g_clear_object (&menu->session);
   g_free (menu);
 }
@@ -1121,6 +1312,14 @@ gboolean
 ooze_global_menu_has_dbusmenu (OozeGlobalMenu *menu)
 {
   return menu && menu->dbusmenu && menu->n_dbus_tops > 0;
+}
+
+const char *
+ooze_global_menu_get_x11_launch_hint (OozeGlobalMenu *menu)
+{
+  if (!menu || !menu->x11_launch_hint || !*menu->x11_launch_hint)
+    return NULL;
+  return menu->x11_launch_hint;
 }
 
 static gboolean

@@ -8,3 +8,5 @@ image/tiff=org.ooze.Eye.desktop
 image/svg+xml=org.ooze.Eye.desktop
 image/x-bmp=org.ooze.Eye.desktop
 image/x-png=org.ooze.Eye.desktop
+application/x-bittorrent=org.ooze.Torrent.desktop
+x-scheme-handler/magnet=org.ooze.Torrent.desktop

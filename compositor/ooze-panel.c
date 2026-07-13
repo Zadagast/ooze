@@ -580,6 +580,9 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
   if (from_app)
     n = ooze_global_menu_get_n_top (plugin->global_menu);
   else if (plugin->global_menu &&
+           ooze_global_menu_get_x11_launch_hint (plugin->global_menu))
+    n = 1;
+  else if (plugin->global_menu &&
            ooze_global_menu_wants_shell_stubs (plugin->global_menu))
     n = (guint) ooze_shell_menu_bar_n_items;
   else
@@ -594,6 +597,7 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
     {
       const char *text;
       ClutterActor *label;
+      const char *hint;
 
       if (from_app)
         {
@@ -601,6 +605,8 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
           if (!text || !*text)
             continue;
         }
+      else if ((hint = ooze_global_menu_get_x11_launch_hint (plugin->global_menu)) != NULL)
+        text = hint;
       else
         text = ooze_shell_menu_bar_items[i];
 
@@ -612,8 +618,11 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
                                           (gfloat) palette->menu_text_b);
       g_object_set_data (G_OBJECT (label), "ooze-menu-top",
                          GSIZE_TO_POINTER ((gsize) i));
-      g_signal_connect (label, "button-press-event",
-                        G_CALLBACK (on_menu_bar_pressed), plugin);
+      if (from_app || !ooze_global_menu_get_x11_launch_hint (plugin->global_menu))
+        {
+          g_signal_connect (label, "button-press-event",
+                            G_CALLBACK (on_menu_bar_pressed), plugin);
+        }
 
       if (plugin->clock_label)
         clutter_actor_insert_child_below (plugin->panel, label, plugin->clock_label);

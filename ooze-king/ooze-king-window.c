@@ -4,12 +4,14 @@
 #include "ooze-button.h"
 #include "ooze-header-bar.h"
 #include "ooze-icons.h"
+#include "ooze-shared-appmenu.h"
 #include "ooze-surface.h"
 #include "ooze-toolbar.h"
 #include "ooze-window-actions.h"
 
 #include <adwaita.h>
 #include <gio/gio.h>
+#include <string.h>
 
 struct _OozeKingWindow
 {
@@ -44,6 +46,9 @@ static const char * const king_icon_about[] = {
 static const char * const king_icon_pak[] = {
   "org.ooze.Pak", "system-software-install", "package-x-generic", NULL
 };
+static const char * const king_icon_torrent[] = {
+  "application-x-bittorrent", "network-workgroup", NULL
+};
 
 static const KingAppEntry king_apps[] = {
   { king_icon_about,   "About This Computer", "ooze-about" },
@@ -52,6 +57,7 @@ static const KingAppEntry king_apps[] = {
   { king_icon_command, "Terminal",       "ooze-command" },
   { king_icon_ear,     "Sound Settings", "ooze-ear" },
   { king_icon_pak,     "Software",       "ooze-pak" },
+  { king_icon_torrent, "Torrent",        "ooze-torrent" },
 };
 
 static void
@@ -84,10 +90,21 @@ king_build_menubar (void)
   return G_MENU_MODEL (bar);
 }
 
+static gboolean
+king_command_is_ooze (const char *command)
+{
+  if (!command || !*command)
+    return FALSE;
+  if (g_strcmp0 (command, "spot") == 0)
+    return TRUE;
+  return g_str_has_prefix (command, "ooze-");
+}
+
 static void
 king_launch_command (const char *command)
 {
   g_autoptr (GAppInfo) info = NULL;
+  g_autoptr (GAppLaunchContext) ctx = NULL;
   g_autoptr (GError) error = NULL;
   g_autofree char *exe = NULL;
 
@@ -111,7 +128,13 @@ king_launch_command (const char *command)
       return;
     }
 
-  if (!g_app_info_launch (info, NULL, NULL, &error))
+  ctx = g_app_launch_context_new ();
+  if (king_command_is_ooze (command))
+    ooze_appmenu_prepare_ooze_launch_context (ctx);
+  else
+    ooze_appmenu_prepare_launch_context (ctx);
+
+  if (!g_app_info_launch (info, NULL, ctx, &error))
     g_warning ("Ooze King: failed to launch %s: %s",
                command, error ? error->message : "unknown");
 }

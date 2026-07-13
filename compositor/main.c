@@ -35,7 +35,8 @@ ooze_apply_wm_settings_early (void)
       g_settings_set_int (mutter, "draggable-border-width", 12);
     }
 
-  /* Wider edge hit-zone: mutter uses drag_threshold * 6 for tile strips. */
+  /* Wider edge hit-zone: mutter uses drag_threshold * 6 for tile strips.
+   * 20 → ~120px strips so side-tile is easier to hit on nest monitors. */
   source = g_settings_schema_source_get_default ();
   if (source)
     mouse_schema = g_settings_schema_source_lookup (
@@ -43,7 +44,31 @@ ooze_apply_wm_settings_early (void)
   if (mouse_schema && g_settings_schema_has_key (mouse_schema, "drag-threshold"))
     {
       mouse = g_settings_new_full (mouse_schema, NULL, NULL);
-      g_settings_set_int (mouse, "drag-threshold", 16);
+      g_settings_set_int (mouse, "drag-threshold", 20);
+    }
+
+  /* Super+Left / Super+Right → side tile (foreign CSD + Ooze). */
+  if (source)
+    {
+      g_autoptr (GSettingsSchema) kb_schema = NULL;
+      g_autoptr (GSettings) kb = NULL;
+
+      kb_schema = g_settings_schema_source_lookup (
+          source, "org.gnome.mutter.keybindings", TRUE);
+      if (kb_schema)
+        {
+          kb = g_settings_new_full (kb_schema, NULL, NULL);
+          if (g_settings_schema_has_key (kb_schema, "toggle-tiled-left"))
+            {
+              const char *left[] = { "<Super>Left", NULL };
+              g_settings_set_strv (kb, "toggle-tiled-left", left);
+            }
+          if (g_settings_schema_has_key (kb_schema, "toggle-tiled-right"))
+            {
+              const char *right[] = { "<Super>Right", NULL };
+              g_settings_set_strv (kb, "toggle-tiled-right", right);
+            }
+        }
     }
 
   /* Left-side controls for MetaFrames + GTK CSD that honor GNOME prefs. */
@@ -130,12 +155,12 @@ main (int argc, char **argv)
   int status;
 
   /*
-   * Nest default: 1920×1080 virtual monitor unless the launcher overrides
-   * MUTTER_DEBUG_DUMMY_MODE_SPECS (see run-devkit.sh).
+   * Nest default modes (overridden by run-devkit.sh). Prefer ≥1600 wide so
+   * Mutter side-tile works for large-min apps like Inkscape.
    */
   if (!g_getenv ("MUTTER_DEBUG_DUMMY_MODE_SPECS"))
     g_setenv ("MUTTER_DEBUG_DUMMY_MODE_SPECS",
-               "1280x720:1600x900:1920x1080:2560x1440",
+               "1600x900:1920x1080:2560x1440:1280x720",
                TRUE);
 
   ooze_icons_apply ();

@@ -29,12 +29,6 @@ else
   gsettings set org.gnome.desktop.peripherals.mouse drag-threshold 16 2>/dev/null || true
 fi
 
-DESKTOP="${APPDIR}/usr/bin/my-desktop"
-if [[ ! -x "$DESKTOP" ]]; then
-  echo "Ooze AppImage: my-desktop missing from AppDir ($DESKTOP)" >&2
-  exit 1
-fi
-
 # Host must provide Mutter 18 (libmutter-18).
 if ! ldconfig -p 2>/dev/null | grep -q 'libmutter-18\.so'; then
   if [[ ! -e /usr/lib/x86_64-linux-gnu/libmutter-18.so.0 ]] && \
@@ -45,8 +39,25 @@ if ! ldconfig -p 2>/dev/null | grep -q 'libmutter-18\.so'; then
   fi
 fi
 
-if command -v dbus-run-session >/dev/null 2>&1; then
-  exec dbus-run-session -- "$DESKTOP" --wayland --devkit --no-x11 "$@"
+DESKTOP="${APPDIR}/usr/bin/ooze"
+if [[ ! -x "$DESKTOP" ]]; then
+  # Older AppDirs used my-desktop
+  DESKTOP="${APPDIR}/usr/bin/my-desktop"
+fi
+if [[ ! -x "$DESKTOP" ]]; then
+  echo "Ooze AppImage: ooze missing from AppDir (${APPDIR}/usr/bin/ooze)" >&2
+  exit 1
 fi
 
-exec "$DESKTOP" --wayland --devkit --no-x11 "$@"
+# Keep Xwayland enabled so GTK3 appmenu clients can register (Inkscape).
+# Pass OOZE_NO_X11=1 to force --no-x11.
+desktop_args=(--wayland --devkit)
+if [[ "${OOZE_NO_X11:-}" == "1" ]]; then
+  desktop_args+=(--no-x11)
+fi
+
+if command -v dbus-run-session >/dev/null 2>&1; then
+  exec dbus-run-session -- "$DESKTOP" "${desktop_args[@]}" "$@"
+fi
+
+exec "$DESKTOP" "${desktop_args[@]}" "$@"

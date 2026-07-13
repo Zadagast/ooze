@@ -2,14 +2,32 @@
 edge-tiling=true
 draggable-border-width=12
 
+[org/gnome/mutter/keybindings]
+toggle-tiled-left=['<Super>Left']
+toggle-tiled-right=['<Super>Right']
+
 [org/gnome/desktop/peripherals/mouse]
-drag-threshold=16
+drag-threshold=20
 
 [org/gnome/desktop/interface]
 icon-theme='elementary'
 cursor-theme='elementary'
 cursor-size=24
-color-scheme='prefer-light'
+color-scheme='prefer-dark'
 
 [org/gnome/desktop/wm/preferences]
 button-layout='close,minimize,maximize:'
+
+[org/gtk/settings/file-chooser]
+window-position=(26, 23)
+window-size=(1203, 927)
+date-format='regular'
+location-mode='path-bar'
+show-hidden=false
+show-size-column=true
+show-type-column=true
+sidebar-width=163
+sort-column='name'
+sort-directories-first=false
+sort-order='ascending'
+type-format='category'

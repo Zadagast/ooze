@@ -36,6 +36,16 @@ void ooze_appmenu_force_x11_backend (GSubprocessLauncher *launcher);
 /* Same X11 + module env for g_app_info_launch / launch_default_for_uri. */
 void ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx);
 
+/* Foreign apps: modules + X11 + WhiteSur on a GSubprocessLauncher. */
+void ooze_appmenu_apply_foreign_to_launcher (GSubprocessLauncher *launcher);
+
+/* Ooze apps via g_app_info_launch: Wayland, never inherit GTK_THEME. */
+void ooze_appmenu_prepare_ooze_launch_context (GAppLaunchContext *ctx);
+
+/* Choose Ooze vs foreign env from GAppInfo id (org.ooze.* → Ooze). */
+void ooze_appmenu_prepare_launch_context_for_info (GAppLaunchContext *ctx,
+                                                   GAppInfo          *info);
+
 /*
  * Copy environ and inject module/proxy + GDK_BACKEND=x11 for VTE shells
  * so `inkscape` from Command registers menus. Caller owns the result.

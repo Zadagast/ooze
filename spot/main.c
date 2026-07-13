@@ -1,17 +1,96 @@
 #include "spot-window.h"
 
+#include "ooze-shared-appmenu.h"
 #include "ooze-shared-icons.h"
 #include "ooze-theme.h"
 
 #include <adwaita.h>
 
+static SpotWindow *
+spot_pick_window (AdwApplication *app)
+{
+  GtkWindow *win;
+  GList *windows;
+
+  win = gtk_application_get_active_window (GTK_APPLICATION (app));
+  if (SPOT_IS_WINDOW (win))
+    return SPOT_WINDOW (win);
+
+  windows = gtk_application_get_windows (GTK_APPLICATION (app));
+  if (windows && SPOT_IS_WINDOW (windows->data))
+    return SPOT_WINDOW (windows->data);
+  return NULL;
+}
+
+static void
+spot_receive_files_activated (GSimpleAction *action G_GNUC_UNUSED,
+                              GVariant      *parameter,
+                              gpointer       user_data)
+{
+  AdwApplication *app = ADW_APPLICATION (user_data);
+  SpotWindow *win;
+  g_autofree const char **paths = NULL;
+  gboolean prefer_move = FALSE;
+
+  if (!parameter)
+    return;
+  g_variant_get (parameter, "(^asb)", &paths, &prefer_move);
+
+  win = spot_pick_window (app);
+  if (win && paths)
+    {
+      spot_window_receive_paths (win, paths, prefer_move);
+      spot_window_shell_drag_leave (win);
+    }
+}
+
+static void
+spot_shell_drag_motion_activated (GSimpleAction *action G_GNUC_UNUSED,
+                                  GVariant      *parameter,
+                                  gpointer       user_data)
+{
+  AdwApplication *app = ADW_APPLICATION (user_data);
+  SpotWindow *win;
+  double x = 0, y = 0;
+
+  if (!parameter)
+    return;
+  g_variant_get (parameter, "(dd)", &x, &y);
+  win = spot_pick_window (app);
+  if (win)
+    {
+      gtk_window_present (GTK_WINDOW (win));
+      spot_window_shell_drag_motion (win, x, y);
+    }
+}
+
+static void
+spot_shell_drag_leave_activated (GSimpleAction *action G_GNUC_UNUSED,
+                                 GVariant      *parameter G_GNUC_UNUSED,
+                                 gpointer       user_data)
+{
+  AdwApplication *app = ADW_APPLICATION (user_data);
+  SpotWindow *win = spot_pick_window (app);
+
+  if (win)
+    spot_window_shell_drag_leave (win);
+}
+
 static void
 on_startup (AdwApplication *app,
             gpointer        user_data G_GNUC_UNUSED)
 {
+  const GActionEntry entries[] = {
+    { "receive-files", spot_receive_files_activated, "(asb)", NULL, NULL },
+    { "shell-drag-motion", spot_shell_drag_motion_activated, "(dd)", NULL, NULL },
+    { "shell-drag-leave", spot_shell_drag_leave_activated, NULL, NULL, NULL },
+  };
+
   ooze_icons_configure_gtk ();
   ooze_theme_ensure ();
   spot_application_setup_menubar (GTK_APPLICATION (app));
+  g_action_map_add_action_entries (G_ACTION_MAP (app), entries,
+                                   G_N_ELEMENTS (entries), app);
 }
 
 static void
@@ -63,10 +142,22 @@ on_open (AdwApplication *app,
       else
         {
           g_autoptr (GError) error = NULL;
+          g_autoptr (GAppLaunchContext) ctx = g_app_launch_context_new ();
+          g_autoptr (GAppInfo) info = NULL;
+          const char *uri = g_file_get_uri (files[i]);
 
-          if (!g_app_info_launch_default_for_uri (g_file_get_uri (files[i]),
-                                                  NULL,
-                                                  &error))
+          info = g_file_query_default_handler (files[i], NULL, NULL);
+          ooze_appmenu_prepare_launch_context_for_info (ctx, info);
+          if (info)
+            {
+              GList uris = { .data = (gpointer) uri, .next = NULL, .prev = NULL };
+
+              if (!g_app_info_launch_uris (info, &uris, ctx, &error))
+                g_warning ("Spot: failed to open %s: %s",
+                           g_file_get_path (files[i]),
+                           error->message);
+            }
+          else if (!g_app_info_launch_default_for_uri (uri, ctx, &error))
             g_warning ("Spot: failed to open %s: %s",
                        g_file_get_path (files[i]),
                        error->message);

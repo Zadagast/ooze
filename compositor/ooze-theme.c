@@ -128,15 +128,11 @@ ooze_theme_recover_ooze_from_foreign_gtk (void)
   ooze_xsettings_republish ();
 }
 
-void
-ooze_theme_apply_foreign_gtk_to_launcher (GSubprocessLauncher *launcher)
+const char *
+ooze_theme_foreign_gtk_theme_for_session (void)
 {
   gboolean dark = FALSE;
-  const char *name;
   g_autoptr (GSettings) iface = NULL;
-
-  if (!launcher)
-    return;
 
   iface = g_settings_new ("org.gnome.desktop.interface");
   if (iface)
@@ -149,12 +145,37 @@ ooze_theme_apply_foreign_gtk_to_launcher (GSubprocessLauncher *launcher)
   if (!ooze_theme_foreign_gtk_installed (dark))
     {
       if (!ooze_theme_foreign_gtk_installed (!dark))
-        return;
+        return NULL;
       dark = !dark;
     }
 
-  name = ooze_theme_foreign_gtk_name (dark);
-  g_subprocess_launcher_setenv (launcher, "GTK_THEME", name, TRUE);
+  return ooze_theme_foreign_gtk_name (dark);
+}
+
+void
+ooze_theme_apply_foreign_gtk_to_launcher (GSubprocessLauncher *launcher)
+{
+  const char *name;
+
+  if (!launcher)
+    return;
+
+  name = ooze_theme_foreign_gtk_theme_for_session ();
+  if (name)
+    g_subprocess_launcher_setenv (launcher, "GTK_THEME", name, TRUE);
+}
+
+void
+ooze_theme_apply_foreign_gtk_to_launch_context (GAppLaunchContext *ctx)
+{
+  const char *name;
+
+  if (!ctx)
+    return;
+
+  name = ooze_theme_foreign_gtk_theme_for_session ();
+  if (name)
+    g_app_launch_context_setenv (ctx, "GTK_THEME", name);
 }
 
 /* Legacy entry used by older call sites — recovers session bleed only. */

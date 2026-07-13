@@ -4,11 +4,14 @@
 
 #include <graphene.h>
 #include <meta/compositor.h>
+#include <meta/display.h>
 #include <meta/meta-enums.h>
 #include <meta/window.h>
 
 #define RESIZE_BORDER    8
 #define TITLEBAR_HEIGHT  AQUA_TITLEBAR_HEIGHT
+/* Mutter often suppresses size/position signals mid-resize; poll overlays. */
+#define RESIZE_GRAB_SYNC_MS 16
 
 typedef struct
 {
@@ -25,6 +28,19 @@ typedef struct
   GWeakRef window_ref;
   gulong position_changed_id;
 } OozeWindowGrabOverlay;
+
+typedef struct
+{
+  MetaDisplay *display;
+  gulong grab_begin_id;
+  gulong grab_end_id;
+  guint poll_id;
+  GWeakRef window_ref;
+  GWeakRef match_ref;
+  ClutterActor *seam_disabled; /* match strip made non-reactive during grab */
+} OozeResizeGrabState;
+
+static OozeResizeGrabState resize_grab;
 
 gboolean
 ooze_window_is_client_decorated (MetaWindow *window)
@@ -148,6 +164,17 @@ ooze_window_destroy_grab_overlay (OozeWindowGrabOverlay *overlay)
   if (!overlay)
     return;
 
+  if (resize_grab.seam_disabled &&
+      (resize_grab.seam_disabled == overlay->east ||
+       resize_grab.seam_disabled == overlay->west ||
+       resize_grab.seam_disabled == overlay->north ||
+       resize_grab.seam_disabled == overlay->south ||
+       resize_grab.seam_disabled == overlay->north_east ||
+       resize_grab.seam_disabled == overlay->north_west ||
+       resize_grab.seam_disabled == overlay->south_east ||
+       resize_grab.seam_disabled == overlay->south_west))
+    resize_grab.seam_disabled = NULL;
+
   if (overlay->position_changed_id)
     {
       window = g_weak_ref_get (&overlay->window_ref);
@@ -191,6 +218,242 @@ ooze_window_get_grab_overlay (MetaWindowActor *actor)
   return g_object_get_data (G_OBJECT (actor), "ooze-window-grab-overlay");
 }
 
+static OozeWindowGrabOverlay *
+ooze_window_overlay_for_meta_window (MetaWindow *window)
+{
+  MetaWindowActor *actor;
+
+  if (!window)
+    return NULL;
+
+  actor = META_WINDOW_ACTOR (meta_window_get_compositor_private (window));
+  if (!actor || meta_window_actor_is_destroyed (actor))
+    return NULL;
+
+  return ooze_window_get_grab_overlay (actor);
+}
+
+static gboolean
+ooze_grab_op_is_resizing (MetaGrabOp op)
+{
+  op &= ~(MetaGrabOp) META_GRAB_OP_WINDOW_FLAG_UNCONSTRAINED;
+  return (op & META_GRAB_OP_WINDOW_DIR_MASK) != 0;
+}
+
+static gboolean
+ooze_grab_op_has_dir (MetaGrabOp op,
+                      guint       dir)
+{
+  op &= ~(MetaGrabOp) META_GRAB_OP_WINDOW_FLAG_UNCONSTRAINED;
+  return (op & dir) != 0;
+}
+
+static void
+ooze_window_sync_meta_window (MetaWindow *window)
+{
+  MetaWindowActor *actor;
+
+  if (!window)
+    return;
+
+  actor = META_WINDOW_ACTOR (meta_window_get_compositor_private (window));
+  if (!actor || meta_window_actor_is_destroyed (actor))
+    return;
+
+  ooze_window_sync (actor);
+}
+
+static void
+ooze_window_restore_seam_strip (void)
+{
+  if (resize_grab.seam_disabled)
+    {
+      clutter_actor_set_reactive (resize_grab.seam_disabled, TRUE);
+      resize_grab.seam_disabled = NULL;
+    }
+}
+
+static void
+ooze_window_disable_match_seam_strip (MetaWindow *match,
+                                      MetaGrabOp  op)
+{
+  OozeWindowGrabOverlay *match_overlay;
+  ClutterActor *strip = NULL;
+
+  ooze_window_restore_seam_strip ();
+
+  if (!match)
+    return;
+
+  match_overlay = ooze_window_overlay_for_meta_window (match);
+  if (!match_overlay)
+    return;
+
+  /* Shared vertical seam: hide the match’s opposing E/W hit target. */
+  if (ooze_grab_op_has_dir (op, META_GRAB_OP_WINDOW_DIR_EAST))
+    strip = match_overlay->west;
+  else if (ooze_grab_op_has_dir (op, META_GRAB_OP_WINDOW_DIR_WEST))
+    strip = match_overlay->east;
+
+  if (!strip || !CLUTTER_IS_ACTOR (strip))
+    return;
+
+  clutter_actor_set_reactive (strip, FALSE);
+  resize_grab.seam_disabled = strip;
+}
+
+static void
+ooze_window_stop_resize_grab_poll (void)
+{
+  if (resize_grab.poll_id)
+    {
+      g_source_remove (resize_grab.poll_id);
+      resize_grab.poll_id = 0;
+    }
+
+  ooze_window_restore_seam_strip ();
+  g_weak_ref_set (&resize_grab.window_ref, NULL);
+  g_weak_ref_set (&resize_grab.match_ref, NULL);
+}
+
+static gboolean
+ooze_window_resize_grab_poll (gpointer user_data G_GNUC_UNUSED)
+{
+  MetaWindow *window;
+  MetaWindow *match;
+
+  window = g_weak_ref_get (&resize_grab.window_ref);
+  match = g_weak_ref_get (&resize_grab.match_ref);
+
+  if (!window)
+    {
+      g_clear_object (&match);
+      ooze_window_restore_seam_strip ();
+      g_weak_ref_set (&resize_grab.window_ref, NULL);
+      g_weak_ref_set (&resize_grab.match_ref, NULL);
+      /* Do not g_source_remove while this timeout is running. */
+      resize_grab.poll_id = 0;
+      return G_SOURCE_REMOVE;
+    }
+
+  ooze_window_sync_meta_window (window);
+  if (match)
+    ooze_window_sync_meta_window (match);
+
+  g_object_unref (window);
+  g_clear_object (&match);
+  return G_SOURCE_CONTINUE;
+}
+
+static void
+ooze_window_on_grab_op_begin (MetaDisplay *display G_GNUC_UNUSED,
+                              MetaWindow  *window,
+                              MetaGrabOp   op,
+                              gpointer     user_data G_GNUC_UNUSED)
+{
+  MetaWindow *match;
+
+  if (!window || !ooze_grab_op_is_resizing (op))
+    return;
+
+  match = meta_window_get_tile_match (window);
+
+  /* Only SSD overlays need poll-sync; CSD owns its own edges. */
+  if (!ooze_window_overlay_for_meta_window (window) &&
+      !ooze_window_overlay_for_meta_window (match))
+    return;
+
+  ooze_window_stop_resize_grab_poll ();
+
+  g_weak_ref_set (&resize_grab.window_ref, window);
+  g_weak_ref_set (&resize_grab.match_ref, match);
+
+  if (match)
+    ooze_window_disable_match_seam_strip (match, op);
+
+  ooze_window_sync_meta_window (window);
+  if (match)
+    ooze_window_sync_meta_window (match);
+
+  resize_grab.poll_id =
+    g_timeout_add (RESIZE_GRAB_SYNC_MS, ooze_window_resize_grab_poll, NULL);
+}
+
+static void
+ooze_window_on_grab_op_end (MetaDisplay *display G_GNUC_UNUSED,
+                            MetaWindow  *window G_GNUC_UNUSED,
+                            MetaGrabOp   op G_GNUC_UNUSED,
+                            gpointer     user_data G_GNUC_UNUSED)
+{
+  MetaWindow *grabbed;
+  MetaWindow *match;
+
+  grabbed = g_weak_ref_get (&resize_grab.window_ref);
+  match = g_weak_ref_get (&resize_grab.match_ref);
+
+  ooze_window_stop_resize_grab_poll ();
+
+  if (grabbed)
+    {
+      ooze_window_sync_meta_window (grabbed);
+      g_object_unref (grabbed);
+    }
+  if (match)
+    {
+      ooze_window_sync_meta_window (match);
+      g_object_unref (match);
+    }
+}
+
+void
+ooze_window_connect_display (MetaDisplay *display)
+{
+  if (!display || resize_grab.display == display)
+    return;
+
+  if (resize_grab.display)
+    ooze_window_disconnect_display (resize_grab.display);
+
+  resize_grab.display = display;
+  g_weak_ref_init (&resize_grab.window_ref, NULL);
+  g_weak_ref_init (&resize_grab.match_ref, NULL);
+
+  resize_grab.grab_begin_id =
+    g_signal_connect (display,
+                      "grab-op-begin",
+                      G_CALLBACK (ooze_window_on_grab_op_begin),
+                      NULL);
+  resize_grab.grab_end_id =
+    g_signal_connect (display,
+                      "grab-op-end",
+                      G_CALLBACK (ooze_window_on_grab_op_end),
+                      NULL);
+}
+
+void
+ooze_window_disconnect_display (MetaDisplay *display)
+{
+  if (!display || resize_grab.display != display)
+    return;
+
+  ooze_window_stop_resize_grab_poll ();
+
+  if (resize_grab.grab_begin_id)
+    {
+      g_signal_handler_disconnect (display, resize_grab.grab_begin_id);
+      resize_grab.grab_begin_id = 0;
+    }
+  if (resize_grab.grab_end_id)
+    {
+      g_signal_handler_disconnect (display, resize_grab.grab_end_id);
+      resize_grab.grab_end_id = 0;
+    }
+
+  g_weak_ref_clear (&resize_grab.window_ref);
+  g_weak_ref_clear (&resize_grab.match_ref);
+  resize_grab.display = NULL;
+}
+
 void
 ooze_window_cancel_scheduled_sync (MetaWindowActor *actor)
 {
@@ -211,7 +474,6 @@ ooze_window_sync_idle (gpointer user_data)
   g_object_set_data (G_OBJECT (actor), "ooze-window-sync-id", NULL);
   ooze_window_sync (actor);
   return G_SOURCE_REMOVE;
-  /* g_object_unref via destroy notify in schedule_sync */
 }
 
 void
@@ -336,8 +598,11 @@ ooze_window_setup (MetaWindowActor *actor)
   if (!window_group)
     return;
 
-  /* Wayland/CSD clients handle their own move/resize; injecting grab
-   * overlays into window_group fights the client and has crashed mutter. */
+  /*
+   * Wayland / GTK CSD (Inkscape, Ooze Gel, …) own move/resize. Injecting
+   * grab overlays into window_group fights the client and crashes Mutter.
+   * Foreign CSD edge-tile: Super+Left/Right + larger nest work-area.
+   */
   if (ooze_window_is_client_decorated (window))
     return;
 

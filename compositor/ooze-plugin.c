@@ -748,6 +748,20 @@ ooze_plugin_add_dock_placeholders (OozePlugin     *plugin,
 }
 
 static void
+ooze_plugin_dock_icons_changed (gpointer user_data)
+{
+  OozePlugin *plugin = user_data;
+  MetaDisplay *display;
+
+  if (!plugin)
+    return;
+  display = meta_plugin_get_display (META_PLUGIN (plugin));
+  plugin->last_dock_plate_width = 0;
+  ooze_plugin_sync_dock_reflections (plugin);
+  ooze_plugin_update_aqua_dock_layout (plugin, display);
+}
+
+static void
 ooze_plugin_setup_aqua_dock (OozePlugin       *plugin,
                            MetaDisplay    *display,
                            MetaCompositor *compositor)
@@ -795,6 +809,10 @@ ooze_plugin_setup_aqua_dock (OozePlugin       *plugin,
   if (plugin->context)
     ooze_dock_populate_container (plugin->context, display, stage,
                                 plugin->aqua_dock_icons);
+
+  ooze_dock_set_changed_callback (plugin->aqua_dock_icons,
+                                  (OozeDockChangedFn) ooze_plugin_dock_icons_changed,
+                                  plugin);
 
   icon_count = ooze_plugin_count_dock_icons (plugin);
   if (icon_count == 0)
@@ -1200,6 +1218,29 @@ ooze_plugin_apply_wm_preferences (void)
   if (g_settings_schema_has_key (schema, "draggable-border-width"))
     g_settings_set_int (mutter, "draggable-border-width", 12);
 
+  {
+    g_autoptr (GSettingsSchema) kb_schema = NULL;
+    g_autoptr (GSettings) kb = NULL;
+
+    kb_schema = g_settings_schema_source_lookup (source,
+                                                 "org.gnome.mutter.keybindings",
+                                                 TRUE);
+    if (kb_schema)
+      {
+        kb = g_settings_new_full (kb_schema, NULL, NULL);
+        if (g_settings_schema_has_key (kb_schema, "toggle-tiled-left"))
+          {
+            const char *left[] = { "<Super>Left", NULL };
+            g_settings_set_strv (kb, "toggle-tiled-left", left);
+          }
+        if (g_settings_schema_has_key (kb_schema, "toggle-tiled-right"))
+          {
+            const char *right[] = { "<Super>Right", NULL };
+            g_settings_set_strv (kb, "toggle-tiled-right", right);
+          }
+      }
+  }
+
   ooze_plugin_apply_button_layout ();
 
   g_settings_sync ();
@@ -1273,6 +1314,134 @@ ooze_plugin_on_xsettings_xevent (MetaX11Display *x11_display G_GNUC_UNUSED,
   ooze_xsettings_handle_xevent (xev);
 }
 
+static gboolean
+ooze_plugin_try_setup_xsettings (OozePlugin *self)
+{
+  MetaDisplay *display;
+  MetaX11Display *x11_display;
+  Display *xdpy;
+  const char *name;
+
+  display = meta_plugin_get_display (META_PLUGIN (self));
+  if (!display)
+    return FALSE;
+
+  x11_display = meta_display_get_x11_display (display);
+  if (!x11_display)
+    return FALSE;
+
+  xdpy = meta_x11_display_get_xdisplay (x11_display);
+  if (!xdpy)
+    return FALSE;
+
+  name = DisplayString (xdpy);
+  if (!name || !*name)
+    name = ":0";
+
+  if (ooze_xsettings_ensure_with_xdisplay (xdpy, name, FALSE))
+    {
+      meta_x11_display_add_event_func (x11_display,
+                                       ooze_plugin_on_xsettings_xevent,
+                                       NULL, NULL);
+      ooze_appmenu_ensure_shell_shows_menubar_on_display (name);
+      return TRUE;
+    }
+
+  g_warning ("OozePlugin: XSETTINGS ensure failed on %s", name);
+  ooze_appmenu_ensure_shell_shows_menubar_on_display (name);
+  return FALSE;
+}
+
+static void
+ooze_plugin_cancel_xsettings_retry (OozePlugin *self)
+{
+  if (self->xsettings_retry_id)
+    {
+      g_source_remove (self->xsettings_retry_id);
+      self->xsettings_retry_id = 0;
+    }
+}
+
+static gboolean
+ooze_plugin_xsettings_retry_cb (gpointer user_data)
+{
+  OozePlugin *self = OOZE_PLUGIN (user_data);
+
+  if (ooze_plugin_try_setup_xsettings (self))
+    {
+      self->xsettings_retry_id = 0;
+      self->xsettings_retry_tries = 0;
+      if (self->x11_display_opened_handler)
+        {
+          MetaDisplay *display =
+            meta_plugin_get_display (META_PLUGIN (self));
+
+          if (display)
+            g_signal_handler_disconnect (display,
+                                         self->x11_display_opened_handler);
+          self->x11_display_opened_handler = 0;
+        }
+      return G_SOURCE_REMOVE;
+    }
+
+  self->xsettings_retry_tries++;
+  if (self->xsettings_retry_tries >= 40) /* ~10s */
+    {
+      g_warning ("OozePlugin: Meta X11 display never became ready; "
+                 "GTK3 global menus (Inkscape) will not hide/export");
+      self->xsettings_retry_id = 0;
+      return G_SOURCE_REMOVE;
+    }
+
+  return G_SOURCE_CONTINUE;
+}
+
+static void
+ooze_plugin_on_x11_display_opened (MetaDisplay *display G_GNUC_UNUSED,
+                                   gpointer     user_data)
+{
+  OozePlugin *self = OOZE_PLUGIN (user_data);
+
+  if (ooze_plugin_try_setup_xsettings (self))
+    {
+      ooze_plugin_cancel_xsettings_retry (self);
+      if (self->x11_display_opened_handler)
+        {
+          g_signal_handler_disconnect (display,
+                                       self->x11_display_opened_handler);
+          self->x11_display_opened_handler = 0;
+        }
+    }
+}
+
+static void
+ooze_plugin_schedule_xsettings (OozePlugin *self)
+{
+  MetaDisplay *display;
+
+  if (ooze_plugin_try_setup_xsettings (self))
+    return;
+
+  display = meta_plugin_get_display (META_PLUGIN (self));
+  g_print ("OozePlugin: waiting for Meta X11 display (Xwayland) "
+           "before serving ShellShowsMenubar\n");
+
+  if (display && !self->x11_display_opened_handler)
+    {
+      self->x11_display_opened_handler =
+        g_signal_connect (display, "x11-display-opened",
+                          G_CALLBACK (ooze_plugin_on_x11_display_opened),
+                          self);
+    }
+
+  if (!self->xsettings_retry_id)
+    {
+      self->xsettings_retry_tries = 0;
+      self->xsettings_retry_id =
+        g_timeout_add (250, ooze_plugin_xsettings_retry_cb, self);
+    }
+}
+
 /* ── Plugin start ────────────────────────────────────────────────────────── */
 
 static void
@@ -1280,7 +1449,6 @@ ooze_plugin_start (MetaPlugin *plugin)
 {
   OozePlugin *self = OOZE_PLUGIN (plugin);
   MetaDisplay *display;
-  MetaX11Display *x11_display;
   MetaContext *context;
   MetaBackend *backend;
   ClutterActor *stage;
@@ -1290,26 +1458,8 @@ ooze_plugin_start (MetaPlugin *plugin)
   ooze_appmenu_setup_environment ();
   ooze_appmenu_ensure_registrar ();
 
-  display = meta_plugin_get_display (plugin);
-  x11_display = meta_display_get_x11_display (display);
-  if (x11_display)
-    {
-      Display *xdpy = meta_x11_display_get_xdisplay (x11_display);
-      if (xdpy)
-        {
-          const char *name = DisplayString (xdpy);
-
-          if (!name || !*name)
-            name = ":0";
-          if (ooze_xsettings_ensure_with_xdisplay (xdpy, name, FALSE))
-            {
-              meta_x11_display_add_event_func (x11_display,
-                                               ooze_plugin_on_xsettings_xevent,
-                                               NULL, NULL);
-              ooze_appmenu_ensure_shell_shows_menubar_on_display (name);
-            }
-        }
-    }
+  /* Xwayland / MetaX11Display often arrives after plugin start. */
+  ooze_plugin_schedule_xsettings (self);
 
   ooze_plugin_apply_wm_preferences ();
   ooze_plugin_init_ui (self);
@@ -1325,6 +1475,8 @@ ooze_plugin_start (MetaPlugin *plugin)
         g_signal_connect (stage, "key-press-event",
                           G_CALLBACK (on_stage_key_press), self);
     }
+
+  ooze_window_connect_display (display);
 
   clutter_actor_show (stage);
 }
@@ -1357,6 +1509,17 @@ ooze_plugin_dispose (GObject *object)
       plugin->workspace_added_handler = 0;
     }
 
+  ooze_plugin_cancel_xsettings_retry (plugin);
+  if (plugin->x11_display_opened_handler)
+    {
+      MetaDisplay *display = meta_plugin_get_display (META_PLUGIN (plugin));
+
+      if (display)
+        g_signal_handler_disconnect (display,
+                                     plugin->x11_display_opened_handler);
+      plugin->x11_display_opened_handler = 0;
+    }
+
   if (plugin->stage_key_handler)
     {
       MetaDisplay *display;
@@ -1372,6 +1535,13 @@ ooze_plugin_dispose (GObject *object)
 
   ooze_theme_unwatch_will_change (NULL, ooze_plugin_on_theme_will_change, plugin);
   ooze_theme_unwatch (NULL, ooze_plugin_on_theme_changed, plugin);
+
+  {
+    MetaDisplay *display = meta_plugin_get_display (META_PLUGIN (plugin));
+
+    if (display)
+      ooze_window_disconnect_display (display);
+  }
 
   ooze_aqua_menu_destroy (plugin->menu_popup);
   plugin->menu_popup = NULL;
@@ -1429,6 +1599,9 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->menu_popup = NULL;
   plugin->monitors_changed_handler = 0;
   plugin->workspace_added_handler = 0;
+  plugin->x11_display_opened_handler = 0;
+  plugin->xsettings_retry_id = 0;
+  plugin->xsettings_retry_tries = 0;
   plugin->clock_timer = 0;
   plugin->stage_key_handler = 0;
   plugin->last_panel_width = 0;

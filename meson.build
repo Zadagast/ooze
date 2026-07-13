@@ -1,8 +1,9 @@
-project('ooze', 'c',
+project('ooze', 'c', 'cpp',
   version: '0.1.0',
   meson_version: '>= 1.0.0',
   default_options: [
     'c_std=c11',
+    'cpp_std=c++17',
     'warning_level=2',
   ],
 )
@@ -74,6 +75,7 @@ executable('ooze',
   'compositor/ooze-shell-menu.c',
   'compositor/ooze-aqua-draw.c',
   'compositor/ooze-dock-shell.c',
+  'compositor/ooze-dock-pins.c',
   'compositor/ooze-desktop-icons.c',
   'compositor/ooze-aqua-menu.c',
   'compositor/ooze-global-menu.c',
@@ -84,6 +86,7 @@ executable('ooze',
   'compositor/ooze-transition.c',
   'shared/ooze-shared-icons.c',
   'shared/ooze-shared-appmenu.c',
+  'shared/ooze-dnd-bridge.c',
   'common/aqua-traffic.c',
   c_args: c_args,
   include_directories: [inc_common, inc_compositor, inc_shared],
@@ -159,6 +162,7 @@ ooze_shared_sources = [
   'shared/ooze-shared-icons.c',
   'shared/ooze-shared-icons-gtk.c',
   'shared/ooze-shared-appmenu.c',
+  'shared/ooze-dnd-bridge.c',
 ]
 
 ooze_app_inc = [inc_shared]
@@ -314,6 +318,119 @@ if gtk4_dep.found() and adw_dep.found()
     install_dir: get_option('datadir') / 'applications',
   )
 
+  # Ooze Torrent — optional; needs ./scripts/fetch-libtransmission.sh once.
+  fs = import('fs')
+  tr_prefix_rel = 'third-party/libtransmission'
+  tr_libdir_rel = tr_prefix_rel / 'lib'
+  tr_incdir_rel = tr_prefix_rel / 'include'
+  tr_sysdeps_rel = tr_prefix_rel / 'sysdeps' / 'lib'
+  if fs.is_file(tr_libdir_rel / 'libtransmission.a') and fs.is_file(tr_libdir_rel / 'libdht.a')
+    tr_inc = include_directories(tr_incdir_rel)
+    tr_lib_abs = meson.project_source_root() / tr_libdir_rel
+
+    tr_curl = dependency('libcurl', required: false)
+    if not tr_curl.found()
+      tr_curl = cc.find_library('curl', dirs: [meson.project_source_root() / tr_sysdeps_rel], required: false)
+      if not tr_curl.found()
+        tr_curl = cc.find_library('curl', required: false)
+      endif
+    endif
+    tr_event = dependency('libevent', required: false)
+    if not tr_event.found()
+      tr_event = cc.find_library('event', dirs: [meson.project_source_root() / tr_sysdeps_rel], required: false)
+      if not tr_event.found()
+        tr_event = cc.find_library('event', required: false)
+      endif
+    endif
+    tr_ssl = dependency('openssl', required: false)
+    tr_deflate = dependency('libdeflate', required: false)
+    if not tr_deflate.found()
+      tr_deflate = cc.find_library('deflate', dirs: [meson.project_source_root() / tr_sysdeps_rel], required: false)
+      if not tr_deflate.found()
+        tr_deflate = cc.find_library('deflate', required: false)
+      endif
+    endif
+    tr_psl = dependency('libpsl', required: false)
+    tr_miniupnpc = cc.find_library('miniupnpc', dirs: [meson.project_source_root() / tr_sysdeps_rel], required: false)
+    if not tr_miniupnpc.found()
+      tr_miniupnpc = cc.find_library('miniupnpc', required: false)
+    endif
+    tr_natpmp = cc.find_library('natpmp', dirs: [meson.project_source_root() / tr_sysdeps_rel], required: false)
+    if not tr_natpmp.found()
+      tr_natpmp = cc.find_library('natpmp', required: false)
+    endif
+    tr_b64 = cc.find_library('b64', dirs: [meson.project_source_root() / tr_sysdeps_rel], required: false)
+    if not tr_b64.found()
+      tr_b64 = cc.find_library('b64', required: false)
+    endif
+    tr_z = dependency('zlib', required: false)
+    if not tr_z.found()
+      tr_z = cc.find_library('z', required: true)
+    endif
+
+    tr_link_args = [
+      '-Wl,--start-group',
+      tr_lib_abs / 'libtransmission.a',
+      tr_lib_abs / 'libdht.a',
+      tr_lib_abs / 'libutp.a',
+      tr_lib_abs / 'libwildmat.a',
+      tr_lib_abs / 'libMadlerCrcany.a',
+      '-Wl,--end-group',
+    ]
+
+    tr_deps = [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      cairo_dep,
+      tr_curl,
+      tr_event,
+      tr_ssl,
+      tr_deflate,
+      tr_psl,
+      tr_miniupnpc,
+      tr_natpmp,
+      tr_b64,
+      tr_z,
+      cc.find_library('m'),
+      meson.get_compiler('cpp').find_library('stdc++'),
+    ]
+
+    tr_deps_clean = []
+    foreach d : tr_deps
+      if d.found()
+        tr_deps_clean += d
+      endif
+    endforeach
+
+    if tr_curl.found() and tr_event.found() and tr_ssl.found() and tr_b64.found()
+      executable('ooze-torrent',
+        'ooze-torrent/main.c',
+        'ooze-torrent/ooze-torrent-window.c',
+        'ooze-torrent/ooze-torrent-session.cc',
+        ooze_shared_sources,
+        include_directories: ooze_app_inc + [include_directories('ooze-torrent'), tr_inc],
+        dependencies: tr_deps_clean,
+        link_args: tr_link_args,
+        c_args: ooze_app_c_args,
+        cpp_args: ooze_app_c_args,
+        install: true,
+      )
+
+      install_data('data/org.ooze.Torrent.desktop',
+        install_dir: get_option('datadir') / 'applications',
+      )
+      install_data('ooze-torrent/COPYING.GPL',
+        install_dir: get_option('datadir') / 'doc' / 'ooze-torrent',
+      )
+    else
+      warning('Ooze Torrent skipped: missing curl/event/openssl/libb64 (or sysdeps)')
+    endif
+  else
+    warning('Ooze Torrent skipped: run ./scripts/fetch-libtransmission.sh')
+  endif
+
   libgtop_dep = dependency('libgtop-2.0', required: false)
   udisks_dep = dependency('udisks2', required: false)
   ooze_about_c_args = ooze_app_c_args
@@ -350,24 +467,6 @@ if gtk4_dep.found() and adw_dep.found()
 
   install_data('data/org.ooze.About.desktop',
     install_dir: get_option('datadir') / 'applications',
-  )
-
-  # Dev gallery for OozeKit widgets — not installed as a desktop product.
-  executable('ooze-kit-factory',
-    'ooze-kit-factory/main.c',
-    'ooze-kit-factory/ooze-kit-factory-window.c',
-    ooze_shared_sources,
-    include_directories: ooze_app_inc + [include_directories('ooze-kit-factory')],
-    dependencies: [
-      ooze_kit_dep,
-      gtk4_dep,
-      adw_dep,
-      gio_dep,
-      cairo_dep,
-      cc.find_library('m'),
-    ],
-    c_args: ooze_app_c_args,
-    install: false,
   )
 
   pipewire_dep = dependency('libpipewire-0.3', required: false)

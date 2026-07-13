@@ -23,6 +23,13 @@ void ooze_dock_populate_container (MetaContext    *context,
                                  ClutterActor   *stage,
                                  ClutterActor   *container);
 
+/* Called after pin/reorder changes so the shell can refresh plate + reflections. */
+typedef void (*OozeDockChangedFn) (gpointer user_data);
+
+void ooze_dock_set_changed_callback (ClutterActor     *container,
+                                     OozeDockChangedFn  callback,
+                                     gpointer           user_data);
+
 ClutterActor *ooze_dock_create_spot_launcher (ClutterActor *stage,
                                             MetaDisplay  *display);
 
@@ -30,6 +37,11 @@ void ooze_dock_launch_spot (MetaContext *context);
 
 void ooze_dock_launch_spot_path (MetaContext *context,
                                const char *path);
+
+/* TRUE if stage coords hit the Dock Downloads icon. */
+gboolean ooze_dock_point_is_downloads (MetaDisplay *display,
+                                       int          x,
+                                       int          y);
 
 void ooze_dock_launch_pak (MetaContext *context);
 

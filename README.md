@@ -14,9 +14,10 @@
 | --- | --- |
 | **Shell** | Global menu bar, dock, desktop icons, system appearance |
 | **Spot** | File manager with sidebar, column, and grid views |
-| **Ooze King** | System apps launcher (Spot, Command, Ear, Monitor, Pak) |
+| **Ooze King** | System apps launcher (Spot, Command, Ear, Monitor, Pak, Torrent) |
 | **Ooze Command** | Terminal with tabs, Ooze Gel, and global menu support |
 | **Ooze Eye** | Image viewer (default handler for images in the nest) |
+| **Ooze Torrent** | BitTorrent client (links static libtransmission; GPL binary) |
 | **Ooze Monitor** | Display preferences via Mutter DisplayConfig |
 | **Ooze Ear** | Sound preferences (PipeWire) |
 | **Ooze Pak** | Flatpak package browser |
@@ -49,7 +50,7 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 
 ### Ooze King
 - Icon + label launcher for Ooze system apps
-- Opens Spot, Ooze Command, Ooze Ear, Ooze Monitor, and Ooze Pak
+- Opens Spot, Ooze Command, Ooze Ear, Ooze Monitor, Ooze Pak, and Ooze Torrent
 
 ### Ooze Command
 - VTE terminal with multiple tabs and New Tab control
@@ -60,6 +61,11 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 - Lightweight GTK4 image viewer with Ooze Gel
 - Fit-to-window viewing and Open dialog
 - Default image handler inside `./run-devkit.sh` (isolated `mimeapps.list`)
+
+### Ooze Torrent
+- First-party BitTorrent client with Ooze Gel and OozeKit
+- Add torrent / magnet, pause, resume, remove, open download folder
+- Links a project-local static `libtransmission` (GPL-2.0-or-later for this binary only)
 
 ### Ooze Monitor
 - Display layout and resolution via Mutter’s DisplayConfig D-Bus API
@@ -105,6 +111,16 @@ ninja -C build
 
 Elementary icons are vendored as `data/icons/elementary-icons.tar.xz` and expanded on demand (`ninja -C build elementary-icons` or first `./run-devkit.sh`).
 
+**Ooze Torrent** needs a one-time libtransmission fetch before it is built:
+
+```bash
+./scripts/fetch-libtransmission.sh
+meson setup --reconfigure build   # if build/ already exists
+ninja -C build ooze-torrent
+```
+
+Requires cmake (or a portable cmake under `.cache/cmake/`), ninja/make, and system libraries for curl, libevent, openssl, libdeflate, miniupnpc, natpmp, and libb64.
+
 ---
 
 ## Run
@@ -144,6 +160,47 @@ Or let **GitHub Actions** build it in an Ubuntu 26.04 container:
 
 The AppImage puts Spot, Command, King, Ear, and Pak on `PATH` inside the nested session. It does not replace your login desktop.
 
+### `.deb` (nested daily-driver test)
+
+Build a system package that installs under `/usr` and adds **Ooze (nested)** to the applications menu:
+
+```bash
+./scripts/build-deb.sh
+sudo apt install ./dist/ooze_0.1.0_amd64.deb
+```
+
+Or launch after install with `ooze-session`.
+
+This is still a **nested** Mutter window on top of your existing Ubuntu login — not a full GDM/login desktop yet. Global menus for classic GTK3 apps (Inkscape) need Xwayland (enabled by default in `ooze-session`).
+
+**Runtime packages (Ubuntu 26.04 / Mutter 18)** — install before or with the `.deb`:
+
+```bash
+sudo apt install mutter libmutter-18-0 xwayland dbus-user-session \
+  libgtk-4-1 libadwaita-1-0 \
+  libvte-2.91-gtk4-0 libgtop-2.0-11 libudisks2-0 libpipewire-0.3-0t64 \
+  libgdk-pixbuf-2.0-0 libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libx11-6 \
+  appmenu-gtk3-module appmenu-gtk-module-common appmenu-registrar
+```
+
+| Package | Role |
+| --- | --- |
+| `mutter` / `libmutter-18-0` | Compositor host libraries |
+| `xwayland` | X11 path for Inkscape / appmenu |
+| `dbus-user-session` | Nested session bus + AppMenu registrar |
+| `libgtk-4-1`, `libadwaita-1-0` | First-party apps |
+| `libvte-2.91-gtk4-0` | Ooze Command |
+| `libgtop-2.0-11`, `libudisks2-0` | Ooze King |
+| `libpipewire-0.3-0t64` | Ooze Ear |
+| `appmenu-gtk3-module`, `appmenu-registrar` | Classic GTK3 global menus (**Recommends**) |
+
+Optional polish (not always in apt):
+
+```bash
+./scripts/install-whitesur-theme.sh    # foreign-app traffic lights (no global gtk-4.0 symlink)
+./scripts/install-elementary-icons.sh  # if icons were not shipped in the package
+```
+
 ---
 
 ## Repository layout
@@ -164,9 +221,9 @@ ooze-ui/       Ooze Gel (header bar, traffic lights, drag/resize)
 common/        Shared Gel / traffic-light constants
 data/          Icons archive, desktop entries, nest XDG config, branding
 docs/          Screenshots and demo media
-packaging/     AppImage AppRun and desktop entry
+packaging/     AppImage + `.deb` packaging
 .github/       CI (compile + AppImage on Ubuntu 26.04)
-scripts/       Icon / WhiteSur / appmenu installers and AppImage builder
+scripts/       Icon / WhiteSur / appmenu installers, AppImage / deb builders
 ```
 
 ---

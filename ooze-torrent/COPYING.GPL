@@ -1,0 +1,8 @@
+/*
+ * Ooze Torrent links statically against Transmission's libtransmission.
+ * Transmission is licensed under the GNU General Public License v2 or later.
+ * This binary (ooze-torrent) is therefore distributed under GPL-2.0-or-later.
+ * The rest of the Ooze project retains its own license terms.
+ *
+ * See: https://github.com/transmission/transmission
+ */

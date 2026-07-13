@@ -22,9 +22,15 @@ export DESKTOP_SESSION=Ooze
 export GSETTINGS_BACKEND=keyfile
 export GSETTINGS_SCHEMA_DIR="${GSETTINGS_SCHEMA_DIR:-/usr/share/glib-2.0/schemas}"
 # Colon-separated modes the nest exposes via DisplayConfig (WWxHH or WWxHH@RR).
+# Prefer 1600x900+ first: half work-area must fit large-min apps (Inkscape) for
+# Mutter side-tile; 1280x720 often refuses can_tile_side_by_side.
 # Override before launch, e.g. OOZE_DISPLAY_MODES=1280x720:1920x1080 ./run-devkit.sh
-export MUTTER_DEBUG_DUMMY_MODE_SPECS="${OOZE_DISPLAY_MODES:-1280x720:1600x900:1920x1080:2560x1440}"
+export MUTTER_DEBUG_DUMMY_MODE_SPECS="${OOZE_DISPLAY_MODES:-1600x900:1920x1080:2560x1440:1280x720}"
 export PATH="$ROOT/build:$PATH"
+# Optional link deps for ooze-torrent when built against third-party/sysdeps.
+if [[ -d "$ROOT/third-party/libtransmission/sysdeps/lib" ]]; then
+  export LD_LIBRARY_PATH="$ROOT/third-party/libtransmission/sysdeps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 export OOZE_DATA_DIR="$ROOT/data"
 export XDG_DATA_DIRS="$ROOT/data${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 # Isolated MIME defaults so Spot opens Ooze Eye for images in the nest
@@ -56,7 +62,10 @@ fi
 
 # Edge snap must be on before Mutter binds prefs (schema default is false).
 gsettings set org.gnome.mutter edge-tiling true 2>/dev/null || true
-gsettings set org.gnome.desktop.peripherals.mouse drag-threshold 16 2>/dev/null || true
+gsettings set org.gnome.desktop.peripherals.mouse drag-threshold 20 2>/dev/null || true
+# Super+Left / Super+Right tile (org.gnome.mutter.keybindings).
+gsettings set org.gnome.mutter.keybindings toggle-tiled-left "['<Super>Left']" 2>/dev/null || true
+gsettings set org.gnome.mutter.keybindings toggle-tiled-right "['<Super>Right']" 2>/dev/null || true
 
 if [[ ! -f "$ROOT/data/icons/elementary/index.theme" ]]; then
   ninja -C build elementary-icons

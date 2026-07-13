@@ -44,6 +44,13 @@ gboolean ooze_global_menu_has_app_menu (OozeGlobalMenu *menu);
 gboolean ooze_global_menu_has_dbusmenu (OozeGlobalMenu *menu);
 
 /*
+ * Non-NULL when focus is a classic GtkMenuBar app on native Wayland
+ * (e.g. Inkscape). Panel may show this one-line hint; global menu cannot
+ * bind until relaunched with GDK_BACKEND=x11 via Spot/Command/dock.
+ */
+const char *ooze_global_menu_get_x11_launch_hint (OozeGlobalMenu *menu);
+
+/*
  * TRUE when the shell Spot/Finder stub menus are appropriate (desktop /
  * Spot / no foreign app focused). Foreign apps without an export get an
  * empty bar — never Spot's File/Go entries.

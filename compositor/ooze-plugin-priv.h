@@ -43,6 +43,9 @@ struct _OozePlugin
   OozeGlobalMenu *global_menu;
   gulong        monitors_changed_handler;
   gulong        workspace_added_handler;
+  gulong        x11_display_opened_handler;
+  guint         xsettings_retry_id;
+  guint         xsettings_retry_tries;
   guint         clock_timer;
   gulong        stage_key_handler;
   int           last_panel_width;

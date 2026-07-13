@@ -1,5 +1,6 @@
 #include "spot-window.h"
 
+#include "ooze-dnd-bridge.h"
 #include "ooze-shared-appmenu.h"
 #include "ooze-shared-icons.h"
 
@@ -64,11 +65,16 @@ struct _SpotWindow
 
   GFile *current_dir;
   GFile *context_target; /* file under right-click / for actions */
+  GFile *spring_target;  /* folder under spring-load timer while dragging */
+  GFile *shell_drag_dest; /* dest folder while compositor shell-drag is active */
+  GtkWidget *shell_drag_highlight; /* widget showing folder drop highlight */
   GList *back_stack;
   GList *forward_stack;
   guint last_column_count;
+  guint spring_id;
   SpotViewMode view_mode;
   gboolean clipboard_cut;
+  gboolean shell_drag_active;
 };
 
 G_DEFINE_FINAL_TYPE (SpotWindow, spot_window, GTK_TYPE_APPLICATION_WINDOW)
@@ -282,6 +288,18 @@ spot_ensure_css (void)
                                      "}"
                                      ".spot-grid-view > flowboxchild:selected .spot-grid-label {"
                                      "  color: #ffffff;"
+                                     "}"
+
+                                     /* Shell / GTK drop feedback */
+                                     ".spot-finder .spot-drop-active {"
+                                     "  outline: 2px solid #2968c8;"
+                                     "  outline-offset: -2px;"
+                                     "  background: rgba(41,104,200,0.08);"
+                                     "}"
+                                     ".spot-finder .spot-drop-folder {"
+                                     "  outline: 2px solid #2968c8;"
+                                     "  outline-offset: -2px;"
+                                     "  background: rgba(41,104,200,0.18);"
                                      "}");
   gtk_style_context_add_provider_for_display (display,
                                               GTK_STYLE_PROVIDER (provider),
@@ -567,6 +585,491 @@ spot_copy_file_recursive (GFile   *src,
     }
 
   return g_file_copy (src, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, error);
+}
+
+static void
+spot_spring_cancel (SpotWindow *self)
+{
+  if (self->spring_id)
+    {
+      g_source_remove (self->spring_id);
+      self->spring_id = 0;
+    }
+  g_clear_object (&self->spring_target);
+}
+
+static gboolean
+spot_spring_fire (gpointer user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+
+  self->spring_id = 0;
+  if (self->spring_target)
+    spot_navigate_to (self, self->spring_target, TRUE);
+  g_clear_object (&self->spring_target);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+spot_spring_arm (SpotWindow *self, GFile *folder)
+{
+  if (!self || !folder)
+    return;
+  if (self->spring_target && g_file_equal (self->spring_target, folder))
+    return;
+  spot_spring_cancel (self);
+  self->spring_target = g_object_ref (folder);
+  self->spring_id = g_timeout_add (700, spot_spring_fire, self);
+}
+
+static gboolean
+spot_file_is_dir (GFile *file)
+{
+  g_autoptr (GFileInfo) info = NULL;
+
+  if (!file)
+    return FALSE;
+  info = g_file_query_info (file, G_FILE_ATTRIBUTE_STANDARD_TYPE,
+                            G_FILE_QUERY_INFO_NONE, NULL, NULL);
+  return info && g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY;
+}
+
+static gboolean
+spot_path_is_descendant (GFile *path, GFile *ancestor)
+{
+  g_autofree char *p = NULL;
+  g_autofree char *a = NULL;
+
+  if (!path || !ancestor)
+    return FALSE;
+  p = g_file_get_path (path);
+  a = g_file_get_path (ancestor);
+  if (!p || !a)
+    return FALSE;
+  if (g_strcmp0 (p, a) == 0)
+    return TRUE;
+  {
+    g_autofree char *prefix = g_strconcat (a, G_DIR_SEPARATOR_S, NULL);
+    return g_str_has_prefix (p, prefix);
+  }
+}
+
+typedef enum
+{
+  SPOT_XFER_AUTO = 0,
+  SPOT_XFER_MOVE,
+  SPOT_XFER_COPY,
+} SpotXferMode;
+
+static gboolean
+spot_same_filesystem (GFile *a, GFile *b)
+{
+  g_autoptr (GFileInfo) ia = NULL;
+  g_autoptr (GFileInfo) ib = NULL;
+  const char *ida, *idb;
+
+  ia = g_file_query_info (a, G_FILE_ATTRIBUTE_ID_FILESYSTEM,
+                          G_FILE_QUERY_INFO_NONE, NULL, NULL);
+  ib = g_file_query_info (b, G_FILE_ATTRIBUTE_ID_FILESYSTEM,
+                          G_FILE_QUERY_INFO_NONE, NULL, NULL);
+  if (!ia || !ib)
+    return FALSE;
+  ida = g_file_info_get_attribute_string (ia, G_FILE_ATTRIBUTE_ID_FILESYSTEM);
+  idb = g_file_info_get_attribute_string (ib, G_FILE_ATTRIBUTE_ID_FILESYSTEM);
+  return ida && idb && g_strcmp0 (ida, idb) == 0;
+}
+
+static SpotXferMode
+spot_xfer_mode_from_drop (GdkDrop *drop)
+{
+  GdkDragAction actions;
+
+  if (!drop)
+    return SPOT_XFER_AUTO;
+
+  actions = gdk_drop_get_actions (drop);
+  if ((actions & GDK_ACTION_MOVE) && !(actions & GDK_ACTION_COPY))
+    return SPOT_XFER_MOVE;
+  if ((actions & GDK_ACTION_COPY) && !(actions & GDK_ACTION_MOVE))
+    return SPOT_XFER_COPY;
+  return SPOT_XFER_AUTO;
+}
+
+static void
+spot_transfer_one (GFile       *src,
+                   GFile       *dest_dir,
+                   SpotXferMode mode)
+{
+  g_autofree char *basename = NULL;
+  g_autofree char *dest_name = NULL;
+  g_autoptr (GFile) dest = NULL;
+  g_autoptr (GFile) src_parent = NULL;
+  g_autoptr (GError) error = NULL;
+  gboolean move;
+
+  if (!src || !dest_dir)
+    return;
+  if (spot_path_is_descendant (dest_dir, src))
+    return;
+
+  src_parent = g_file_get_parent (src);
+  if (src_parent && g_file_equal (src_parent, dest_dir))
+    return;
+
+  basename = g_file_get_basename (src);
+  dest_name = spot_unique_child_name (dest_dir, basename);
+  dest = g_file_get_child (dest_dir, dest_name);
+
+  if (mode == SPOT_XFER_COPY)
+    move = FALSE;
+  else if (mode == SPOT_XFER_MOVE)
+    move = TRUE;
+  else
+    move = spot_same_filesystem (src, dest_dir);
+
+  if (move)
+    {
+      if (!g_file_move (src, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &error))
+        {
+          g_clear_error (&error);
+          if (!spot_copy_file_recursive (src, dest, &error))
+            g_warning ("Spot: copy failed: %s", error->message);
+        }
+    }
+  else if (!spot_copy_file_recursive (src, dest, &error))
+    {
+      g_warning ("Spot: copy failed: %s", error->message);
+    }
+}
+
+static void
+spot_transfer_file_list (SpotWindow  *self,
+                         GdkFileList *file_list,
+                         GFile       *dest_dir,
+                         SpotXferMode mode)
+{
+  GSList *files;
+  GSList *l;
+
+  if (!file_list || !dest_dir)
+    return;
+
+  files = gdk_file_list_get_files (file_list);
+  for (l = files; l != NULL; l = l->next)
+    spot_transfer_one (l->data, dest_dir, mode);
+
+  spot_refresh (self);
+}
+
+void
+spot_window_receive_paths (SpotWindow         *self,
+                           const char * const *paths,
+                           gboolean            prefer_move)
+{
+  SpotXferMode mode = prefer_move ? SPOT_XFER_MOVE : SPOT_XFER_AUTO;
+  GFile *dest;
+  gsize i;
+
+  if (!self || !paths)
+    return;
+
+  dest = self->shell_drag_dest ? self->shell_drag_dest : self->current_dir;
+  if (!dest)
+    return;
+
+  for (i = 0; paths[i] != NULL; i++)
+    {
+      g_autoptr (GFile) src = g_file_new_for_path (paths[i]);
+      spot_transfer_one (src, dest, mode);
+    }
+  spot_refresh (self);
+}
+
+static void
+spot_drop_clear_folder_highlight (SpotWindow *self)
+{
+  if (self->shell_drag_highlight)
+    {
+      gtk_widget_remove_css_class (self->shell_drag_highlight, "spot-drop-folder");
+      self->shell_drag_highlight = NULL;
+    }
+}
+
+static void
+spot_drop_set_content_active (SpotWindow *self, gboolean active)
+{
+  GtkWidget *target = NULL;
+
+  if (self->view_mode == SPOT_VIEW_GRID && self->grid_scrolled)
+    target = self->grid_scrolled;
+  else if (self->columns_scrolled)
+    target = self->columns_scrolled;
+  else if (self->content_stack)
+    target = self->content_stack;
+
+  if (!target)
+    return;
+
+  if (active)
+    gtk_widget_add_css_class (target, "spot-drop-active");
+  else
+    gtk_widget_remove_css_class (target, "spot-drop-active");
+}
+
+static GtkWidget *
+spot_widget_with_file (GtkWidget *widget)
+{
+  for (; widget != NULL; widget = gtk_widget_get_parent (widget))
+    {
+      if (g_object_get_data (G_OBJECT (widget), "spot-file"))
+        return widget;
+    }
+  return NULL;
+}
+
+static void
+spot_drop_highlight_folder_widget (SpotWindow *self, GtkWidget *widget)
+{
+  if (self->shell_drag_highlight == widget)
+    return;
+  spot_drop_clear_folder_highlight (self);
+  if (widget)
+    {
+      /* Prefer the FlowBoxChild / ListBoxRow chrome for a clean outline. */
+      GtkWidget *row = widget;
+      while (row &&
+             !GTK_IS_FLOW_BOX_CHILD (row) &&
+             !GTK_IS_LIST_BOX_ROW (row))
+        row = gtk_widget_get_parent (row);
+      if (!row)
+        row = widget;
+      self->shell_drag_highlight = row;
+      gtk_widget_add_css_class (row, "spot-drop-folder");
+    }
+}
+
+void
+spot_window_shell_drag_leave (SpotWindow *self)
+{
+  if (!self)
+    return;
+  spot_spring_cancel (self);
+  spot_drop_clear_folder_highlight (self);
+  spot_drop_set_content_active (self, FALSE);
+  self->shell_drag_active = FALSE;
+  g_clear_object (&self->shell_drag_dest);
+}
+
+void
+spot_window_shell_drag_motion (SpotWindow *self, double x, double y)
+{
+  GtkWidget *picked;
+  GtkWidget *file_widget;
+  GFile *file = NULL;
+  gboolean is_dir = FALSE;
+
+  if (!self)
+    return;
+
+  self->shell_drag_active = TRUE;
+  spot_drop_set_content_active (self, TRUE);
+
+  picked = gtk_widget_pick (GTK_WIDGET (self), x, y, GTK_PICK_DEFAULT);
+  file_widget = spot_widget_with_file (picked);
+  if (file_widget)
+    {
+      file = g_object_get_data (G_OBJECT (file_widget), "spot-file");
+      is_dir = file && spot_file_is_dir (file);
+    }
+
+  if (is_dir && file)
+    {
+      spot_drop_highlight_folder_widget (self, file_widget);
+      g_set_object (&self->shell_drag_dest, file);
+      spot_spring_arm (self, file);
+    }
+  else
+    {
+      spot_drop_clear_folder_highlight (self);
+      g_set_object (&self->shell_drag_dest, self->current_dir);
+      spot_spring_cancel (self);
+    }
+}
+
+static GdkContentProvider *
+spot_drag_prepare (GtkDragSource *source G_GNUC_UNUSED,
+                   double         x G_GNUC_UNUSED,
+                   double         y G_GNUC_UNUSED,
+                   gpointer       user_data)
+{
+  GtkWidget *widget = user_data;
+  GFile *file = g_object_get_data (G_OBJECT (widget), "spot-file");
+  GdkFileList *file_list;
+  GSList *files = NULL;
+  g_autofree char *path = NULL;
+
+  if (!file)
+    return NULL;
+
+  path = g_file_get_path (file);
+  if (path)
+    {
+      const char *paths[1] = { path };
+      ooze_dnd_bridge_set_paths (paths, 1, TRUE);
+    }
+
+  files = g_slist_prepend (files, g_object_ref (file));
+  file_list = gdk_file_list_new_from_list (files);
+  g_slist_free_full (files, g_object_unref);
+  return gdk_content_provider_new_typed (GDK_TYPE_FILE_LIST, file_list);
+}
+
+static gboolean
+spot_bridge_clear_later (gpointer user_data G_GNUC_UNUSED)
+{
+  ooze_dnd_bridge_clear ();
+  return G_SOURCE_REMOVE;
+}
+
+static void
+spot_drag_end (GtkDragSource *source G_GNUC_UNUSED,
+               GdkDrag       *drag G_GNUC_UNUSED,
+               gboolean       delete_data,
+               gpointer       user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+  g_autofree char *hover = NULL;
+  gboolean changed = FALSE;
+
+  /* If a GTK drop target already handled the transfer, bridge is empty. */
+  if (!ooze_dnd_bridge_has_pending ())
+    {
+      ooze_dnd_bridge_clear ();
+      if (delete_data)
+        spot_refresh (self);
+      return;
+    }
+
+  hover = ooze_dnd_bridge_get_hover_dir ();
+  if (hover)
+    {
+      ooze_dnd_bridge_drop_into (hover);
+      changed = TRUE;
+    }
+  else
+    {
+      ooze_dnd_bridge_clear ();
+    }
+
+  /* Belt-and-suspenders clear in case drop_into partially failed. */
+  g_timeout_add (50, spot_bridge_clear_later, NULL);
+
+  /* Desktop / shell drops move files out from under this view. */
+  if (changed || delete_data)
+    spot_refresh (self);
+}
+
+static gboolean
+spot_on_drop (GtkDropTarget *target,
+              const GValue  *value,
+              double         x G_GNUC_UNUSED,
+              double         y G_GNUC_UNUSED,
+              gpointer       user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+  GFile *dest_dir;
+  GdkFileList *list;
+  GdkDrop *drop;
+  SpotXferMode mode;
+
+  spot_spring_cancel (self);
+  ooze_dnd_bridge_clear ();
+
+  dest_dir = g_object_get_data (G_OBJECT (target), "spot-drop-dir");
+  if (!dest_dir)
+    dest_dir = self->current_dir;
+  if (!dest_dir || !G_VALUE_HOLDS (value, GDK_TYPE_FILE_LIST))
+    return FALSE;
+
+  list = g_value_get_boxed (value);
+  drop = gtk_drop_target_get_current_drop (target);
+  mode = spot_xfer_mode_from_drop (drop);
+
+  spot_transfer_file_list (self, list, dest_dir, mode);
+  spot_window_shell_drag_leave (self);
+  return TRUE;
+}
+
+static GdkDragAction
+spot_on_drop_enter (GtkDropTarget *target,
+                    double         x G_GNUC_UNUSED,
+                    double         y G_GNUC_UNUSED,
+                    gpointer       user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+  GFile *dest_dir = g_object_get_data (G_OBJECT (target), "spot-drop-dir");
+  GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (target));
+
+  spot_drop_set_content_active (self, TRUE);
+  if (dest_dir && spot_file_is_dir (dest_dir))
+    {
+      spot_drop_highlight_folder_widget (self, widget);
+      g_set_object (&self->shell_drag_dest, dest_dir);
+      spot_spring_arm (self, dest_dir);
+    }
+  else
+    {
+      spot_drop_clear_folder_highlight (self);
+      g_set_object (&self->shell_drag_dest, self->current_dir);
+    }
+  return GDK_ACTION_COPY | GDK_ACTION_MOVE;
+}
+
+static void
+spot_on_drop_leave (GtkDropTarget *target G_GNUC_UNUSED,
+                    gpointer       user_data)
+{
+  spot_window_shell_drag_leave (SPOT_WINDOW (user_data));
+}
+
+static void
+spot_attach_file_drag (GtkWidget *widget, SpotWindow *self, GFile *file G_GNUC_UNUSED)
+{
+  GtkDragSource *drag;
+
+  drag = gtk_drag_source_new ();
+  gtk_drag_source_set_actions (drag, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+  g_signal_connect (drag, "prepare", G_CALLBACK (spot_drag_prepare), widget);
+  g_signal_connect (drag, "drag-end", G_CALLBACK (spot_drag_end), self);
+  gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (drag));
+}
+
+static void
+spot_attach_folder_drop (GtkWidget   *widget,
+                         SpotWindow  *self,
+                         GFile       *folder)
+{
+  GtkDropTarget *drop;
+
+  drop = gtk_drop_target_new (GDK_TYPE_FILE_LIST, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+  g_object_set_data_full (G_OBJECT (drop), "spot-drop-dir",
+                          g_object_ref (folder), g_object_unref);
+  g_signal_connect (drop, "drop", G_CALLBACK (spot_on_drop), self);
+  g_signal_connect (drop, "enter", G_CALLBACK (spot_on_drop_enter), self);
+  g_signal_connect (drop, "leave", G_CALLBACK (spot_on_drop_leave), self);
+  gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (drop));
+}
+
+static void
+spot_attach_dir_drop (GtkWidget *widget, SpotWindow *self)
+{
+  GtkDropTarget *drop;
+
+  drop = gtk_drop_target_new (GDK_TYPE_FILE_LIST, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+  g_signal_connect (drop, "drop", G_CALLBACK (spot_on_drop), self);
+  g_signal_connect (drop, "enter", G_CALLBACK (spot_on_drop_enter), self);
+  g_signal_connect (drop, "leave", G_CALLBACK (spot_on_drop_leave), self);
+  gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (drop));
 }
 
 static void
@@ -1355,7 +1858,7 @@ spot_image_new_for_info_size (GFileInfo *info, int size)
 /* ── Grid-view helpers ──────────────────────────────────────────────────── */
 
 static GtkWidget *
-spot_create_grid_cell (GFileInfo *info, GFile *file)
+spot_create_grid_cell (SpotWindow *self, GFileInfo *info, GFile *file)
 {
   GtkWidget *box;
   GtkWidget *image;
@@ -1388,6 +1891,9 @@ spot_create_grid_cell (GFileInfo *info, GFile *file)
 
   g_object_set_data_full (G_OBJECT (box), "spot-file",
                           g_object_ref (file), g_object_unref);
+  spot_attach_file_drag (box, self, file);
+  if (g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
+    spot_attach_folder_drop (box, self, file);
   return box;
 }
 
@@ -1454,7 +1960,7 @@ spot_populate_grid (SpotWindow *self)
       GFileInfo *entry = l->data;
       g_autoptr (GFile) child = g_file_get_child (self->current_dir,
                                                    g_file_info_get_name (entry));
-      GtkWidget *cell = spot_create_grid_cell (entry, child);
+      GtkWidget *cell = spot_create_grid_cell (self, entry, child);
 
       gtk_flow_box_append (GTK_FLOW_BOX (self->grid_flow), cell);
 
@@ -2100,8 +2606,22 @@ spot_launch_uri (const char *uri)
 {
   g_autoptr (GError) error = NULL;
   g_autoptr (GAppLaunchContext) ctx = g_app_launch_context_new ();
+  g_autoptr (GFile) file = NULL;
+  g_autoptr (GAppInfo) info = NULL;
 
-  ooze_appmenu_prepare_launch_context (ctx);
+  file = g_file_new_for_uri (uri);
+  info = g_file_query_default_handler (file, NULL, NULL);
+  ooze_appmenu_prepare_launch_context_for_info (ctx, info);
+
+  if (info)
+    {
+      GList uris = { .data = (gpointer) uri, .next = NULL, .prev = NULL };
+
+      if (!g_app_info_launch_uris (info, &uris, ctx, &error))
+        g_warning ("Spot: failed to open %s: %s", uri, error->message);
+      return;
+    }
+
   if (!g_app_info_launch_default_for_uri (uri, ctx, &error))
     g_warning ("Spot: failed to open %s: %s", uri, error->message);
 }
@@ -2221,6 +2741,9 @@ spot_create_column_list (SpotWindow *self,
       gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), box);
 
       g_object_set_data_full (G_OBJECT (row), "spot-file", g_object_ref (child), g_object_unref);
+      spot_attach_file_drag (row, self, child);
+      if (g_file_info_get_file_type (entry) == G_FILE_TYPE_DIRECTORY)
+        spot_attach_folder_drop (row, self, child);
       gtk_list_box_append (GTK_LIST_BOX (list), row);
 
       if (select_child && g_file_equal (child, select_child))
@@ -2670,6 +3193,8 @@ spot_window_constructed (GObject *object)
                                  self->grid_flow);
   g_signal_connect (self->grid_flow, "child-activated",
                     G_CALLBACK (on_grid_child_activated), self);
+  spot_attach_dir_drop (self->grid_flow, self);
+  spot_attach_dir_drop (self->grid_scrolled, self);
   spot_attach_context_menu (self, self->grid_flow);
   spot_attach_context_menu (self, self->grid_scrolled);
   spot_attach_context_menu (self, self->columns_scrolled);
@@ -2741,6 +3266,8 @@ spot_window_dispose (GObject *object)
 {
   SpotWindow *self = SPOT_WINDOW (object);
 
+  spot_spring_cancel (self);
+  spot_window_shell_drag_leave (self);
   g_clear_object (&self->current_dir);
   g_clear_object (&self->context_target);
   if (self->context_menu)

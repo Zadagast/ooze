@@ -46,11 +46,15 @@ gboolean ooze_theme_is_dark (OozeTheme *theme);
 const OozeAquaPalette *ooze_theme_get_palette (OozeTheme *theme);
 void ooze_theme_toggle (OozeTheme *theme);
 
-/* WhiteSur helpers — never applied globally (that breaks Ooze Gel / OozeKit). */
+/* WhiteSur helpers — never applied globally via GSettings (that breaks Ooze Gel).
+ * X11 foreign apps get WhiteSur through XSETTINGS + launch-scoped GTK_THEME. */
 const char *ooze_theme_foreign_gtk_name (gboolean dark);
 gboolean    ooze_theme_foreign_gtk_installed (gboolean dark);
+/* Prefer-dark aware installed WhiteSur name, or NULL if missing. */
+const char *ooze_theme_foreign_gtk_theme_for_session (void);
 void        ooze_theme_recover_ooze_from_foreign_gtk (void);
 void        ooze_theme_apply_foreign_gtk_to_launcher (GSubprocessLauncher *launcher);
+void        ooze_theme_apply_foreign_gtk_to_launch_context (GAppLaunchContext *ctx);
 /* Legacy entry used by main.c — recovers session bleed, does not apply WhiteSur. */
 void        ooze_theme_apply_foreign_gtk (gboolean dark);
 

@@ -1,0 +1,19 @@
+Source: ooze
+Package: ooze
+Version: @VERSION@
+Section: x11
+Priority: optional
+Architecture: amd64
+Maintainer: Ooze Desktop <ooze@localhost>
+Homepage: https://github.com/Zadagast/ooze
+Depends: mutter, libmutter-18-0, xwayland, dbus-user-session, libgtk-4-1, libadwaita-1-0, libvte-2.91-gtk4-0, libgtop-2.0-11, libudisks2-0, libpipewire-0.3-0t64, libgdk-pixbuf-2.0-0, libcairo2, libpango-1.0-0, libpangocairo-1.0-0, libx11-6, libglib2.0-0t64
+Recommends: appmenu-gtk3-module, appmenu-gtk-module-common, appmenu-registrar
+Suggests: xsettingsd
+Description: Ooze nested Wayland desktop (Mutter 18)
+ Ooze is a Mutter-based desktop shell with Spot, Command, King, and related
+ apps. This package installs a nested test session you can launch from an
+ existing Ubuntu Wayland login; it does not replace GNOME as the display
+ manager session yet.
+ .
+ Requires host Mutter 18 (Ubuntu 26.04). Xwayland stays enabled so classic
+ GTK3 apps can feed the global menu via appmenu-gtk-module.

@@ -50,5 +50,6 @@ echo "OK: module=$module"
 echo "OK: registrar=$registrar"
 echo
 echo "Restart Ooze (./run-devkit.sh). GTK3 apps launched from the dock will"
-echo "load appmenu-gtk-module; Xwayland clients register with the AppMenu registrar."
-echo "xsettingsd advertises Gtk/ShellShowsMenubar so in-window bars can hide."
+echo "load appmenu-gtk-module; Xwayland clients export menus via registrar"
+echo "(legacy dbusmenu) and/or _GTK_* X11 props (modern org.gtk.Menus)."
+echo "xsettingsd / nest XSETTINGS advertises Gtk/ShellShowsMenubar so in-window bars can hide."

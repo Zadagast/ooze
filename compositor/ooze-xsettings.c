@@ -1,4 +1,5 @@
 #include "ooze-xsettings.h"
+#include "ooze-theme.h"
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -103,13 +104,18 @@ ooze_xsettings_append_string (GByteArray *buf,
 static const char *
 ooze_xsettings_current_gtk_theme (void)
 {
-  g_autoptr (GSettings) iface = NULL;
-  g_autofree char *gtk_theme = NULL;
+  const char *foreign;
 
-  iface = g_settings_new ("org.gnome.desktop.interface");
-  gtk_theme = g_settings_get_string (iface, "gtk-theme");
-  if (gtk_theme && *gtk_theme)
-    return g_intern_string (gtk_theme);
+  /*
+   * XSETTINGS is only consumed by X11 / Xwayland clients. Foreign GTK apps
+   * are forced onto X11 for appmenu, so publish WhiteSur here.
+   *
+   * Do NOT mirror this into org.gnome.desktop.interface gtk-theme — Wayland
+   * Ooze apps read GSettings and WhiteSur there breaks Ooze Gel / OozeKit.
+   */
+  foreign = ooze_theme_foreign_gtk_theme_for_session ();
+  if (foreign)
+    return foreign;
 
   return "Adwaita";
 }
@@ -128,7 +134,7 @@ ooze_xsettings_build_blob (guint32 serial)
   ooze_xsettings_append_u8 (buf, 0);
   ooze_xsettings_append_u8 (buf, 0);
   ooze_xsettings_append_u32 (buf, serial);
-  ooze_xsettings_append_u32 (buf, 4);
+  ooze_xsettings_append_u32 (buf, 5);
 
   ooze_xsettings_append_int (buf, "Gtk/ShellShowsMenubar", 1, serial);
   ooze_xsettings_append_int (buf, "Gtk/ShellShowsAppmenu", 1, serial);
@@ -136,6 +142,10 @@ ooze_xsettings_build_blob (guint32 serial)
   ooze_xsettings_append_string (buf, "Gtk/DecorationLayout",
                                 "close,minimize,maximize:", serial);
   ooze_xsettings_append_string (buf, "Gtk/ThemeName",
+                                theme_name ? theme_name : "Adwaita",
+                                serial);
+  /* GTK2 / some GTK3 paths still read Net/ThemeName. */
+  ooze_xsettings_append_string (buf, "Net/ThemeName",
                                 theme_name ? theme_name : "Adwaita",
                                 serial);
   return buf;

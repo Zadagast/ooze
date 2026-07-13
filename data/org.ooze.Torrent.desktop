@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Ooze Torrent
+GenericName=BitTorrent Client
+Comment=Download torrents on Ooze Desktop
+Exec=ooze-torrent %U
+Icon=application-x-bittorrent
+Terminal=false
+Type=Application
+Categories=Network;FileTransfer;P2P;GTK;
+MimeType=application/x-bittorrent;x-scheme-handler/magnet;
+StartupWMClass=org.ooze.Torrent

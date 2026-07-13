@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Ooze (nested)
+GenericName=Desktop Environment
+Comment=Launch a nested Ooze desktop session (Mutter 18 host required)
+Exec=ooze-session
+Icon=ooze
+Terminal=false
+Type=Application
+Categories=System;
+StartupNotify=true
+StartupWMClass=org.ooze.Desktop
+Keywords=Ooze;Mutter;Wayland;Desktop;

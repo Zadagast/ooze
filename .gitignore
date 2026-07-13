@@ -11,8 +11,21 @@ data/icons/elementary/
 .cache/
 build-elementary-icons/
 
+# Transmission source extract + project-local static lib (arch-specific).
+# Fetch once with: ./scripts/fetch-libtransmission.sh
+third-party/transmission-src/
+third-party/libtransmission/
+
 # Nest session leftovers (do not commit)
 data/xdg-config/org.gnome.Ptyxis/
+data/xdg-config/google-chrome/
+data/xdg-config/pulse/
+data/xdg-config/monitors.xml
+data/xdg-config/ooze-torrent/
+data/xdg-config/ooze/
+data/xdg-config/enchant/
+data/xdg-config/inkscape/*
+!data/xdg-config/inkscape/preferences.xml
 
 # Editor / OS
 *~

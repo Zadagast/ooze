@@ -118,13 +118,36 @@ ooze_appmenu_force_wayland_backend (GSubprocessLauncher *launcher)
   g_subprocess_launcher_unsetenv (launcher, "GTK_THEME");
 }
 
+static gboolean
+ooze_appmenu_theme_index_exists (const char *name)
+{
+  g_autofree char *user_path = NULL;
+  g_autofree char *home_path = NULL;
+  g_autofree char *system_path = NULL;
+
+  if (!name || !*name)
+    return FALSE;
+
+  user_path = g_build_filename (g_get_user_data_dir (), "themes", name,
+                                "index.theme", NULL);
+  if (g_file_test (user_path, G_FILE_TEST_EXISTS))
+    return TRUE;
+
+  home_path = g_build_filename (g_get_home_dir (), ".themes", name,
+                                "index.theme", NULL);
+  if (g_file_test (home_path, G_FILE_TEST_EXISTS))
+    return TRUE;
+
+  system_path = g_build_filename ("/usr/share/themes", name, "index.theme", NULL);
+  return g_file_test (system_path, G_FILE_TEST_EXISTS);
+}
+
 static const char *
 ooze_appmenu_foreign_gtk_theme (void)
 {
   g_autoptr (GSettings) iface = NULL;
   gboolean dark = FALSE;
   const char *name;
-  g_autofree char *path = NULL;
 
   iface = g_settings_new ("org.gnome.desktop.interface");
   if (iface)
@@ -135,14 +158,11 @@ ooze_appmenu_foreign_gtk_theme (void)
     }
 
   name = dark ? "WhiteSur-Dark" : "WhiteSur-Light";
-  path = g_build_filename (g_get_user_data_dir (), "themes", name, "index.theme", NULL);
-  if (g_file_test (path, G_FILE_TEST_EXISTS))
+  if (ooze_appmenu_theme_index_exists (name))
     return name;
 
   name = dark ? "WhiteSur-Light" : "WhiteSur-Dark";
-  g_free (path);
-  path = g_build_filename (g_get_user_data_dir (), "themes", name, "index.theme", NULL);
-  if (g_file_test (path, G_FILE_TEST_EXISTS))
+  if (ooze_appmenu_theme_index_exists (name))
     return name;
 
   return NULL;
@@ -187,6 +207,40 @@ ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx)
   ooze_appmenu_ensure_shell_shows_menubar ();
 }
 
+void
+ooze_appmenu_apply_foreign_to_launcher (GSubprocessLauncher *launcher)
+{
+  g_return_if_fail (launcher != NULL);
+
+  ooze_appmenu_apply_to_launcher (launcher);
+  ooze_appmenu_force_x11_backend (launcher);
+}
+
+void
+ooze_appmenu_prepare_ooze_launch_context (GAppLaunchContext *ctx)
+{
+  g_return_if_fail (G_IS_APP_LAUNCH_CONTEXT (ctx));
+
+  ooze_appmenu_setup_environment ();
+  g_app_launch_context_setenv (ctx, "GDK_BACKEND", "wayland");
+  g_app_launch_context_unsetenv (ctx, "GTK_THEME");
+}
+
+void
+ooze_appmenu_prepare_launch_context_for_info (GAppLaunchContext *ctx,
+                                              GAppInfo          *info)
+{
+  const char *id;
+
+  g_return_if_fail (G_IS_APP_LAUNCH_CONTEXT (ctx));
+
+  id = info ? g_app_info_get_id (info) : NULL;
+  if (id && g_str_has_prefix (id, "org.ooze."))
+    ooze_appmenu_prepare_ooze_launch_context (ctx);
+  else
+    ooze_appmenu_prepare_launch_context (ctx);
+}
+
 char **
 ooze_appmenu_environ_for_foreign (char **envp)
 {
@@ -209,6 +263,7 @@ ooze_appmenu_environ_for_foreign (char **envp)
   theme = ooze_appmenu_foreign_gtk_theme ();
   if (theme)
     envp = g_environ_setenv (envp, "GTK_THEME", theme, TRUE);
+  ooze_appmenu_ensure_shell_shows_menubar ();
   return envp;
 }
 
@@ -284,12 +339,6 @@ ooze_appmenu_try_start_xsettingsd (gpointer user_data G_GNUC_UNUSED)
 {
   static guint retries;
   const char *display;
-  const char *data_dir;
-  g_autofree char *bin = NULL;
-  g_autofree char *conf = NULL;
-  g_autoptr (GError) error = NULL;
-  g_autoptr (GSubprocessLauncher) launcher = NULL;
-  GSubprocess *proc;
 
   display = xsettings_target_display;
   if (!display || !*display)
@@ -314,8 +363,8 @@ ooze_appmenu_try_start_xsettingsd (gpointer user_data G_GNUC_UNUSED)
 
   /*
    * Prefer the built-in nest XSETTINGS manager when linked into the compositor.
-   * System xsettingsd is async and often loses the race with Inkscape, which
-   * leaves the in-window bar visible (dual menus).
+   * Spot/Command/Eye must NOT start system xsettingsd — that steals
+   * _XSETTINGS_S0 from the nest and drops WhiteSur ThemeName.
    */
   if (ooze_xsettings_ensure_shell_shows_menubar != NULL)
     {
@@ -340,65 +389,9 @@ ooze_appmenu_try_start_xsettingsd (gpointer user_data G_GNUC_UNUSED)
             warned = TRUE;
           }
       }
-      xsettingsd_retry_id = 0;
-      return G_SOURCE_REMOVE;
     }
 
-  bin = g_find_program_in_path ("xsettingsd");
-  if (!bin)
-    {
-      xsettingsd_retry_id = 0;
-      return G_SOURCE_REMOVE;
-    }
-
-  data_dir = g_getenv ("OOZE_DATA_DIR");
-  if (data_dir && *data_dir)
-    conf = g_build_filename (data_dir, "xsettingsd.conf", NULL);
-  if (!conf || !g_file_test (conf, G_FILE_TEST_IS_REGULAR))
-    {
-      g_free (conf);
-      conf = g_build_filename (g_get_user_config_dir (),
-                               "ooze", "xsettingsd.conf", NULL);
-    }
-  if (!g_file_test (conf, G_FILE_TEST_IS_REGULAR))
-    {
-      g_autofree char *tmp = NULL;
-      g_autoptr (GError) write_err = NULL;
-
-      tmp = g_build_filename (g_get_user_runtime_dir (),
-                              "ooze-xsettingsd.conf", NULL);
-      if (!g_file_set_contents (tmp,
-                                "Gtk/ShellShowsMenubar 1\n"
-                                "Gtk/ShellShowsAppmenu 1\n",
-                                -1, &write_err))
-        {
-          g_warning ("Ooze appmenu: cannot write xsettingsd.conf: %s",
-                     write_err ? write_err->message : "unknown");
-          xsettingsd_retry_id = 0;
-          return G_SOURCE_REMOVE;
-        }
-      g_free (conf);
-      conf = g_steal_pointer (&tmp);
-    }
-
-  launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_STDOUT_SILENCE |
-                                        G_SUBPROCESS_FLAGS_STDERR_SILENCE);
-  g_subprocess_launcher_setenv (launcher, "DISPLAY", display, TRUE);
-  proc = g_subprocess_launcher_spawn (launcher, &error, bin, "-c", conf, NULL);
-  if (!proc)
-    {
-      g_warning ("Ooze appmenu: failed to start xsettingsd: %s",
-                 error ? error->message : "unknown");
-      xsettingsd_retry_id = 0;
-      return G_SOURCE_REMOVE;
-    }
-
-  g_free (xsettings_started_display);
-  xsettings_started_display = g_strdup (display);
   xsettingsd_retry_id = 0;
-  g_object_unref (proc);
-  g_print ("Ooze appmenu: started xsettingsd on DISPLAY=%s (ShellShowsMenubar)\n",
-           display);
   return G_SOURCE_REMOVE;
 }
 

@@ -81,8 +81,8 @@ ooze_display_pane_nest_hint (OozeDisplayPane *self)
 
   if (self->state->modes->len <= 1)
     return "Nest devkit: only one resolution available. "
-           "Restart with OOZE_DISPLAY_MODES=1280x720:1920x1080 "
-           "./run-devkit.sh to add more.";
+           "Restart with OOZE_DISPLAY_MODES=1600x900:1920x1080 "
+           "./run-devkit.sh to add more (prefer ≥1600px wide for side-tile).";
 
   return "Nest devkit: enable Emulate monitor modes in the "
          "devkit viewer \xe2\x98\xb0 menu for resolution changes to resize the window.";
