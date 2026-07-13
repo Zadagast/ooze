@@ -1,5 +1,6 @@
 #include "ooze-aqua-draw.h"
 #include "ooze-theme.h"
+#include "../shared/ooze-icon-lookup.h"
 
 #include "../common/aqua-chrome.h"
 #include "../common/ooze-font.h"
@@ -806,15 +807,21 @@ ooze_aqua_spot_icon_content (ClutterActor *ref_actor,
 {
   g_autoptr (GdkPixbuf) pixbuf = NULL;
   int texture;
+  static const char * const names[] = {
+    "system-file-manager",
+    "folder-home",
+    "folder",
+    NULL,
+  };
 
   if (logical_size < 1)
     logical_size = 1;
 
   texture = ooze_aqua_icon_texture_size (display, logical_size);
-  pixbuf = ooze_aqua_load_data_pixbuf ("spot-logo.svg", texture, texture);
+  pixbuf = ooze_icon_lookup_first (names, texture);
   if (!pixbuf)
     {
-      g_warning ("Ooze: spot-logo.svg not found; using fallback tile");
+      g_warning ("Ooze: system-file-manager icon not found; using fallback tile");
       return ooze_aqua_dock_icon_content (ref_actor,
                                         texture,
                                         0.22f,

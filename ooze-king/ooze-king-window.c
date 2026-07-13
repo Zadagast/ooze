@@ -29,25 +29,25 @@ typedef struct {
 } KingAppEntry;
 
 static const char * const king_icon_spot[] = {
-  "org.ooze.Spot", "system-file-manager", NULL
+  "system-file-manager", NULL
 };
 static const char * const king_icon_command[] = {
-  "org.ooze.Command", "utilities-terminal", NULL
+  "utilities-terminal", NULL
 };
 static const char * const king_icon_ear[] = {
-  "org.ooze.Ear", "audio-headphones", "multimedia-volume-control", NULL
+  "audio-headphones", "multimedia-volume-control", NULL
 };
 static const char * const king_icon_monitor[] = {
-  "org.ooze.Monitor", "video-display", "preferences-desktop-display", NULL
+  "video-display", "preferences-desktop-display", NULL
 };
 static const char * const king_icon_themes[] = {
-  "org.ooze.Themes", "preferences-desktop-theme", "preferences-desktop", NULL
+  "preferences-desktop-theme", "preferences-desktop", NULL
 };
 static const char * const king_icon_about[] = {
-  "org.ooze.About", "help-about", "dialog-information", NULL
+  "help-about", "dialog-information", NULL
 };
 static const char * const king_icon_pak[] = {
-  "org.ooze.Pak", "system-software-install", "package-x-generic", NULL
+  "system-software-install", "package-x-generic", NULL
 };
 static const char * const king_icon_torrent[] = {
   "application-x-bittorrent", "network-workgroup", NULL
@@ -57,7 +57,7 @@ static const KingAppEntry king_apps[] = {
   { king_icon_about,   "About This Computer", "ooze-about" },
   { king_icon_monitor, "Displays",            "ooze-monitor" },
   { king_icon_themes,  "Themes",              "ooze-themes" },
-  { king_icon_spot,    "File Manager",        "spot" },
+  { king_icon_spot,    "Spot",                "spot" },
   { king_icon_command, "Terminal",       "ooze-command" },
   { king_icon_ear,     "Sound Settings", "ooze-ear" },
   { king_icon_pak,     "Software",       "ooze-pak" },

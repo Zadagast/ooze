@@ -1,9 +1,9 @@
 [Desktop Entry]
-Name=File Manager
+Name=Spot
 GenericName=File Manager
 Comment=Spot — browse files on Ooze
 Exec=spot %U
-Icon=org.ooze.Spot
+Icon=system-file-manager
 Terminal=false
 Type=Application
 Categories=Utility;FileManager;
