@@ -2,9 +2,9 @@
 
 **Ooze** is a Wayland desktop environment built on [Mutter](https://gitlab.gnome.org/GNOME/mutter). It pairs a cohesive Aqua-inspired shell — menu bar, dock, and **Ooze Gel** — with first-party GTK4 applications that share one visual system.
 
-![Ooze desktop demo](docs/ooze-theme-demo.gif)
+![Ooze desktop demo](docs/ooze-desktop-demo.gif)
 
-*Nested Ooze session demo (autoplaying GIF). [Full-quality MP4](docs/ooze-theme-demo.mp4) — same crop at native resolution.*
+*Nested Ooze session demo (autoplaying GIF). [Full-quality MP4](docs/ooze-desktop-demo.mp4) — same crop at native resolution.*
 
 ---
 
