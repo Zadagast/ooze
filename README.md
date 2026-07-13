@@ -1,10 +1,16 @@
 # Ooze
 
+[![CI](https://github.com/Zadagast/ooze/actions/workflows/ci.yml/badge.svg)](https://github.com/Zadagast/ooze/actions/workflows/ci.yml)
+[![AppImage](https://github.com/Zadagast/ooze/actions/workflows/appimage.yml/badge.svg)](https://github.com/Zadagast/ooze/actions/workflows/appimage.yml)
+[![Website](https://github.com/Zadagast/ooze/actions/workflows/pages.yml/badge.svg)](https://zadagast.github.io/ooze/)
+
 **Ooze** is a Wayland desktop environment built on [Mutter](https://gitlab.gnome.org/GNOME/mutter). It pairs a cohesive Aqua-inspired shell — menu bar, dock, and **Ooze Gel** — with first-party GTK4 applications that share one visual system.
 
 ![Ooze desktop demo](docs/ooze-desktop-demo.gif)
 
 *Nested Ooze session demo (autoplaying GIF). [Full-quality MP4](docs/ooze-desktop-demo.mp4) — same crop at native resolution.*
+
+**Project website:** [zadagast.github.io/ooze](https://zadagast.github.io/ooze/) — features, screenshots, and install steps.
 
 ---
 
@@ -107,6 +113,10 @@ When reporting freezes, include log lines around `OozeStall:`, `OozeDock:`, them
 | --- | --- |
 | ![Dark mode](docs/ooze-dark.png) | ![Light mode](docs/ooze-light.png) |
 
+Spot's Miller columns — drill through folders with scrollable panes:
+
+![Spot columns view](docs/ooze-spot-columns.png)
+
 ---
 
 ## Build
@@ -120,6 +130,7 @@ When reporting freezes, include log lines around `OozeStall:`, `OozeDock:`, them
 - `libgdk-pixbuf-2.0-dev`, `libpng-dev`
 - `mutter-dev-bin` (provides `/usr/libexec/mutter-devkit`, required by `./run-devkit.sh`)
 - PipeWire running on the session bus (the devkit window cannot start without it)
+- `fonts-noto-color-emoji` (Unicode 16) — the Ooze menu button glyph 🫟 renders as a blank box without it
 - Optional: `appmenu-gtk3-module`, `appmenu-registrar` (GTK3 global menus) — `./scripts/install-appmenu.sh`
 - Optional: WhiteSur GTK theme (foreign-app traffic lights) — `./scripts/install-whitesur-theme.sh`
 
@@ -128,7 +139,7 @@ meson setup build
 ninja -C build
 ```
 
-Elementary icons are vendored as `data/icons/elementary-icons.tar.xz` and expanded on demand (`ninja -C build elementary-icons` or first `./run-devkit.sh`).
+Elementary icons are vendored as `data/icons/elementary-icons.tar.xz` and expanded on demand (`ninja -C build elementary-icons.stamp` or first `./run-devkit.sh`).
 
 **Ooze Torrent** needs a one-time libtransmission fetch before it is built:
 
@@ -242,6 +253,8 @@ ooze-king/     System apps launcher
 ooze-command/  Terminal
 ooze-ear/      Sound preferences
 ooze-pak/      Flatpak browser
+ooze-themes/   Appearance, icons, cursors
+ooze-torrent/  BitTorrent client (static libtransmission)
 ooze-about/    About This Computer
 ooze-kit/      Shared drawing toolkit
 ooze-ui/       Ooze Gel (header bar, traffic lights, drag/resize)

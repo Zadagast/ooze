@@ -424,8 +424,9 @@
         <h3>2 · Build from source</h3>
         <pre><code><span class="c"># dependencies (Ubuntu 26.04)</span>
 <span class="p">sudo apt install meson ninja-build pkg-config libmutter-18-dev \
-  libgtk-4-dev libadwaita-1-dev libcairo2-dev libvte-2.91-gtk4-dev \
-  libgdk-pixbuf-2.0-dev libpng-dev</span>
+  mutter-dev-bin libgtk-4-dev libadwaita-1-dev libcairo2-dev \
+  libvte-2.91-gtk4-dev libgdk-pixbuf-2.0-dev libpng-dev \
+  fonts-noto-color-emoji</span>
 
 <span class="c"># build and run a nested session</span>
 <span class="p">meson setup build
@@ -436,14 +437,14 @@ ninja -C build
         <h3>3 · Install — native session</h3>
         <p>Build a .deb, install it, then pick “Ooze” at the GDM login screen.</p>
         <pre><code><span class="p">./scripts/build-deb.sh
-sudo apt install ./dist/ooze_0.1.0_amd64.deb</span></code></pre>
+sudo apt install ./dist/ooze_*_amd64.deb</span></code></pre>
       </div>
     </div>
   </section>
 </main>
 
 <footer>
-  <p>Ooze — built on <a href="https://gitlab.gnome.org/GNOME/mutter">Mutter</a> · <a href="https://github.com/Zadagast/ooze">Source on GitHub</a></p>
+  <p>Ooze — built on <a href="https://gitlab.gnome.org/GNOME/mutter">Mutter</a> · <a href="https://github.com/Zadagast/ooze">Source on GitHub</a> · <a href="https://github.com/Zadagast/ooze/releases">Releases</a></p>
 </footer>
 
 <script>
