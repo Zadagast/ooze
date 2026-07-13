@@ -287,8 +287,8 @@
       one visual system.
     </p>
     <div class="cta">
-      <a class="btn" href="https://github.com/Zadagast/ooze/releases">Download AppImage</a>
-      <a class="btn alt" href="https://github.com/Zadagast/ooze#build">Build from source</a>
+      <a class="btn" href="https://github.com/Zadagast/ooze/releases/download/v0.3.0/Ooze-v0.3.0-x86_64.AppImage">Download AppImage</a>
+      <a class="btn alt" href="https://github.com/Zadagast/ooze/releases/download/v0.3.0/ooze_0.3.0_amd64.deb">Download .deb</a>
     </div>
 
     <div class="frame">
@@ -310,7 +310,7 @@
       <div class="card">
         <span class="chip">Shell</span>
         <h3>Global menu bar</h3>
-        <p>App menus from native GTK4 and classic GTK3 / Xwayland apps, with shell File / Edit / View / Go / Window / Help menus.</p>
+        <p>Native GTK4 app menus in the panel; foreign apps keep in-window menus for stability. Shell File / Edit / View / Go / Window / Help menus stay available.</p>
       </div>
       <div class="card">
         <span class="chip">Shell</span>
@@ -441,8 +441,8 @@
         <h3>1 · Try it — AppImage</h3>
         <p>Single file, nested session. Host Mutter 18 required.</p>
         <pre><code><span class="c"># download from GitHub Releases, then:</span>
-<span class="p">chmod +x Ooze-*-x86_64.AppImage
-./Ooze-*-x86_64.AppImage</span></code></pre>
+<span class="p">chmod +x Ooze-v0.3.0-x86_64.AppImage
+./Ooze-v0.3.0-x86_64.AppImage</span></code></pre>
       </div>
       <div class="step">
         <h3>2 · Build from source</h3>
@@ -458,10 +458,11 @@ ninja -C build
 ./run-devkit.sh</span></code></pre>
       </div>
       <div class="step">
-        <h3>3 · Install — native session</h3>
-        <p>Build a .deb, install it, then pick “Ooze” at the GDM login screen.</p>
-        <pre><code><span class="p">./scripts/build-deb.sh
-sudo apt install ./dist/ooze_*_amd64.deb</span></code></pre>
+        <h3>3 · Install — native session (.deb)</h3>
+        <p>Download the release package, install it, then pick “Ooze” at the GDM login screen.</p>
+        <pre><code><span class="p"># or build locally: ./scripts/build-deb.sh
+sudo apt install ./ooze_0.3.0_amd64.deb</span></code></pre>
+        <p><a href="https://github.com/Zadagast/ooze/releases/download/v0.3.0/ooze_0.3.0_amd64.deb">Download ooze_0.3.0_amd64.deb</a></p>
       </div>
     </div>
   </section>

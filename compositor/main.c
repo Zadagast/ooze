@@ -194,9 +194,9 @@ main (int argc, char **argv)
   ooze_appmenu_ensure_registrar ();
   /* ShellShowsMenubar waits until plugin start — nest Xwayland, not host :0. */
 
-  if (!ooze_appmenu_module_available ())
+  if (ooze_appmenu_foreign_enabled () && !ooze_appmenu_module_available ())
     g_warning ("Ooze: appmenu-gtk-module missing; run scripts/install-appmenu.sh "
-               "for Inkscape / GTK3 global menus");
+               "for Inkscape / GTK3 global menus (OOZE_FOREIGN_GLOBAL_MENU=1)");
 
   context = meta_init (&argc, &argv);
   if (!context)

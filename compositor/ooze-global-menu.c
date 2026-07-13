@@ -1,6 +1,7 @@
 #include "ooze-global-menu.h"
 #include "ooze-shared-appmenu.h"
 #include "ooze-dbusmenu.h"
+#include "ooze-stall.h"
 
 #include <clutter/clutter.h>
 #include <meta/display.h>
@@ -291,6 +292,7 @@ ooze_global_menu_query_appmenu_registrar_xid (OozeGlobalMenu *menu,
 {
   g_autoptr (GError) error = NULL;
   g_autoptr (GVariant) reply = NULL;
+  g_autoptr (OozeStallScope) stall = NULL;
 
   *bus_out = NULL;
   *menubar_out = NULL;
@@ -298,6 +300,7 @@ ooze_global_menu_query_appmenu_registrar_xid (OozeGlobalMenu *menu,
   if (xid == 0 || !menu->session)
     return FALSE;
 
+  stall = ooze_stall_begin ("appmenu-GetMenuForWindow");
   reply = g_dbus_connection_call_sync (menu->session,
                                        "com.canonical.AppMenu.Registrar",
                                        "/com/canonical/AppMenu/Registrar",
@@ -439,6 +442,8 @@ static void
 ooze_global_menu_schedule_registrar_retry (OozeGlobalMenu *menu,
                                          MetaWindow   *window)
 {
+  if (!ooze_appmenu_foreign_enabled ())
+    return;
   if (!menu || !window)
     return;
   if (meta_window_get_client_type (window) != META_WINDOW_CLIENT_TYPE_X11)
@@ -799,24 +804,29 @@ ooze_global_menu_handle_wayland_classic (OozeGlobalMenu *menu,
 
   ooze_global_menu_cancel_registrar_retry (menu);
   ooze_global_menu_clear_proxy (menu);
-  ooze_global_menu_set_x11_launch_hint (menu, "Needs X11 (Spot/Command)");
+  ooze_global_menu_set_x11_launch_hint (menu, NULL);
 
-  if (!warned_wayland_gtk3)
+  if (ooze_appmenu_foreign_enabled ())
     {
-      g_warning ("Ooze global menu: %s is Wayland-native; "
-                 "global menus need Xwayland — relaunch via Spot/Command "
-                 "so GDK_BACKEND=x11 is set",
-                 meta_window_get_wm_class (window)
-                   ? meta_window_get_wm_class (window) : "app");
-      warned_wayland_gtk3 = TRUE;
+      ooze_global_menu_set_x11_launch_hint (menu, "Needs X11 (Spot/Command)");
+      if (!warned_wayland_gtk3)
+        {
+          g_warning ("Ooze global menu: %s is Wayland-native; "
+                     "foreign global menus need Xwayland — relaunch via "
+                     "Spot/Command so GDK_BACKEND=x11 is set "
+                     "(or unset OOZE_FOREIGN_GLOBAL_MENU for in-window menus)",
+                     meta_window_get_wm_class (window)
+                       ? meta_window_get_wm_class (window) : "app");
+          warned_wayland_gtk3 = TRUE;
+        }
+      g_print ("Ooze global menu: Wayland classic GtkMenuBar focused "
+               "(wm_class=%s) — no registrar export; use Spot/Command\n",
+               meta_window_get_wm_class (window)
+                 ? meta_window_get_wm_class (window) : "?");
     }
 
-  g_print ("Ooze global menu: Wayland classic GtkMenuBar focused "
-           "(wm_class=%s) — no registrar export; use Spot/Command\n",
-           meta_window_get_wm_class (window)
-             ? meta_window_get_wm_class (window) : "?");
-
   ooze_global_menu_emit_changed (menu);
+  (void) window;
 }
 
 static void
@@ -859,7 +869,25 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
   ooze_global_menu_set_x11_launch_hint (menu, NULL);
 
   /*
-   * X11 / Xwayland + appmenu-gtk-module:
+   * Foreign X11 AppMenu (registrar / dbusmenu) is off by default — it does
+   * sync D-Bus on the compositor main thread and freezes the session.
+   * Wayland gtk-shell exports (Ooze apps) still bind below.
+   */
+  if (is_x11 && !ooze_appmenu_foreign_enabled ())
+    {
+      ooze_global_menu_cancel_registrar_retry (menu);
+      if (menu->menubar || menu->dbusmenu)
+        {
+          ooze_global_menu_clear_proxy (menu);
+          ooze_global_menu_emit_changed (menu);
+        }
+      else
+        menu->bound_window = NULL;
+      return;
+    }
+
+  /*
+   * X11 / Xwayland + appmenu-gtk-module (OOZE_FOREIGN_GLOBAL_MENU=1 only):
    * - Legacy exporters call AppMenu.Registrar (com.canonical.dbusmenu).
    * - Modern appmenu-gtk-module (Ubuntu 25.04+) exports org.gtk.Menus and sets
    *   _GTK_UNIQUE_BUS_NAME / _GTK_MENUBAR_OBJECT_PATH — same gtk-shell props
@@ -896,7 +924,8 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
       app_path = meta_window_get_gtk_application_object_path (window);
       win_path = meta_window_get_gtk_window_object_path (window);
 
-      if ((!bus || !*bus || !menubar || !*menubar) &&
+      if (ooze_appmenu_foreign_enabled () &&
+          (!bus || !*bus || !menubar || !*menubar) &&
           ooze_global_menu_query_appmenu_registrar (menu, window,
                                                   &registrar_bus,
                                                   &registrar_menubar))
@@ -918,7 +947,8 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
     {
       if (menu->bound_window == window && (menu->menubar || menu->dbusmenu))
         {
-          ooze_global_menu_schedule_registrar_retry (menu, window);
+          if (ooze_appmenu_foreign_enabled ())
+            ooze_global_menu_schedule_registrar_retry (menu, window);
           return;
         }
 
@@ -930,7 +960,8 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
       else
         menu->bound_window = NULL;
 
-      ooze_global_menu_schedule_registrar_retry (menu, window);
+      if (ooze_appmenu_foreign_enabled ())
+        ooze_global_menu_schedule_registrar_retry (menu, window);
       return;
     }
 
@@ -1017,12 +1048,14 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
   /* Registrar paths are dbusmenu; gtk-shell / modern appmenu paths are org.gtk.Menus. */
   if (registrar_bus && registrar_menubar)
     {
+      g_autoptr (OozeStallScope) stall = NULL;
       OozeDbusmenu *dm = ooze_dbusmenu_new (menu->session,
                                         menu->bus_name,
                                         menu->menubar_path);
       OozeDbusmenuItem *tops = NULL;
       gsize n_tops = 0;
 
+      stall = ooze_stall_begin ("appmenu-dbusmenu-GetLayout");
       if (dm && ooze_dbusmenu_get_top_items (dm, &tops, &n_tops) && n_tops > 0)
         {
           g_print ("Ooze global menu: dbusmenu bound (%s %s) tops=%u title=\"%s\"\n",

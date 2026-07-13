@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Provided by compositor/my-xsettings.c only. Spot/Command share this
+/* Provided by compositor/ooze-xsettings.c only. Spot/Command share this
  * file for launch env and must not own the nest XSETTINGS selection. */
 gboolean ooze_xsettings_ensure_shell_shows_menubar (const char *display_name)
   __attribute__ ((weak));
@@ -17,6 +17,20 @@ void ooze_xsettings_republish (void) __attribute__ ((weak));
 #define APPMENU_MODULE_NAME "appmenu-gtk-module"
 #define APPMENU_REGISTRAR_NAME "com.canonical.AppMenu.Registrar"
 #define APPMENU_REGISTRAR_PATH "/com/canonical/AppMenu/Registrar"
+
+gboolean
+ooze_appmenu_foreign_enabled (void)
+{
+  const char *v = g_getenv ("OOZE_FOREIGN_GLOBAL_MENU");
+
+  if (!v || !*v)
+    return FALSE;
+
+  return g_ascii_strcasecmp (v, "1") == 0 ||
+         g_ascii_strcasecmp (v, "true") == 0 ||
+         g_ascii_strcasecmp (v, "yes") == 0 ||
+         g_ascii_strcasecmp (v, "on") == 0;
+}
 
 static gboolean
 ooze_appmenu_module_on_disk (void)
@@ -79,6 +93,9 @@ ooze_appmenu_prepend_module (void)
 void
 ooze_appmenu_setup_environment (void)
 {
+  if (!ooze_appmenu_foreign_enabled ())
+    return;
+
   ooze_appmenu_prepend_module ();
 
   if (!g_getenv ("UBUNTU_MENUPROXY") || !*g_getenv ("UBUNTU_MENUPROXY"))
@@ -91,6 +108,9 @@ ooze_appmenu_launcher_set_modules (GSubprocessLauncher *launcher)
   const char *modules;
   const char *proxy;
 
+  if (!ooze_appmenu_foreign_enabled ())
+    return;
+
   modules = g_getenv ("GTK_MODULES");
   if (modules && *modules)
     g_subprocess_launcher_setenv (launcher, "GTK_MODULES", modules, TRUE);
@@ -100,10 +120,33 @@ ooze_appmenu_launcher_set_modules (GSubprocessLauncher *launcher)
     g_subprocess_launcher_setenv (launcher, "UBUNTU_MENUPROXY", proxy, TRUE);
 }
 
+static void
+ooze_appmenu_apply_foreign_theme_to_launcher (GSubprocessLauncher *launcher)
+{
+  g_autofree char *theme = NULL;
+
+  theme = ooze_foreign_gtk_theme_for_session ();
+  if (theme)
+    g_subprocess_launcher_setenv (launcher, "GTK_THEME", theme, TRUE);
+}
+
+static void
+ooze_appmenu_apply_foreign_theme_to_context (GAppLaunchContext *ctx)
+{
+  g_autofree char *theme = NULL;
+
+  theme = ooze_foreign_gtk_theme_for_session ();
+  if (theme)
+    g_app_launch_context_setenv (ctx, "GTK_THEME", theme);
+}
+
 void
 ooze_appmenu_apply_to_launcher (GSubprocessLauncher *launcher)
 {
   g_return_if_fail (launcher != NULL);
+
+  if (!ooze_appmenu_foreign_enabled ())
+    return;
 
   ooze_appmenu_setup_environment ();
   ooze_appmenu_launcher_set_modules (launcher);
@@ -122,39 +165,37 @@ ooze_appmenu_force_wayland_backend (GSubprocessLauncher *launcher)
 void
 ooze_appmenu_force_x11_backend (GSubprocessLauncher *launcher)
 {
-  g_autofree char *theme = NULL;
-
   g_return_if_fail (launcher != NULL);
   g_subprocess_launcher_setenv (launcher, "GDK_BACKEND", "x11", TRUE);
-  theme = ooze_foreign_gtk_theme_for_session ();
-  if (theme)
-    g_subprocess_launcher_setenv (launcher, "GTK_THEME", theme, TRUE);
+  ooze_appmenu_apply_foreign_theme_to_launcher (launcher);
 }
 
 void
 ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx)
 {
-  const char *modules;
-  const char *proxy;
-  g_autofree char *theme = NULL;
-
   g_return_if_fail (G_IS_APP_LAUNCH_CONTEXT (ctx));
+
+  if (!ooze_appmenu_foreign_enabled ())
+    {
+      /* In-window menus; WhiteSur via launch GTK_THEME only. */
+      ooze_appmenu_apply_foreign_theme_to_context (ctx);
+      return;
+    }
 
   ooze_appmenu_setup_environment ();
 
-  modules = g_getenv ("GTK_MODULES");
-  if (modules && *modules)
-    g_app_launch_context_setenv (ctx, "GTK_MODULES", modules);
+  {
+    const char *modules = g_getenv ("GTK_MODULES");
+    const char *proxy = g_getenv ("UBUNTU_MENUPROXY");
 
-  proxy = g_getenv ("UBUNTU_MENUPROXY");
-  if (proxy && *proxy)
-    g_app_launch_context_setenv (ctx, "UBUNTU_MENUPROXY", proxy);
+    if (modules && *modules)
+      g_app_launch_context_setenv (ctx, "GTK_MODULES", modules);
+    if (proxy && *proxy)
+      g_app_launch_context_setenv (ctx, "UBUNTU_MENUPROXY", proxy);
+  }
 
-  /* Classic GtkMenuBar exporters only speak AppMenu on X11. */
   g_app_launch_context_setenv (ctx, "GDK_BACKEND", "x11");
-  theme = ooze_foreign_gtk_theme_for_session ();
-  if (theme)
-    g_app_launch_context_setenv (ctx, "GTK_THEME", theme);
+  ooze_appmenu_apply_foreign_theme_to_context (ctx);
   ooze_appmenu_ensure_shell_shows_menubar ();
 }
 
@@ -162,6 +203,12 @@ void
 ooze_appmenu_apply_foreign_to_launcher (GSubprocessLauncher *launcher)
 {
   g_return_if_fail (launcher != NULL);
+
+  if (!ooze_appmenu_foreign_enabled ())
+    {
+      ooze_appmenu_apply_foreign_theme_to_launcher (launcher);
+      return;
+    }
 
   ooze_appmenu_apply_to_launcher (launcher);
   ooze_appmenu_force_x11_backend (launcher);
@@ -172,7 +219,7 @@ ooze_appmenu_prepare_ooze_launch_context (GAppLaunchContext *ctx)
 {
   g_return_if_fail (G_IS_APP_LAUNCH_CONTEXT (ctx));
 
-  ooze_appmenu_setup_environment ();
+  /* Native gtk_shell1 menus — no appmenu module. */
   g_app_launch_context_setenv (ctx, "GDK_BACKEND", "wayland");
   g_app_launch_context_unsetenv (ctx, "GTK_THEME");
 }
@@ -195,25 +242,29 @@ ooze_appmenu_prepare_launch_context_for_info (GAppLaunchContext *ctx,
 char **
 ooze_appmenu_environ_for_foreign (char **envp)
 {
-  const char *modules;
-  const char *proxy;
   g_autofree char *theme = NULL;
-
-  ooze_appmenu_setup_environment ();
-  modules = g_getenv ("GTK_MODULES");
-  proxy = g_getenv ("UBUNTU_MENUPROXY");
 
   if (!envp)
     envp = g_get_environ ();
 
-  if (modules && *modules)
-    envp = g_environ_setenv (envp, "GTK_MODULES", modules, TRUE);
-  if (proxy && *proxy)
-    envp = g_environ_setenv (envp, "UBUNTU_MENUPROXY", proxy, TRUE);
-  envp = g_environ_setenv (envp, "GDK_BACKEND", "x11", TRUE);
   theme = ooze_foreign_gtk_theme_for_session ();
   if (theme)
     envp = g_environ_setenv (envp, "GTK_THEME", theme, TRUE);
+
+  if (!ooze_appmenu_foreign_enabled ())
+    return envp;
+
+  ooze_appmenu_setup_environment ();
+  {
+    const char *modules = g_getenv ("GTK_MODULES");
+    const char *proxy = g_getenv ("UBUNTU_MENUPROXY");
+
+    if (modules && *modules)
+      envp = g_environ_setenv (envp, "GTK_MODULES", modules, TRUE);
+    if (proxy && *proxy)
+      envp = g_environ_setenv (envp, "UBUNTU_MENUPROXY", proxy, TRUE);
+  }
+  envp = g_environ_setenv (envp, "GDK_BACKEND", "x11", TRUE);
   ooze_appmenu_ensure_shell_shows_menubar ();
   return envp;
 }
@@ -226,6 +277,9 @@ ooze_appmenu_ensure_registrar (void)
   g_autoptr (GVariant) owner = NULL;
   g_autoptr (GVariant) started = NULL;
   guint32 result = 0;
+
+  if (!ooze_appmenu_foreign_enabled ())
+    return;
 
   session = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, &error);
   if (!session)
@@ -249,8 +303,6 @@ ooze_appmenu_ensure_registrar (void)
   if (owner)
     return;
 
-  /* Prefer D-Bus activation (one instance) over spawning by hand — a
-   * second appmenu-registrar fails with org.valapanel.AppMenu.Registrar. */
   error = NULL;
   started = g_dbus_connection_call_sync (session,
                                          "org.freedesktop.DBus",
@@ -268,7 +320,7 @@ ooze_appmenu_ensure_registrar (void)
   if (started)
     {
       g_variant_get (started, "(u)", &result);
-      if (result == 1 || result == 2) /* started or already running */
+      if (result == 1 || result == 2)
         {
           g_print ("Ooze appmenu: AppMenu registrar active (D-Bus)\n");
           return;
@@ -291,6 +343,12 @@ ooze_appmenu_try_start_xsettingsd (gpointer user_data G_GNUC_UNUSED)
   static guint retries;
   const char *display;
 
+  if (!ooze_appmenu_foreign_enabled ())
+    {
+      xsettingsd_retry_id = 0;
+      return G_SOURCE_REMOVE;
+    }
+
   display = xsettings_target_display;
   if (!display || !*display)
     display = g_getenv ("DISPLAY");
@@ -305,18 +363,12 @@ ooze_appmenu_try_start_xsettingsd (gpointer user_data G_GNUC_UNUSED)
 
   if (g_strcmp0 (xsettings_started_display, display) == 0)
     {
-      /* Refresh so Inkscape started mid-session still sees ShellShowsMenubar. */
       if (ooze_xsettings_republish != NULL)
         ooze_xsettings_republish ();
       xsettingsd_retry_id = 0;
       return G_SOURCE_REMOVE;
     }
 
-  /*
-   * Prefer the built-in nest XSETTINGS manager when linked into the compositor.
-   * Spot/Command/Eye must NOT start system xsettingsd — that steals
-   * _XSETTINGS_S0 from the nest and drops WhiteSur ThemeName.
-   */
   if (ooze_xsettings_ensure_shell_shows_menubar != NULL)
     {
       if (ooze_xsettings_ensure_shell_shows_menubar (display))
@@ -349,6 +401,9 @@ ooze_appmenu_try_start_xsettingsd (gpointer user_data G_GNUC_UNUSED)
 void
 ooze_appmenu_ensure_shell_shows_menubar_on_display (const char *display_name)
 {
+  if (!ooze_appmenu_foreign_enabled ())
+    return;
+
   if (display_name && *display_name)
     {
       g_free (xsettings_target_display);

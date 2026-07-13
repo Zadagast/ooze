@@ -39,8 +39,10 @@ Shell and apps use one design language: aluminum surfaces, subtle pinstripes, cu
 ### Desktop shell
 - Mutter-based Wayland compositor (`compositor/`)
 - Global menu bar with appearance toggle and shell File / Edit / View / Go / Window / Help menus
-- App menus from native GTK4 (`gtk_shell1`) and GTK3 / Xwayland via **appmenu-gtk-module** + dbusmenu
-- Built-in XSETTINGS (menubar / appmenu / left-side decoration layout) when system `xsettingsd` is absent
+- App menus from native GTK4 (`gtk_shell1`). Classic GTK3 / Xwayland AppMenu
+  (`appmenu-gtk-module` + dbusmenu) is **off by default** — it stalled the
+  compositor on focus; set `OOZE_FOREIGN_GLOBAL_MENU=1` only to debug.
+- Built-in XSETTINGS (theme / decoration layout; ShellShowsMenubar only when foreign AppMenu is on) when system `xsettingsd` is absent
 - Floating dock with Spot, Command, and other Ooze apps
 - Running-app indicators with focus / minimize on dock click
 - Magic-lamp minimize animation into the dock
@@ -86,11 +88,11 @@ Ooze’s panel, dock, and desktop icons run **inside** the Mutter compositor (sa
 
 | What happened | What it means |
 |---------------|---------------|
-| Session feels frozen; clicks work but folders/apps don’t open | Usually a **main-thread stall** in the compositor (heavy sync work on Light↔Dark or icon rebuild) |
+| Session feels frozen; clicks work but folders/apps don’t open | Usually a **main-thread stall** in the compositor (sync work on theme, icons, or — historically — foreign AppMenu/dbusmenu) |
 | Themes / Spot window disappears with `Bail out!` | **Client abort** — one app died; the session should keep running |
 | Entire nest dies / back to GDM | **Compositor death** — on Wayland there is no live respawn without losing apps |
 
-What we promise today: don’t freeze the compositor on appearance toggle; don’t take the session down for first-party UI bugs; foreign WhiteSur is launch/XSETTINGS only. We do **not** promise “restart Ooze without losing open windows” on Wayland.
+What we promise today: don’t freeze the compositor on appearance toggle; don’t take the session down for first-party UI bugs; foreign WhiteSur is launch/XSETTINGS only; foreign global menus stay off unless `OOZE_FOREIGN_GLOBAL_MENU=1`. We do **not** promise “restart Ooze without losing open windows” on Wayland.
 
 When reporting freezes, include log lines around `OozeStall:`, `OozeDock:`, theme toggle, and Themes.
 
@@ -131,7 +133,8 @@ Spot's Miller columns — drill through folders with scrollable panes:
 - `mutter-dev-bin` (provides `/usr/libexec/mutter-devkit`, required by `./run-devkit.sh`)
 - PipeWire running on the session bus (the devkit window cannot start without it)
 - `fonts-noto-color-emoji` (Unicode 16) — the Ooze menu button glyph 🫟 renders as a blank box without it
-- Optional: `appmenu-gtk3-module`, `appmenu-registrar` (GTK3 global menus) — `./scripts/install-appmenu.sh`
+- Optional: `appmenu-gtk3-module`, `appmenu-registrar` — only if debugging foreign
+  global menus with `OOZE_FOREIGN_GLOBAL_MENU=1` (`./scripts/install-appmenu.sh`)
 - Optional: WhiteSur GTK theme (foreign-app traffic lights) — `./scripts/install-whitesur-theme.sh`
 
 ```bash
@@ -186,7 +189,7 @@ Build a single-file nested demo (binaries + icons; **host Mutter 18** still requ
 Or let **GitHub Actions** build it in an Ubuntu 26.04 container:
 
 - **Manual:** Actions → **AppImage** → Run workflow (downloads as a workflow artifact)
-- **Release:** `git push origin v0.2.2` — CI builds and attaches the AppImage to that GitHub Release
+- **Release:** `git push origin v0.3.0` — CI builds and attaches the AppImage to that GitHub Release
 
 The AppImage puts the compositor (`ooze`) plus Spot, Command, King, Ear, Pak, Themes, Eye, Monitor, and About on `PATH` inside the nested session. It does not replace your login desktop.
 
@@ -196,7 +199,7 @@ Build a system package that installs under `/usr`:
 
 ```bash
 ./scripts/build-deb.sh
-sudo apt install ./dist/ooze_0.2.2_amd64.deb
+sudo apt install ./dist/ooze_0.3.0_amd64.deb
 ```
 
 **Native login (Wayland):** log out, and at GDM pick **Ooze**. That runs `ooze-wayland-session` → `ooze --wayland` on real displays (no `--devkit`). Xwayland stays enabled unless you set `OOZE_NO_X11=1`.
