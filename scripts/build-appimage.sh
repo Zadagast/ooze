@@ -21,7 +21,7 @@ TOOLS_DIR="${TOOLS_DIR:-$ROOT/packaging/appimage/tools}"
 VERSION="${VERSION:-$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo 0.1.0)}"
 OUTPUT="${OUTPUT:-$DIST_DIR/Ooze-${VERSION}-${ARCH}.AppImage}"
 
-BINARIES=(my-desktop spot ooze-command ooze-king ooze-ear ooze-pak)
+BINARIES=(ooze spot ooze-command ooze-king ooze-ear ooze-pak)
 
 echo "==> Building Ooze"
 if [[ ! -f "$BUILD_DIR/build.ninja" ]]; then
@@ -31,7 +31,7 @@ ninja -C "$BUILD_DIR"
 
 if [[ ! -f "$ROOT/data/icons/elementary/index.theme" ]]; then
   echo "==> Fetching elementary icons"
-  ninja -C "$BUILD_DIR" elementary-icons
+  ninja -C "$BUILD_DIR" elementary-icons.stamp
 fi
 
 for bin in "${BINARIES[@]}"; do
@@ -50,7 +50,7 @@ mkdir -p \
   "$APPDIR/usr/share/icons/hicolor/scalable/apps" \
   "$APPDIR/usr/share/metainfo"
 
-install -m755 "$BUILD_DIR"/my-desktop \
+install -m755 "$BUILD_DIR"/ooze \
   "$BUILD_DIR"/spot \
   "$BUILD_DIR"/ooze-command \
   "$BUILD_DIR"/ooze-king \
