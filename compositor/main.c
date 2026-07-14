@@ -174,6 +174,7 @@ main (int argc, char **argv)
    * get WhiteSur only via launch helpers / XSETTINGS — not this process.
    */
   g_unsetenv ("GTK_THEME");
+  ooze_appmenu_strip_modules ();
 
   ooze_stall_init ();
 

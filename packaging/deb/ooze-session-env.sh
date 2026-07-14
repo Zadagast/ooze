@@ -30,7 +30,28 @@ ooze_export_foreign_gtk_theme () {
 ooze_export_appmenu_modules () {
   case "${OOZE_FOREIGN_GLOBAL_MENU:-}" in
     1|true|TRUE|yes|YES|on|ON) ;;
-    *) return 0 ;;
+    *)
+      local _modules="${GTK_MODULES:-}"
+      local _module
+      local -a _kept=()
+
+      IFS=: read -r -a _modules <<< "$_modules"
+      for _module in "${_modules[@]}"; do
+        case "$_module" in
+          ""|appmenu-gtk-module|appmenu-gtk3-module|unity-gtk-module|unity-gtk3-module)
+            ;;
+          *) _kept+=("$_module") ;;
+        esac
+      done
+
+      if ((${#_kept[@]})); then
+        local IFS=:
+        export GTK_MODULES="${_kept[*]}"
+      else
+        unset GTK_MODULES
+      fi
+      return 0
+      ;;
   esac
   if [[ -n "${GTK_MODULES:-}" ]]; then
     case ":$GTK_MODULES:" in
