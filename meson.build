@@ -176,7 +176,6 @@ install_data('data/xdg-desktop-portal/ooze-portals.conf',
 install_data(
   [
     'data/xdg-desktop-portal/portals/ooze-gtk.portal',
-    'data/xdg-desktop-portal/portals/ooze-gnome.portal',
     'data/xdg-desktop-portal/portals/ooze-gnome-keyring.portal',
   ],
   install_dir: get_option('datadir') / 'xdg-desktop-portal' / 'portals',
