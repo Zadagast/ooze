@@ -39,7 +39,8 @@ jobs:
             ca-certificates \
             curl \
             git \
-            python3
+            python3 \
+            sudo
 
       - name: Checkout
         uses: actions/checkout@v4
