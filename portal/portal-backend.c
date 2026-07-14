@@ -84,6 +84,18 @@ typedef struct
   GtkWidget *list;
 } Picker;
 
+void
+ooze_portal_backend_ensure_gtk (void)
+{
+  static gsize initialized;
+
+  if (g_once_init_enter (&initialized))
+    {
+      gtk_init ();
+      g_once_init_leave (&initialized, 1);
+    }
+}
+
 static void request_free (PortalRequest *request);
 static void session_free (PortalSession *session);
 static void start_mutter (PortalRequest *request, PortalSession *session);
@@ -456,6 +468,7 @@ show_picker (PortalRequest *request,
   GtkWidget *cancel;
   guint i;
 
+  ooze_portal_backend_ensure_gtk ();
   if (!ooze_display_config_load (&config, &error))
     {
       complete_request_method (request, RESPONSE_FAILED, empty_results ());

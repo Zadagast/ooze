@@ -1,7 +1,5 @@
 #include "portal-backend.h"
 
-#include <gtk/gtk.h>
-
 static void
 on_bus_acquired (GDBusConnection *connection,
                  const char      *name,
@@ -18,7 +16,6 @@ main (int argc, char **argv)
   guint owner_id;
   GMainLoop *loop;
 
-  gtk_init ();
   owner_id = g_bus_own_name (G_BUS_TYPE_SESSION,
                              "org.freedesktop.impl.portal.desktop.ooze",
                              G_BUS_NAME_OWNER_FLAGS_NONE,

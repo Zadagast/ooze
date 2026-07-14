@@ -1,3 +1,4 @@
 [D-BUS Service]
 Name=org.freedesktop.impl.portal.desktop.ooze
 Exec=@libexecdir@/ooze-portal
+SystemdService=xdg-desktop-portal-ooze.service
