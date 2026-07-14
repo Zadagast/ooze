@@ -18,6 +18,15 @@ void ooze_xsettings_republish (void) __attribute__ ((weak));
 #define APPMENU_REGISTRAR_NAME "com.canonical.AppMenu.Registrar"
 #define APPMENU_REGISTRAR_PATH "/com/canonical/AppMenu/Registrar"
 
+static gboolean
+ooze_appmenu_module_is_managed (const char *module)
+{
+  return g_strcmp0 (module, "appmenu-gtk-module") == 0 ||
+         g_strcmp0 (module, "appmenu-gtk3-module") == 0 ||
+         g_strcmp0 (module, "unity-gtk-module") == 0 ||
+         g_strcmp0 (module, "unity-gtk3-module") == 0;
+}
+
 gboolean
 ooze_appmenu_foreign_enabled (void)
 {
@@ -74,9 +83,7 @@ ooze_appmenu_prepend_module (void)
 
       for (i = 0; parts && parts[i]; i++)
         {
-          if (g_strcmp0 (parts[i], APPMENU_MODULE_NAME) == 0 ||
-              g_strcmp0 (parts[i], "appmenu-gtk3-module") == 0 ||
-              g_strcmp0 (parts[i], "unity-gtk-module") == 0)
+          if (ooze_appmenu_module_is_managed (parts[i]))
             return;
         }
 
@@ -91,10 +98,52 @@ ooze_appmenu_prepend_module (void)
 }
 
 void
+ooze_appmenu_strip_modules (void)
+{
+  const char *existing;
+  g_autofree char *cleaned = NULL;
+  g_auto (GStrv) parts = NULL;
+  GString *result;
+  int i;
+
+  if (ooze_appmenu_foreign_enabled ())
+    return;
+
+  existing = g_getenv ("GTK_MODULES");
+  if (!existing || !*existing)
+    {
+      g_unsetenv ("GTK_MODULES");
+      return;
+    }
+
+  parts = g_strsplit (existing, ":", -1);
+  result = g_string_new (NULL);
+
+  for (i = 0; parts && parts[i]; i++)
+    {
+      if (!parts[i][0] || ooze_appmenu_module_is_managed (parts[i]))
+        continue;
+
+      if (result->len > 0)
+        g_string_append_c (result, ':');
+      g_string_append (result, parts[i]);
+    }
+
+  cleaned = g_string_free (result, FALSE);
+  if (cleaned[0] != '\0')
+    g_setenv ("GTK_MODULES", cleaned, TRUE);
+  else
+    g_unsetenv ("GTK_MODULES");
+}
+
+void
 ooze_appmenu_setup_environment (void)
 {
   if (!ooze_appmenu_foreign_enabled ())
-    return;
+    {
+      ooze_appmenu_strip_modules ();
+      return;
+    }
 
   ooze_appmenu_prepend_module ();
 

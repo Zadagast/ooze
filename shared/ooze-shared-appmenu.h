@@ -21,6 +21,9 @@ gboolean ooze_appmenu_foreign_enabled (void);
 /* Set GTK_MODULES / UBUNTU_MENUPROXY when foreign global menus are enabled. */
 void ooze_appmenu_setup_environment (void);
 
+/* Remove inherited AppMenu modules when foreign global menus are disabled. */
+void ooze_appmenu_strip_modules (void);
+
 /* Forward module/proxy env to a dock / compositor-spawned subprocess. */
 void ooze_appmenu_apply_to_launcher (GSubprocessLauncher *launcher);
 
