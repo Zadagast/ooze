@@ -15,6 +15,7 @@ struct _OozeThemesPane
   GtkWidget *cursors;
   GtkWidget *cursor_size;
   GtkWidget *foreign_gtk;
+  gulong color_scheme_handler;
   gboolean filling;
 };
 
@@ -146,6 +147,24 @@ on_appearance_changed (GtkDropDown    *drop_down,
 }
 
 static void
+on_external_color_scheme_changed (GSettings      *settings,
+                                  const char     *key G_GNUC_UNUSED,
+                                  OozeThemesPane *self)
+{
+  g_autofree char *scheme = NULL;
+  gboolean prev_filling;
+
+  scheme = g_settings_get_string (settings, "color-scheme");
+
+  /* Reflect the external change without echoing it back to GSettings. */
+  prev_filling = self->filling;
+  self->filling = TRUE;
+  gtk_drop_down_set_selected (GTK_DROP_DOWN (self->appearance),
+                              g_strcmp0 (scheme, "prefer-dark") == 0 ? 1 : 0);
+  self->filling = prev_filling;
+}
+
+static void
 on_icons_changed (GtkDropDown    *drop_down,
                   GParamSpec     *pspec G_GNUC_UNUSED,
                   OozeThemesPane *self)
@@ -207,6 +226,12 @@ ooze_themes_pane_dispose (GObject *object)
 {
   OozeThemesPane *self = OOZE_THEMES_PANE (object);
 
+  if (self->color_scheme_handler)
+    {
+      g_signal_handler_disconnect (self->interface_settings,
+                                   self->color_scheme_handler);
+      self->color_scheme_handler = 0;
+    }
   g_clear_object (&self->interface_settings);
   G_OBJECT_CLASS (ooze_themes_pane_parent_class)->dispose (object);
 }
@@ -260,6 +285,11 @@ ooze_themes_pane_init (OozeThemesPane *self)
   scheme = g_settings_get_string (self->interface_settings, "color-scheme");
   gtk_drop_down_set_selected (GTK_DROP_DOWN (self->appearance),
                               g_strcmp0 (scheme, "prefer-dark") == 0 ? 1 : 0);
+  self->color_scheme_handler =
+    g_signal_connect (self->interface_settings,
+                      "changed::color-scheme",
+                      G_CALLBACK (on_external_color_scheme_changed),
+                      self);
   gtk_box_append (GTK_BOX (box), make_row ("Appearance", self->appearance));
 
   /* Create empty dropdowns first, then attach models (Monitor pattern). */
