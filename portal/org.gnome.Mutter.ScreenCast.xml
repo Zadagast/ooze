@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<node>
+  <interface name="org.gnome.Mutter.ScreenCast">
+    <method name="CreateSession">
+      <arg name="properties" type="a{sv}" direction="in"/>
+      <arg name="session_path" type="o" direction="out"/>
+    </method>
+    <property name="Version" type="i" access="read"/>
+  </interface>
+  <interface name="org.gnome.Mutter.ScreenCast.Session">
+    <method name="Start"/>
+    <method name="Stop"/>
+    <signal name="Closed"/>
+    <method name="RecordMonitor">
+      <arg name="connector" type="s" direction="in"/>
+      <arg name="properties" type="a{sv}" direction="in"/>
+      <arg name="stream_path" type="o" direction="out"/>
+    </method>
+  </interface>
+  <interface name="org.gnome.Mutter.ScreenCast.Stream">
+    <signal name="PipeWireStreamAdded">
+      <arg name="node_id" type="u"/>
+    </signal>
+    <property name="Parameters" type="a{sv}" access="read"/>
+  </interface>
+</node>
