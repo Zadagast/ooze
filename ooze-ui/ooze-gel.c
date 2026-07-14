@@ -66,12 +66,15 @@ ooze_shadow_bin_snapshot (GtkWidget   *widget,
   gdouble width, height;
   gdouble radius;
   gdouble fx, fy, fw, fh;
+  gboolean dark;
   cairo_t *cr;
 
   width  = gtk_widget_get_width (widget);
   height = gtk_widget_get_height (widget);
   if (width <= 0 || height <= 0)
     return;
+
+  dark = adw_style_manager_get_dark (adw_style_manager_get_default ());
 
   radius = 7.0;
 
@@ -104,27 +107,38 @@ ooze_shadow_bin_snapshot (GtkWidget   *widget,
   /*
    * ── Window frame ───────────────────────────────────────────
    *
-   * Fill with opaque white so the window content has a solid
-   * background even when ooze-shell-frame's CSS background is
-   * transparent.  The title-bar, toolbar etc. paint on top of
-   * this via their own CSS backgrounds.
+   * Fill with the opaque window background so content has a solid
+   * base even when ooze-shell-frame's CSS background is transparent.
+   * The title-bar, toolbar etc. paint on top of this via their own
+   * CSS backgrounds.  Colors follow the session light/dark; the
+   * dark values match Adwaita's @window_bg_color so the Cairo frame
+   * and the child libadwaita/OozeKit surfaces stay consistent.
    *
    * The frame border is a two-layer stroke:
-   *   outer – dark ring for definition
+   *   outer – ring for definition against the wallpaper
    *   inner – subtle highlight for the classic Aqua gloss rim
    */
   ooze_rounded_rect_path (cr, fx, fy, fw, fh, radius);
-  cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
+  if (dark)
+    cairo_set_source_rgb (cr, 0.141, 0.141, 0.141);
+  else
+    cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
   cairo_fill_preserve (cr);
 
-  /* Outer border – dark gray frame edge */
-  cairo_set_source_rgba (cr, 0.33, 0.33, 0.38, 0.92);
+  /* Outer border – frame edge */
+  if (dark)
+    cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.55);
+  else
+    cairo_set_source_rgba (cr, 0.33, 0.33, 0.38, 0.92);
   cairo_set_line_width (cr, 1.8);
   cairo_stroke_preserve (cr);
 
-  /* Inner gloss rim – 1 px white highlight just inside the border */
+  /* Inner gloss rim – 1 px highlight just inside the border */
   ooze_rounded_rect_path (cr, fx + 1.5, fy + 1.5, fw - 3.0, fh - 3.0, radius - 1.0);
-  cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 0.60);
+  if (dark)
+    cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 0.08);
+  else
+    cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 0.60);
   cairo_set_line_width (cr, 1.0);
   cairo_stroke (cr);
 
@@ -162,10 +176,26 @@ ooze_shadow_bin_class_init (OozeShadowBinClass *klass)
 }
 
 static void
+ooze_shadow_bin_on_dark_changed (AdwStyleManager *manager G_GNUC_UNUSED,
+                                 GParamSpec      *pspec G_GNUC_UNUSED,
+                                 OozeShadowBin   *self)
+{
+  gtk_widget_queue_draw (GTK_WIDGET (self));
+}
+
+static void
 ooze_shadow_bin_init (OozeShadowBin *self)
 {
   gtk_orientable_set_orientation (GTK_ORIENTABLE (self), GTK_ORIENTATION_VERTICAL);
   gtk_widget_set_overflow (GTK_WIDGET (self), GTK_OVERFLOW_HIDDEN);
+
+  /* Repaint the frame when the session light/dark changes. Tied to the
+   * widget lifetime so it disconnects automatically on finalize. */
+  g_signal_connect_object (adw_style_manager_get_default (),
+                           "notify::dark",
+                           G_CALLBACK (ooze_shadow_bin_on_dark_changed),
+                           self,
+                           0);
 }
 
 static GtkWidget *
@@ -358,7 +388,7 @@ ooze_gel_ensure_css (void)
                                       * border: none – the Cairo stroke is the window border.
                                       */
                                      ".ooze-shell-frame {"
-                                     "  background: #ffffff;"
+                                     "  background: @window_bg_color;"
                                      "  border: none;"
                                      "}"
 
