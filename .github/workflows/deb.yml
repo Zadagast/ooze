@@ -1,0 +1,90 @@
+# Build the Ooze .deb inside Ubuntu 26.04 (Mutter 18).
+#
+# Trigger: MANUAL ONLY (Actions -> Deb -> Run workflow).
+#   Run it against a release tag (v*) to also attach the .deb to that
+#   GitHub Release. .deb releases are intentionally opt-in, not every tag.
+#
+# Stock GitHub runners are still 22.04/24.04; the job uses an Ubuntu 26.04
+# container so libmutter-18-dev is available.
+
+name: Deb
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    name: Build .deb (Ubuntu 26.04)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:26.04
+      env:
+        DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            git \
+            python3
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            meson \
+            ninja-build \
+            pkg-config \
+            libmutter-18-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libcairo2-dev \
+            libvte-2.91-gtk4-dev \
+            libgdk-pixbuf-2.0-dev \
+            libpng-dev \
+            libpipewire-0.3-dev \
+            librsvg2-bin \
+            x11-apps \
+            appstream \
+            desktop-file-utils \
+            file \
+            dpkg-dev \
+            sassc \
+            libglib2.0-dev \
+            libxml2-utils
+
+      - name: Build .deb
+        env:
+          TERM: xterm
+        run: |
+          chmod +x scripts/build-deb.sh
+          ./scripts/build-deb.sh
+          ls -lh dist/*.deb
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ooze-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+      - name: Attach .deb to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
