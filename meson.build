@@ -98,6 +98,7 @@ executable('ooze',
   'shared/ooze-dnd-bridge.c',
   'shared/ooze-icon-lookup.c',
   'shared/ooze-foreign-gtk.c',
+  'shared/ooze-color-scheme.c',
   'common/aqua-traffic.c',
   c_args: c_args,
   include_directories: [inc_common, inc_compositor, inc_shared],
@@ -228,6 +229,7 @@ ooze_shared_sources = [
   'shared/ooze-dnd-bridge.c',
   'shared/ooze-icon-lookup.c',
   'shared/ooze-foreign-gtk.c',
+  'shared/ooze-color-scheme.c',
 ]
 
 ooze_app_inc = [inc_shared]
