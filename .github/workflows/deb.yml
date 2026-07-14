@@ -1,8 +1,10 @@
 # Build the Ooze .deb inside Ubuntu 26.04 (Mutter 18).
 #
 # Trigger: MANUAL ONLY (Actions -> Deb -> Run workflow).
-#   Run it against a release tag (v*) to also attach the .deb to that
-#   GitHub Release. .deb releases are intentionally opt-in, not every tag.
+#   Set the "release_tag" input (e.g. v0.5.0) to also attach the built .deb
+#   to that existing GitHub Release; leave it blank to only upload a build
+#   artifact. Running from a tag ref attaches to that tag too. .deb releases
+#   are intentionally opt-in, not every tag.
 #
 # Stock GitHub runners are still 22.04/24.04; the job uses an Ubuntu 26.04
 # container so libmutter-18-dev is available.
@@ -11,6 +13,11 @@ name: Deb
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Attach the .deb to this existing Release tag (e.g. v0.5.0). Blank = artifact only."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -81,9 +88,10 @@ jobs:
           if-no-files-found: error
 
       - name: Attach .deb to GitHub Release
-        if: github.ref_type == 'tag'
+        if: ${{ inputs.release_tag != '' || github.ref_type == 'tag' }}
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}
           files: dist/*.deb
           fail_on_unmatched_files: true
         env:

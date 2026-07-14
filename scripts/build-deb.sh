@@ -12,7 +12,10 @@ BUILD_DIR="${BUILD_DIR:-$ROOT/build}"
 DIST_DIR="${DIST_DIR:-$ROOT/dist}"
 STAGE="${STAGE_DIR:-$DIST_DIR/ooze-deb-root}"
 ARCH="${ARCH:-amd64}"
-VERSION="${VERSION:-$(meson introspect --projectinfo "$BUILD_DIR" 2>/dev/null | sed -n 's/.*"version": "\([^"]*\)".*/\1/p' | head -1)}"
+# Prefer the configured build dir's version, but never let a missing/failed
+# introspect (e.g. no build dir yet) abort under `set -e`+`pipefail` — fall
+# through to the meson.build value below.
+VERSION="${VERSION:-$( { meson introspect --projectinfo "$BUILD_DIR" 2>/dev/null | sed -n 's/.*"version": "\([^"]*\)".*/\1/p' | head -1; } || true)}"
 if [[ -z "$VERSION" ]]; then
   VERSION="$(sed -n "s/.*version: '\\([^']*\\)'.*/\\1/p" meson.build | head -1)"
 fi
