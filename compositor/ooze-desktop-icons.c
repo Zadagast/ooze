@@ -23,6 +23,25 @@
 #define DESKTOP_DOUBLE_MS   400
 #define DESKTOP_SPRING_MS   700
 #define DESKTOP_DRAG_THRESHOLD 6
+#define DESKTOP_ENUM_BATCH 32
+
+typedef struct
+{
+  char *name;
+  char *display_name;
+  GFileType type;
+  gboolean hidden;
+} OozeDesktopEntry;
+
+typedef struct
+{
+  GWeakRef container_ref;
+  GFile *directory;
+  GFileEnumerator *enumerator;
+  GCancellable *cancellable;
+  GPtrArray *entries;
+  guint generation;
+} OozeDesktopEnumeration;
 
 typedef struct
 {
@@ -61,14 +80,25 @@ typedef struct
   GHashTable *layout; /* path -> graphene_point_t* */
   gulong dnd_enter_handler;
   guint rebuild_idle;
+  GCancellable *enumeration_cancellable;
+  guint enumeration_generation;
 } OozeDesktopIconData;
 
 #define DESKTOP_REBUILD_DEBOUNCE_MS 200
 
-static void ooze_desktop_icons_rebuild (OozeDesktopIconData *data);
+static void ooze_desktop_icons_rebuild_async (OozeDesktopIconData *data);
 static void ooze_desktop_icons_schedule_rebuild (OozeDesktopIconData *data);
 static void ooze_desktop_layout_save (OozeDesktopIconData *data);
 static gboolean ooze_desktop_spring_fire (gpointer user_data);
+static void ooze_desktop_enumerate_children_cb (GObject      *source,
+                                                GAsyncResult *result,
+                                                gpointer      user_data);
+static void ooze_desktop_enumerate_next_cb (GObject      *source,
+                                            GAsyncResult *result,
+                                            gpointer      user_data);
+static void ooze_desktop_enumeration_close_cb (GObject      *source,
+                                               GAsyncResult *result,
+                                               gpointer      user_data);
 static void on_desktop_changed (GFileMonitor     *monitor,
                                 GFile            *file,
                                 GFile            *other,
@@ -82,6 +112,31 @@ ooze_desktop_root_path (void)
   if (dir && *dir)
     return g_strdup (dir);
   return g_build_filename (g_get_home_dir (), "Desktop", NULL);
+}
+
+static void
+ooze_desktop_entry_free (gpointer user_data)
+{
+  OozeDesktopEntry *entry = user_data;
+
+  if (!entry)
+    return;
+  g_free (entry->name);
+  g_free (entry->display_name);
+  g_free (entry);
+}
+
+static void
+ooze_desktop_enumeration_free (OozeDesktopEnumeration *enumeration)
+{
+  if (!enumeration)
+    return;
+  g_weak_ref_clear (&enumeration->container_ref);
+  g_clear_object (&enumeration->directory);
+  g_clear_object (&enumeration->enumerator);
+  g_clear_object (&enumeration->cancellable);
+  g_clear_pointer (&enumeration->entries, g_ptr_array_unref);
+  g_free (enumeration);
 }
 
 static char *
@@ -447,6 +502,11 @@ ooze_desktop_icon_data_free (gpointer user_data)
     {
       g_source_remove (data->rebuild_idle);
       data->rebuild_idle = 0;
+    }
+  if (data->enumeration_cancellable)
+    {
+      g_cancellable_cancel (data->enumeration_cancellable);
+      g_clear_object (&data->enumeration_cancellable);
     }
   ooze_desktop_spring_cancel (data);
   ooze_desktop_dismiss_grab (data);
@@ -954,7 +1014,7 @@ ooze_desktop_icon_released (ClutterActor *actor,
   ooze_desktop_destroy_ghost (data);
   data->dragging = FALSE;
   g_clear_pointer (&data->drag_path, g_free);
-  ooze_desktop_icons_rebuild (data);
+  ooze_desktop_icons_rebuild_async (data);
   return CLUTTER_EVENT_STOP;
 }
 
@@ -1050,7 +1110,8 @@ ooze_desktop_place_at (ClutterActor *container,
 }
 
 static void
-ooze_desktop_icons_rebuild (OozeDesktopIconData *data)
+ooze_desktop_icons_apply (OozeDesktopIconData *data,
+                          GPtrArray            *entries)
 {
   g_autoptr (OozeStallScope) stall = NULL;
   static const char *hd_icons[] = { "drive-harddisk", NULL };
@@ -1058,14 +1119,13 @@ ooze_desktop_icons_rebuild (OozeDesktopIconData *data)
   static const char *folder_icons[] = { "folder", NULL };
   static const char *file_icons[] = { "text-x-generic", "application-x-generic", NULL };
   g_autofree char *view_path = NULL;
-  g_autoptr (GFile) view_dir = NULL;
-  g_autoptr (GFileEnumerator) enumerator = NULL;
   g_autofree char *home_label = NULL;
   gfloat right_x, right_y;
   gfloat auto_x, auto_y;
   ClutterActor *icon;
+  guint i;
 
-  if (!data || !data->container)
+  if (!data || !data->container || !entries)
     return;
 
   stall = ooze_stall_begin ("desktop-rebuild");
@@ -1090,75 +1150,217 @@ ooze_desktop_icons_rebuild (OozeDesktopIconData *data)
                                    0.22f, 0.48f, 0.92f);
   ooze_desktop_place_at (data->container, icon, right_x, right_y);
 
-  g_mkdir_with_parents (view_path, 0700);
-  view_dir = g_file_new_for_path (view_path);
-  enumerator = g_file_enumerate_children (view_dir,
-                                          G_FILE_ATTRIBUTE_STANDARD_NAME ","
-                                          G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME ","
-                                          G_FILE_ATTRIBUTE_STANDARD_TYPE ","
-                                          G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN,
-                                          G_FILE_QUERY_INFO_NONE, NULL, NULL);
-  if (enumerator)
+  for (i = 0; i < entries->len; i++)
     {
-      GFileInfo *info;
-      while ((info = g_file_enumerator_next_file (enumerator, NULL, NULL)) != NULL)
+      OozeDesktopEntry *entry = entries->pdata[i];
+      g_autofree char *child_path = NULL;
+      gboolean is_dir;
+      float x, y;
+
+      if (entry->hidden)
+        continue;
+
+      child_path = g_build_filename (view_path, entry->name, NULL);
+      if (data->drag_path && g_strcmp0 (child_path, data->drag_path) == 0)
+        continue;
+
+      is_dir = entry->type == G_FILE_TYPE_DIRECTORY;
+      icon = ooze_desktop_icon_create (data->ref_actor, data->display, data,
+                                       entry->display_name, child_path,
+                                       is_dir ? folder_icons : file_icons,
+                                       is_dir, FALSE,
+                                       is_dir ? 0.95f : 0.75f,
+                                       is_dir ? 0.80f : 0.75f,
+                                       is_dir ? 0.35f : 0.78f);
+
+      if (ooze_desktop_layout_get (data, child_path, &x, &y))
         {
-          g_autofree char *child_path = NULL;
-          const char *name;
-          gboolean is_dir;
-          float x, y;
-
-          if (g_file_info_get_is_hidden (info))
-            {
-              g_object_unref (info);
-              continue;
-            }
-
-          name = g_file_info_get_display_name (info);
-          child_path = g_build_filename (view_path, g_file_info_get_name (info), NULL);
-
-          if (data->drag_path && g_strcmp0 (child_path, data->drag_path) == 0)
-            {
-              g_object_unref (info);
-              continue;
-            }
-
-          is_dir = g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY;
-          icon = ooze_desktop_icon_create (data->ref_actor, data->display, data,
-                                           name, child_path,
-                                           is_dir ? folder_icons : file_icons,
-                                           is_dir, FALSE,
-                                           is_dir ? 0.95f : 0.75f,
-                                           is_dir ? 0.80f : 0.75f,
-                                           is_dir ? 0.35f : 0.78f);
-
-          if (ooze_desktop_layout_get (data, child_path, &x, &y))
-            {
-              ooze_desktop_snap_grid (&x, &y, data->width, data->height);
-            }
-          else
-            {
-              x = auto_x;
-              y = auto_y;
-              ooze_desktop_find_free_cell (data, &x, &y, child_path);
-              auto_y = y + DESKTOP_ICON_GAP;
-              if (auto_y + DESKTOP_ICON_SIZE + 24.0f >
-                  (gfloat) data->height - DESKTOP_ICON_MARGIN)
-                {
-                  auto_y = DESKTOP_TOP_INSET;
-                  auto_x += DESKTOP_ICON_GAP;
-                }
-            }
-
-          ooze_desktop_place_at (data->container, icon, x, y);
-          g_object_unref (info);
+          ooze_desktop_snap_grid (&x, &y, data->width, data->height);
         }
+      else
+        {
+          x = auto_x;
+          y = auto_y;
+          ooze_desktop_find_free_cell (data, &x, &y, child_path);
+          auto_y = y + DESKTOP_ICON_GAP;
+          if (auto_y + DESKTOP_ICON_SIZE + 24.0f >
+              (gfloat) data->height - DESKTOP_ICON_MARGIN)
+            {
+              auto_y = DESKTOP_TOP_INSET;
+              auto_x += DESKTOP_ICON_GAP;
+            }
+        }
+
+      ooze_desktop_place_at (data->container, icon, x, y);
     }
 
   if (data->drag_ghost)
     clutter_actor_set_child_above_sibling (data->container, data->drag_ghost, NULL);
 
   clutter_actor_set_size (data->container, (gfloat) data->width, (gfloat) data->height);
+}
+
+static void
+ooze_desktop_enumeration_finish (OozeDesktopEnumeration *enumeration)
+{
+  ClutterActor *container;
+  OozeDesktopIconData *data;
+
+  container = g_weak_ref_get (&enumeration->container_ref);
+  if (container)
+    {
+      data = g_object_get_data (G_OBJECT (container), "desktop-icon-data");
+      if (data &&
+          data->enumeration_generation == enumeration->generation &&
+          data->enumeration_cancellable == enumeration->cancellable)
+        {
+          g_clear_object (&data->enumeration_cancellable);
+          if (!g_cancellable_is_cancelled (enumeration->cancellable) &&
+              !data->dragging)
+            ooze_desktop_icons_apply (data, enumeration->entries);
+        }
+    }
+
+  g_clear_object (&container);
+  ooze_desktop_enumeration_free (enumeration);
+}
+
+static void
+ooze_desktop_enumeration_close (OozeDesktopEnumeration *enumeration)
+{
+  if (enumeration->enumerator &&
+      !g_file_enumerator_is_closed (enumeration->enumerator))
+    {
+      g_file_enumerator_close_async (enumeration->enumerator,
+                                     G_PRIORITY_DEFAULT,
+                                     enumeration->cancellable,
+                                     ooze_desktop_enumeration_close_cb,
+                                     enumeration);
+      return;
+    }
+
+  ooze_desktop_enumeration_finish (enumeration);
+}
+
+static void
+ooze_desktop_enumerate_next_cb (GObject      *source,
+                                GAsyncResult *result,
+                                gpointer      user_data)
+{
+  OozeDesktopEnumeration *enumeration = user_data;
+  g_autoptr (GError) error = NULL;
+  GList *infos;
+  GList *l;
+  gsize n_infos;
+
+  infos = g_file_enumerator_next_files_finish (G_FILE_ENUMERATOR (source),
+                                               result, &error);
+  if (error)
+    {
+      ooze_desktop_enumeration_close (enumeration);
+      return;
+    }
+
+  n_infos = g_list_length (infos);
+  for (l = infos; l != NULL; l = l->next)
+    {
+      GFileInfo *info = l->data;
+      OozeDesktopEntry *entry = g_new0 (OozeDesktopEntry, 1);
+
+      entry->name = g_strdup (g_file_info_get_name (info));
+      entry->display_name = g_strdup (g_file_info_get_display_name (info));
+      entry->type = g_file_info_get_file_type (info);
+      entry->hidden = g_file_info_get_is_hidden (info);
+      g_ptr_array_add (enumeration->entries, entry);
+    }
+  g_list_free_full (infos, g_object_unref);
+
+  if (n_infos < DESKTOP_ENUM_BATCH ||
+      g_file_enumerator_is_closed (enumeration->enumerator))
+    {
+      ooze_desktop_enumeration_close (enumeration);
+      return;
+    }
+
+  g_file_enumerator_next_files_async (enumeration->enumerator,
+                                      DESKTOP_ENUM_BATCH,
+                                      G_PRIORITY_DEFAULT,
+                                      enumeration->cancellable,
+                                      ooze_desktop_enumerate_next_cb,
+                                      enumeration);
+}
+
+static void
+ooze_desktop_enumerate_children_cb (GObject      *source,
+                                    GAsyncResult *result,
+                                    gpointer      user_data)
+{
+  OozeDesktopEnumeration *enumeration = user_data;
+  g_autoptr (GError) error = NULL;
+
+  enumeration->enumerator =
+    g_file_enumerate_children_finish (G_FILE (source), result, &error);
+  if (error)
+    {
+      ooze_desktop_enumeration_finish (enumeration);
+      return;
+    }
+
+  g_file_enumerator_next_files_async (enumeration->enumerator,
+                                      DESKTOP_ENUM_BATCH,
+                                      G_PRIORITY_DEFAULT,
+                                      enumeration->cancellable,
+                                      ooze_desktop_enumerate_next_cb,
+                                      enumeration);
+}
+
+static void
+ooze_desktop_enumeration_close_cb (GObject      *source,
+                                   GAsyncResult *result,
+                                   gpointer      user_data)
+{
+  OozeDesktopEnumeration *enumeration = user_data;
+
+  g_file_enumerator_close_finish (G_FILE_ENUMERATOR (source), result, NULL);
+  ooze_desktop_enumeration_finish (enumeration);
+}
+
+static void
+ooze_desktop_icons_rebuild_async (OozeDesktopIconData *data)
+{
+  OozeDesktopEnumeration *enumeration;
+  g_autofree char *view_path = NULL;
+
+  if (!data || !data->container || data->dragging)
+    return;
+
+  if (data->enumeration_cancellable)
+    {
+      g_cancellable_cancel (data->enumeration_cancellable);
+      g_clear_object (&data->enumeration_cancellable);
+    }
+
+  data->enumeration_generation++;
+  data->enumeration_cancellable = g_cancellable_new ();
+
+  enumeration = g_new0 (OozeDesktopEnumeration, 1);
+  g_weak_ref_init (&enumeration->container_ref, data->container);
+  enumeration->cancellable = g_object_ref (data->enumeration_cancellable);
+  enumeration->entries = g_ptr_array_new_with_free_func (ooze_desktop_entry_free);
+  enumeration->generation = data->enumeration_generation;
+
+  view_path = ooze_desktop_root_path ();
+  enumeration->directory = g_file_new_for_path (view_path);
+  g_file_enumerate_children_async (enumeration->directory,
+                                   G_FILE_ATTRIBUTE_STANDARD_NAME ","
+                                   G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME ","
+                                   G_FILE_ATTRIBUTE_STANDARD_TYPE ","
+                                   G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN,
+                                   G_FILE_QUERY_INFO_NONE,
+                                   G_PRIORITY_DEFAULT,
+                                   enumeration->cancellable,
+                                   ooze_desktop_enumerate_children_cb,
+                                   enumeration);
 }
 
 static gboolean
@@ -1169,7 +1371,7 @@ ooze_desktop_icons_rebuild_idle (gpointer user_data)
   data->rebuild_idle = 0;
   if (data->dragging)
     return G_SOURCE_REMOVE;
-  ooze_desktop_icons_rebuild (data);
+  ooze_desktop_icons_rebuild_async (data);
   return G_SOURCE_REMOVE;
 }
 
@@ -1317,6 +1519,6 @@ ooze_desktop_icons_create (MetaContext  *context,
         }
     }
 
-  ooze_desktop_icons_rebuild (data);
+  ooze_desktop_icons_rebuild_async (data);
   return container;
 }
