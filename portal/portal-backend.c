@@ -137,6 +137,7 @@ complete_dbus_request (PortalRequest *request,
                        guint          response,
                        GVariant      *results)
 {
+  g_message ("SC CreateSession response=%u", response);
   ooze_portal_screen_cast_complete_create_session (
     request->state->screen_cast, request->invocation, response, results);
   g_clear_object (&request->invocation);
@@ -148,6 +149,7 @@ complete_dbus_select_sources (PortalRequest *request,
                               guint          response,
                               GVariant      *results)
 {
+  g_message ("SC SelectSources response=%u", response);
   ooze_portal_screen_cast_complete_select_sources (
     request->state->screen_cast, request->invocation, response, results);
   g_clear_object (&request->invocation);
@@ -159,6 +161,7 @@ complete_dbus_start (PortalRequest *request,
                      guint          response,
                      GVariant      *results)
 {
+  g_message ("SC Start response=%u", response);
   ooze_portal_screen_cast_complete_start (
     request->state->screen_cast, request->invocation, response, results);
   g_clear_object (&request->invocation);
@@ -313,6 +316,7 @@ on_create_session (OozePortalScreenCast *object,
   PortalRequest *request;
   PortalSession *session;
 
+  g_message ("SC CreateSession app_id=%s", app_id ? app_id : "");
   request = request_new (state, handle, invocation, complete_dbus_request);
   session = session_new (state, session_handle);
   complete_create (request, RESPONSE_SUCCESS, session->path);
@@ -340,6 +344,7 @@ on_select_sources (OozePortalScreenCast *object,
 
   if (!session)
     {
+      g_warning ("SC SelectSources unknown-session");
       g_dbus_method_invocation_return_dbus_error (invocation,
                                                   "org.freedesktop.impl.portal.Error.NotFound",
                                                   "Unknown screen cast session");
@@ -351,14 +356,11 @@ on_select_sources (OozePortalScreenCast *object,
   g_variant_lookup (options, "cursor_mode", "u", &cursor_mode);
   session->multiple = multiple;
   session->cursor_mode = cursor_mode;
-  if ((types & SOURCE_MONITOR) == 0)
-    complete_request_method (request, RESPONSE_FAILED, empty_results ());
-  else
-    {
-      /* Source selection is intentionally performed by Start, after the
-       * frontend has completed SelectSources. */
-      complete_request_method (request, RESPONSE_SUCCESS, empty_results ());
-    }
+  g_message ("SC SelectSources types=%u multiple=%d cursor_mode=%u decision=accept-monitor",
+             types, multiple, cursor_mode);
+  /* Monitor capture is the only implemented source. Keep accepting requests
+   * with other type bits so the picker can offer the available monitor. */
+  complete_request_method (request, RESPONSE_SUCCESS, empty_results ());
   (void) object;
   (void) app_id;
   return TRUE;
@@ -393,12 +395,14 @@ picker_finish (Picker *picker,
           copy->name = g_strdup (source->name);
           g_ptr_array_add (session->monitors, copy);
         }
+      g_message ("SC picker accept monitors=%u", picker->selected->len);
       picker->window = NULL;
       gtk_window_destroy (window);
       start_mutter (request, session);
     }
   else
     {
+      g_message ("SC picker cancel");
       picker->window = NULL;
       gtk_window_destroy (window);
       complete_request_method (request, RESPONSE_CANCELLED, empty_results ());
@@ -446,6 +450,7 @@ on_picker_close (GtkWindow *window,
 
   if (picker->window)
     {
+      g_message ("SC picker cancel");
       picker->window = NULL;
       complete_request_method (picker->request, RESPONSE_CANCELLED, empty_results ());
       picker_free (picker);
@@ -468,9 +473,21 @@ show_picker (PortalRequest *request,
   GtkWidget *cancel;
   guint i;
 
+  g_message ("SC picker entered");
   ooze_portal_backend_ensure_gtk ();
   if (!ooze_display_config_load (&config, &error))
     {
+      g_warning ("SC picker DisplayConfig error=%s",
+                 error ? error->message : "unknown");
+      complete_request_method (request, RESPONSE_FAILED, empty_results ());
+      session->start_request = NULL;
+      return;
+    }
+  g_message ("SC picker monitors=%u", config->monitors->len);
+  if (config->monitors->len == 0)
+    {
+      g_warning ("SC picker no-monitors");
+      ooze_display_config_free (config);
       complete_request_method (request, RESPONSE_FAILED, empty_results ());
       session->start_request = NULL;
       return;
@@ -547,6 +564,7 @@ show_picker (PortalRequest *request,
   g_signal_connect (accept, "clicked", G_CALLBACK (on_picker_accept), picker);
   gtk_window_set_child (picker->window, root);
   gtk_window_present (picker->window);
+  g_message ("SC picker presented");
 }
 
 static void
@@ -595,6 +613,7 @@ on_stream_signal (GDBusProxy *proxy,
   if (g_strcmp0 (signal_name, "PipeWireStreamAdded") != 0)
     return;
   g_variant_get (parameters, "(u)", &node_id);
+  g_message ("SC PipeWireStreamAdded node_id=%u", node_id);
   stream_ready (session, proxy, node_id);
   (void) sender_name;
 }
@@ -612,6 +631,8 @@ start_mutter (PortalRequest *request,
   session->start_request = request;
   session->streams_ready = 0;
   g_variant_builder_init (&session->stream_builder, G_VARIANT_TYPE ("a(ua{sv})"));
+  g_message ("SC Mutter CreateSession begin monitors=%u",
+             session->monitors->len);
   g_variant_builder_init (&props, G_VARIANT_TYPE ("a{sv}"));
   reply = g_dbus_connection_call_sync (session->state->connection,
                                        MUTTER_BUS, MUTTER_PATH, MUTTER_IFACE,
@@ -622,11 +643,14 @@ start_mutter (PortalRequest *request,
                                        G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
   if (!reply)
     {
+      g_warning ("SC Mutter CreateSession error=%s",
+                 error ? error->message : "unknown");
       complete_request_method (request, RESPONSE_FAILED, empty_results ());
       session->start_request = NULL;
       return;
     }
   g_variant_get (reply, "(&o)", &path);
+  g_message ("SC Mutter CreateSession path=%s", path);
   session->mutter_session = g_dbus_proxy_new_sync (session->state->connection,
                                                     G_DBUS_PROXY_FLAGS_NONE,
                                                     NULL, MUTTER_BUS, path,
@@ -634,6 +658,8 @@ start_mutter (PortalRequest *request,
                                                     NULL, &error);
   if (!session->mutter_session)
     {
+      g_warning ("SC Mutter session proxy error=%s",
+                 error ? error->message : "unknown");
       session->start_request = NULL;
       complete_request_method (request, RESPONSE_FAILED, empty_results ());
       return;
@@ -657,11 +683,16 @@ start_mutter (PortalRequest *request,
                                              G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
       if (!record_reply)
         {
+          g_warning ("SC Mutter RecordMonitor connector=%s error=%s",
+                     monitor->connector,
+                     error ? error->message : "unknown");
           complete_request_method (request, RESPONSE_FAILED, empty_results ());
           session->start_request = NULL;
           return;
         }
       g_variant_get (record_reply, "(&o)", &stream_path);
+      g_message ("SC Mutter RecordMonitor connector=%s path=%s",
+                 monitor->connector, stream_path);
       stream = g_dbus_proxy_new_sync (session->state->connection,
                                       G_DBUS_PROXY_FLAGS_NONE, NULL, MUTTER_BUS,
                                       stream_path,
@@ -669,6 +700,9 @@ start_mutter (PortalRequest *request,
                                       NULL, &error);
       if (!stream)
         {
+          g_warning ("SC Mutter stream proxy connector=%s error=%s",
+                     monitor->connector,
+                     error ? error->message : "unknown");
           session->start_request = NULL;
           complete_request_method (request, RESPONSE_FAILED, empty_results ());
           return;
@@ -680,10 +714,13 @@ start_mutter (PortalRequest *request,
                                   G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
   if (!reply)
     {
+      g_warning ("SC Mutter Start error=%s",
+                 error ? error->message : "unknown");
       complete_request_method (request, RESPONSE_FAILED, empty_results ());
       session->start_request = NULL;
       return;
     }
+  g_message ("SC Mutter Start success");
   /* PipeWireStreamAdded is asynchronous. */
 }
 
@@ -701,8 +738,10 @@ on_start (OozePortalScreenCast *object,
   PortalSession *session = g_hash_table_lookup (state->sessions, session_handle);
   PortalRequest *request;
 
+  g_message ("SC Start app_id=%s", app_id ? app_id : "");
   if (!session)
     {
+      g_warning ("SC Start unknown-session");
       g_dbus_method_invocation_return_dbus_error (invocation,
                                                   "org.freedesktop.impl.portal.Error.NotFound",
                                                   "Unknown screen cast session");
