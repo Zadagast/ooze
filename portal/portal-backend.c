@@ -1,0 +1,733 @@
+#include "portal-backend.h"
+
+#include "portal-dbus-generated.h"
+#include "mutter-screencast-generated.h"
+#include "ooze-display-config.h"
+#include "ooze-button.h"
+#include "ooze-header-bar.h"
+#include "ooze-surface.h"
+
+#include <adwaita.h>
+#include <gtk/gtk.h>
+
+#define MUTTER_BUS "org.gnome.Mutter.ScreenCast"
+#define MUTTER_PATH "/org/gnome/Mutter/ScreenCast"
+#define MUTTER_IFACE "org.gnome.Mutter.ScreenCast"
+
+#define RESPONSE_SUCCESS 0
+#define RESPONSE_CANCELLED 1
+#define RESPONSE_FAILED 2
+#define SOURCE_MONITOR 1u
+#define CURSOR_HIDDEN 1u
+#define CURSOR_EMBEDDED 2u
+#define CURSOR_METADATA 4u
+
+typedef struct _PortalState PortalState;
+typedef struct _PortalSession PortalSession;
+typedef struct _PortalRequest PortalRequest;
+typedef void (*RequestCompleteFunc) (PortalRequest *, guint, GVariant *);
+
+typedef struct
+{
+  char *connector;
+  char *name;
+  int x;
+  int y;
+  int width;
+  int height;
+} PickerMonitor;
+
+struct _PortalRequest
+{
+  PortalState *state;
+  char *path;
+  guint registration_id;
+  OozePortalRequest *skeleton;
+  GDBusMethodInvocation *invocation;
+  RequestCompleteFunc complete;
+  gboolean closed;
+};
+
+struct _PortalSession
+{
+  PortalState *state;
+  char *path;
+  guint registration_id;
+  OozePortalSession *skeleton;
+  GPtrArray *monitors;
+  GPtrArray *streams;
+  PortalRequest *start_request;
+  GVariantBuilder stream_builder;
+  guint streams_ready;
+  GDBusProxy *mutter_session;
+  guint cursor_mode;
+  gboolean multiple;
+  gboolean closed;
+};
+
+struct _PortalState
+{
+  GDBusConnection *connection;
+  OozePortalScreenCast *screen_cast;
+  guint screen_cast_registration_id;
+  GHashTable *requests;
+  GHashTable *sessions;
+};
+
+typedef struct
+{
+  PortalRequest *request;
+  PortalSession *session;
+  GtkWindow *window;
+  GPtrArray *monitors;
+  GPtrArray *selected;
+  GtkWidget *list;
+} Picker;
+
+static void request_free (PortalRequest *request);
+static void session_free (PortalSession *session);
+static void start_mutter (PortalRequest *request, PortalSession *session);
+static GVariant *empty_results (void);
+
+static void
+picker_monitor_free (PickerMonitor *monitor)
+{
+  g_free (monitor->connector);
+  g_free (monitor->name);
+  g_free (monitor);
+}
+
+static void
+request_complete (PortalRequest *request)
+{
+  if (!request || request->closed)
+    return;
+
+  g_dbus_interface_skeleton_unexport (
+    G_DBUS_INTERFACE_SKELETON (request->skeleton));
+  request->registration_id = 0;
+  request->closed = TRUE;
+  g_hash_table_remove (request->state->requests, request->path);
+}
+
+static void
+complete_request_method (PortalRequest *request,
+                         guint          response,
+                         GVariant      *results)
+{
+  if (!request || request->closed)
+    return;
+  request->complete (request, response, results);
+}
+
+static void
+complete_dbus_request (PortalRequest *request,
+                       guint          response,
+                       GVariant      *results)
+{
+  ooze_portal_screen_cast_complete_create_session (
+    request->state->screen_cast, request->invocation, response, results);
+  g_clear_object (&request->invocation);
+  request_complete (request);
+}
+
+static void
+complete_dbus_select_sources (PortalRequest *request,
+                              guint          response,
+                              GVariant      *results)
+{
+  ooze_portal_screen_cast_complete_select_sources (
+    request->state->screen_cast, request->invocation, response, results);
+  g_clear_object (&request->invocation);
+  request_complete (request);
+}
+
+static void
+complete_dbus_start (PortalRequest *request,
+                     guint          response,
+                     GVariant      *results)
+{
+  ooze_portal_screen_cast_complete_start (
+    request->state->screen_cast, request->invocation, response, results);
+  g_clear_object (&request->invocation);
+  request_complete (request);
+}
+
+static gboolean
+on_request_close (OozePortalRequest *object,
+                  GDBusMethodInvocation                      *invocation,
+                  gpointer                                    user_data)
+{
+  PortalRequest *request = user_data;
+  GHashTableIter iter;
+  gpointer value;
+
+  g_hash_table_iter_init (&iter, request->state->sessions);
+  while (g_hash_table_iter_next (&iter, NULL, &value))
+    {
+      PortalSession *session = value;
+      if (session->start_request == request)
+        session->start_request = NULL;
+    }
+  if (request->invocation)
+    complete_request_method (request, RESPONSE_CANCELLED, empty_results ());
+  g_dbus_method_invocation_return_value (invocation, NULL);
+  (void) object;
+  return TRUE;
+}
+
+static void
+request_free (PortalRequest *request)
+{
+  if (!request)
+    return;
+  g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (request->skeleton));
+  g_clear_object (&request->skeleton);
+  g_clear_object (&request->invocation);
+  g_free (request->path);
+  g_free (request);
+}
+
+static PortalRequest *
+request_new (PortalState *state,
+             const char  *path,
+             GDBusMethodInvocation *invocation,
+             RequestCompleteFunc complete)
+{
+  PortalRequest *request = g_new0 (PortalRequest, 1);
+
+  request->state = state;
+  request->path = g_strdup (path);
+  request->invocation = g_object_ref (invocation);
+  request->complete = complete;
+  request->skeleton = ooze_portal_request_skeleton_new ();
+  g_signal_connect (request->skeleton, "handle-close",
+                    G_CALLBACK (on_request_close), request);
+  g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (request->skeleton),
+                                    state->connection, path, NULL);
+  g_hash_table_insert (state->requests, g_strdup (path), request);
+  return request;
+}
+
+static gboolean
+on_session_close (OozePortalSession *object,
+                  GDBusMethodInvocation                       *invocation,
+                  gpointer                                     user_data)
+{
+  PortalSession *session = user_data;
+  g_autoptr (GError) error = NULL;
+
+  if (session->mutter_session)
+    g_dbus_proxy_call_sync (session->mutter_session, "Stop", NULL,
+                            G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
+  session->closed = TRUE;
+  ooze_portal_session_emit_closed (session->skeleton);
+  g_dbus_method_invocation_return_value (invocation, NULL);
+  g_hash_table_remove (session->state->sessions, session->path);
+  (void) object;
+  return TRUE;
+}
+
+static void
+session_free (PortalSession *session)
+{
+  if (!session)
+    return;
+  if (session->mutter_session)
+    {
+      g_autoptr (GError) error = NULL;
+      g_dbus_proxy_call_sync (session->mutter_session, "Stop", NULL,
+                              G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
+    }
+  g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (session->skeleton));
+  g_clear_object (&session->mutter_session);
+  g_clear_object (&session->skeleton);
+  g_clear_pointer (&session->monitors, g_ptr_array_unref);
+  g_clear_pointer (&session->streams, g_ptr_array_unref);
+  g_free (session->path);
+  g_free (session);
+}
+
+static PortalSession *
+session_new (PortalState *state,
+             const char  *path)
+{
+  PortalSession *session = g_new0 (PortalSession, 1);
+
+  session->state = state;
+  session->path = g_strdup (path);
+  session->monitors = g_ptr_array_new_with_free_func ((GDestroyNotify) picker_monitor_free);
+  session->streams = g_ptr_array_new_with_free_func (g_object_unref);
+  session->skeleton = ooze_portal_session_skeleton_new ();
+  ooze_portal_session_set_version (session->skeleton, 1);
+  g_signal_connect (session->skeleton, "handle-close",
+                    G_CALLBACK (on_session_close), session);
+  g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (session->skeleton),
+                                    state->connection, path, NULL);
+  g_hash_table_insert (state->sessions, g_strdup (path), session);
+  return session;
+}
+
+static GVariant *
+empty_results (void)
+{
+  return g_variant_new ("a{sv}", NULL);
+}
+
+static void
+complete_create (PortalRequest *request,
+                 guint          response,
+                 const char    *session_id)
+{
+  GVariantBuilder builder;
+
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("a{sv}"));
+  if (session_id)
+    g_variant_builder_add (&builder, "{sv}", "session_id",
+                           g_variant_new_string (session_id));
+  complete_request_method (request, response, g_variant_builder_end (&builder));
+}
+
+static gboolean
+on_create_session (OozePortalScreenCast *object,
+                   GDBusMethodInvocation                         *invocation,
+                   const char                                    *handle,
+                   const char                                    *session_handle,
+                   const char                                    *app_id,
+                   GVariant                                      *options,
+                   gpointer                                       user_data)
+{
+  PortalState *state = user_data;
+  PortalRequest *request;
+  PortalSession *session;
+
+  request = request_new (state, handle, invocation, complete_dbus_request);
+  session = session_new (state, session_handle);
+  complete_create (request, RESPONSE_SUCCESS, session->path);
+  (void) object;
+  (void) app_id;
+  (void) options;
+  return TRUE;
+}
+
+static gboolean
+on_select_sources (OozePortalScreenCast *object,
+                   GDBusMethodInvocation                         *invocation,
+                   const char                                    *handle,
+                   const char                                    *session_handle,
+                   const char                                    *app_id,
+                   GVariant                                      *options,
+                   gpointer                                       user_data)
+{
+  PortalState *state = user_data;
+  PortalSession *session = g_hash_table_lookup (state->sessions, session_handle);
+  PortalRequest *request;
+  guint types = SOURCE_MONITOR;
+  gboolean multiple = FALSE;
+  guint cursor_mode = CURSOR_HIDDEN;
+
+  if (!session)
+    {
+      g_dbus_method_invocation_return_dbus_error (invocation,
+                                                  "org.freedesktop.impl.portal.Error.NotFound",
+                                                  "Unknown screen cast session");
+      return TRUE;
+    }
+  request = request_new (state, handle, invocation, complete_dbus_select_sources);
+  g_variant_lookup (options, "types", "u", &types);
+  g_variant_lookup (options, "multiple", "b", &multiple);
+  g_variant_lookup (options, "cursor_mode", "u", &cursor_mode);
+  session->multiple = multiple;
+  session->cursor_mode = cursor_mode;
+  if ((types & SOURCE_MONITOR) == 0)
+    complete_request_method (request, RESPONSE_FAILED, empty_results ());
+  else
+    {
+      /* Source selection is intentionally performed by Start, after the
+       * frontend has completed SelectSources. */
+      complete_request_method (request, RESPONSE_SUCCESS, empty_results ());
+    }
+  (void) object;
+  (void) app_id;
+  return TRUE;
+}
+
+static void
+picker_free (Picker *picker)
+{
+  g_clear_pointer (&picker->monitors, g_ptr_array_unref);
+  g_clear_pointer (&picker->selected, g_ptr_array_unref);
+  g_free (picker);
+}
+
+static void
+picker_finish (Picker *picker,
+               gboolean  accepted)
+{
+  PortalSession *session = picker->session;
+  PortalRequest *request = picker->request;
+  GtkWindow *window = picker->window;
+
+  if (accepted)
+    {
+      guint i;
+      g_ptr_array_set_size (session->monitors, 0);
+      for (i = 0; i < picker->selected->len; i++)
+        {
+          PickerMonitor *source = picker->selected->pdata[i];
+          PickerMonitor *copy = g_new0 (PickerMonitor, 1);
+          *copy = *source;
+          copy->connector = g_strdup (source->connector);
+          copy->name = g_strdup (source->name);
+          g_ptr_array_add (session->monitors, copy);
+        }
+      picker->window = NULL;
+      gtk_window_destroy (window);
+      start_mutter (request, session);
+    }
+  else
+    {
+      picker->window = NULL;
+      gtk_window_destroy (window);
+      complete_request_method (request, RESPONSE_CANCELLED, empty_results ());
+    }
+  picker_free (picker);
+}
+
+static void
+on_picker_cancel (GtkButton *button,
+                  gpointer   user_data)
+{
+  picker_finish (user_data, FALSE);
+  (void) button;
+}
+
+static void
+on_picker_accept (GtkButton *button,
+                  gpointer   user_data)
+{
+  Picker *picker = user_data;
+  guint i;
+  GtkListBoxRow *row;
+
+  for (i = 0; (row = gtk_list_box_get_row_at_index (GTK_LIST_BOX (picker->list), i)); i++)
+    {
+      GtkWidget *check = gtk_list_box_row_get_child (row);
+      if (gtk_check_button_get_active (GTK_CHECK_BUTTON (check)))
+        {
+          g_ptr_array_add (picker->selected, picker->monitors->pdata[i]);
+          if (!picker->session->multiple)
+            break;
+        }
+    }
+  if (picker->selected->len == 0)
+    return;
+  picker_finish (picker, TRUE);
+  (void) button;
+}
+
+static void
+on_picker_close (GtkWindow *window,
+                 gpointer   user_data)
+{
+  Picker *picker = user_data;
+
+  if (picker->window)
+    {
+      picker->window = NULL;
+      complete_request_method (picker->request, RESPONSE_CANCELLED, empty_results ());
+      picker_free (picker);
+    }
+  (void) window;
+}
+
+static void
+show_picker (PortalRequest *request,
+             PortalSession *session)
+{
+  OozeDisplayConfig *config = NULL;
+  g_autoptr (GError) error = NULL;
+  Picker *picker;
+  GtkWidget *root;
+  GtkWidget *surface;
+  GtkWidget *box;
+  GtkWidget *buttons;
+  GtkWidget *accept;
+  GtkWidget *cancel;
+  guint i;
+
+  if (!ooze_display_config_load (&config, &error))
+    {
+      complete_request_method (request, RESPONSE_FAILED, empty_results ());
+      session->start_request = NULL;
+      return;
+    }
+
+  picker = g_new0 (Picker, 1);
+  picker->request = request;
+  picker->session = session;
+  picker->monitors = g_ptr_array_new_with_free_func ((GDestroyNotify) picker_monitor_free);
+  picker->selected = g_ptr_array_new ();
+  picker->window = GTK_WINDOW (gtk_window_new ());
+  gtk_window_set_title (picker->window, "Share a Monitor");
+  gtk_window_set_default_size (picker->window, 460, 360);
+  g_signal_connect (picker->window, "close-request",
+                    G_CALLBACK (on_picker_close), picker);
+
+  root = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  surface = ooze_surface_new (OOZE_SURFACE_TOOLBAR, GTK_ORIENTATION_VERTICAL);
+  gtk_widget_set_margin_start (surface, 18);
+  gtk_widget_set_margin_end (surface, 18);
+  gtk_widget_set_margin_top (surface, 18);
+  gtk_widget_set_margin_bottom (surface, 18);
+  gtk_box_append (GTK_BOX (root), surface);
+  box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 12);
+  gtk_box_append (GTK_BOX (surface), box);
+  gtk_box_append (GTK_BOX (box), gtk_label_new ("Choose the monitor to share."));
+  picker->list = gtk_list_box_new ();
+  gtk_list_box_set_selection_mode (GTK_LIST_BOX (picker->list), GTK_SELECTION_NONE);
+  gtk_widget_set_vexpand (picker->list, TRUE);
+  gtk_box_append (GTK_BOX (box), picker->list);
+
+  for (i = 0; i < config->monitors->len; i++)
+    {
+      OozeDisplayMonitor *monitor = config->monitors->pdata[i];
+      PickerMonitor *source = g_new0 (PickerMonitor, 1);
+      GtkWidget *check;
+      OozeDisplayMode *mode = NULL;
+      guint j;
+
+      source->connector = g_strdup (monitor->connector);
+      source->name = g_strdup (monitor->display_name);
+      source->x = monitor->layout_x;
+      source->y = monitor->layout_y;
+      for (j = 0; j < monitor->modes->len; j++)
+        {
+          OozeDisplayMode *candidate = monitor->modes->pdata[j];
+          if (g_strcmp0 (candidate->id, monitor->current_mode_id) == 0)
+            {
+              mode = candidate;
+              break;
+            }
+        }
+      if (mode)
+        {
+          source->width = mode->width;
+          source->height = mode->height;
+        }
+      g_ptr_array_add (picker->monitors, source);
+      check = gtk_check_button_new_with_label (source->name);
+      gtk_widget_set_margin_top (check, 6);
+      gtk_widget_set_margin_bottom (check, 6);
+      gtk_list_box_append (GTK_LIST_BOX (picker->list), check);
+    }
+  ooze_display_config_free (config);
+
+  buttons = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+  gtk_widget_set_halign (buttons, GTK_ALIGN_END);
+  cancel = gtk_button_new_with_label ("Cancel");
+  accept = gtk_button_new_with_label ("Share");
+  gtk_box_append (GTK_BOX (buttons), cancel);
+  gtk_box_append (GTK_BOX (buttons), accept);
+  gtk_box_append (GTK_BOX (box), buttons);
+  g_signal_connect (cancel, "clicked", G_CALLBACK (on_picker_cancel), picker);
+  g_signal_connect (accept, "clicked", G_CALLBACK (on_picker_accept), picker);
+  gtk_window_set_child (picker->window, root);
+  gtk_window_present (picker->window);
+}
+
+static void
+stream_ready (PortalSession *session,
+              GDBusProxy    *stream,
+              guint          node_id)
+{
+  PickerMonitor *monitor;
+  GVariantBuilder properties;
+
+  monitor = session->monitors->pdata[session->streams_ready];
+  g_variant_builder_init (&properties, G_VARIANT_TYPE ("a{sv}"));
+  g_variant_builder_add (&properties, "{sv}", "source_type",
+                         g_variant_new_uint32 (SOURCE_MONITOR));
+  g_variant_builder_add (&properties, "{sv}", "position",
+                         g_variant_new ("(ii)", monitor->x, monitor->y));
+  g_variant_builder_add (&properties, "{sv}", "size",
+                         g_variant_new ("(ii)", monitor->width, monitor->height));
+  g_variant_builder_add (&session->stream_builder, "(u@a{sv})", node_id,
+                         g_variant_builder_end (&properties));
+  session->streams_ready++;
+  if (session->streams_ready == session->streams->len && session->start_request)
+    {
+      GVariantBuilder results;
+      GVariant *streams = g_variant_builder_end (&session->stream_builder);
+
+      g_variant_builder_init (&results, G_VARIANT_TYPE ("a{sv}"));
+      g_variant_builder_add (&results, "{sv}", "streams", streams);
+      complete_request_method (session->start_request, RESPONSE_SUCCESS,
+                               g_variant_builder_end (&results));
+      session->start_request = NULL;
+    }
+  (void) stream;
+}
+
+static void
+on_stream_signal (GDBusProxy *proxy,
+                  const char  *sender_name,
+                  const char  *signal_name,
+                  GVariant    *parameters,
+                  gpointer     user_data)
+{
+  PortalSession *session = user_data;
+  guint node_id;
+
+  if (g_strcmp0 (signal_name, "PipeWireStreamAdded") != 0)
+    return;
+  g_variant_get (parameters, "(u)", &node_id);
+  stream_ready (session, proxy, node_id);
+  (void) sender_name;
+}
+
+static void
+start_mutter (PortalRequest *request,
+              PortalSession *session)
+{
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GVariant) reply = NULL;
+  GVariantBuilder props;
+  const char *path;
+  guint i;
+
+  session->start_request = request;
+  session->streams_ready = 0;
+  g_variant_builder_init (&session->stream_builder, G_VARIANT_TYPE ("a(ua{sv})"));
+  g_variant_builder_init (&props, G_VARIANT_TYPE ("a{sv}"));
+  reply = g_dbus_connection_call_sync (session->state->connection,
+                                       MUTTER_BUS, MUTTER_PATH, MUTTER_IFACE,
+                                       "CreateSession",
+                                       g_variant_new ("(@a{sv})",
+                                                      g_variant_builder_end (&props)),
+                                       G_VARIANT_TYPE ("(o)"),
+                                       G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
+  if (!reply)
+    {
+      complete_request_method (request, RESPONSE_FAILED, empty_results ());
+      session->start_request = NULL;
+      return;
+    }
+  g_variant_get (reply, "(&o)", &path);
+  session->mutter_session = g_dbus_proxy_new_sync (session->state->connection,
+                                                    G_DBUS_PROXY_FLAGS_NONE,
+                                                    NULL, MUTTER_BUS, path,
+                                                    "org.gnome.Mutter.ScreenCast.Session",
+                                                    NULL, &error);
+  if (!session->mutter_session)
+    {
+      session->start_request = NULL;
+      complete_request_method (request, RESPONSE_FAILED, empty_results ());
+      return;
+    }
+  for (i = 0; i < session->monitors->len; i++)
+    {
+      PickerMonitor *monitor = session->monitors->pdata[i];
+      GVariantBuilder record_props;
+      GVariant *record_reply;
+      const char *stream_path;
+      GDBusProxy *stream;
+
+      g_variant_builder_init (&record_props, G_VARIANT_TYPE ("a{sv}"));
+      g_variant_builder_add (&record_props, "{sv}", "cursor-mode",
+                             g_variant_new_uint32 (session->cursor_mode == 2 ? 1 :
+                                                   session->cursor_mode == 4 ? 2 : 0));
+      record_reply = g_dbus_proxy_call_sync (session->mutter_session, "RecordMonitor",
+                                             g_variant_new ("(s@a{sv})",
+                                                            monitor->connector,
+                                                            g_variant_builder_end (&record_props)),
+                                             G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
+      if (!record_reply)
+        {
+          complete_request_method (request, RESPONSE_FAILED, empty_results ());
+          session->start_request = NULL;
+          return;
+        }
+      g_variant_get (record_reply, "(&o)", &stream_path);
+      stream = g_dbus_proxy_new_sync (session->state->connection,
+                                      G_DBUS_PROXY_FLAGS_NONE, NULL, MUTTER_BUS,
+                                      stream_path,
+                                      "org.gnome.Mutter.ScreenCast.Stream",
+                                      NULL, &error);
+      if (!stream)
+        {
+          session->start_request = NULL;
+          complete_request_method (request, RESPONSE_FAILED, empty_results ());
+          return;
+        }
+      g_signal_connect (stream, "g-signal", G_CALLBACK (on_stream_signal), session);
+      g_ptr_array_add (session->streams, stream);
+    }
+  reply = g_dbus_proxy_call_sync (session->mutter_session, "Start", NULL,
+                                  G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
+  if (!reply)
+    {
+      complete_request_method (request, RESPONSE_FAILED, empty_results ());
+      session->start_request = NULL;
+      return;
+    }
+  /* PipeWireStreamAdded is asynchronous. */
+}
+
+static gboolean
+on_start (OozePortalScreenCast *object,
+          GDBusMethodInvocation                         *invocation,
+          const char                                    *handle,
+          const char                                    *session_handle,
+          const char                                    *app_id,
+          const char                                    *parent_window,
+          GVariant                                      *options,
+          gpointer                                       user_data)
+{
+  PortalState *state = user_data;
+  PortalSession *session = g_hash_table_lookup (state->sessions, session_handle);
+  PortalRequest *request;
+
+  if (!session)
+    {
+      g_dbus_method_invocation_return_dbus_error (invocation,
+                                                  "org.freedesktop.impl.portal.Error.NotFound",
+                                                  "Unknown screen cast session");
+      return TRUE;
+    }
+  request = request_new (state, handle, invocation, complete_dbus_start);
+  show_picker (request, session);
+  (void) object;
+  (void) app_id;
+  (void) parent_window;
+  (void) options;
+  return TRUE;
+}
+
+void
+ooze_portal_backend_start (GDBusConnection *connection)
+{
+  PortalState *state = g_new0 (PortalState, 1);
+
+  state->connection = g_object_ref (connection);
+  state->requests = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
+                                           (GDestroyNotify) request_free);
+  state->sessions = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
+                                           (GDestroyNotify) session_free);
+  state->screen_cast = ooze_portal_screen_cast_skeleton_new ();
+  ooze_portal_screen_cast_set_available_source_types (
+    state->screen_cast, SOURCE_MONITOR);
+  ooze_portal_screen_cast_set_available_cursor_modes (
+    state->screen_cast, CURSOR_HIDDEN | CURSOR_EMBEDDED | CURSOR_METADATA);
+  ooze_portal_screen_cast_set_version (state->screen_cast, 5);
+  g_signal_connect (state->screen_cast, "handle-create-session",
+                    G_CALLBACK (on_create_session), state);
+  g_signal_connect (state->screen_cast, "handle-select-sources",
+                    G_CALLBACK (on_select_sources), state);
+  g_signal_connect (state->screen_cast, "handle-start",
+                    G_CALLBACK (on_start), state);
+  g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (state->screen_cast),
+                                    connection,
+                                    "/org/freedesktop/impl/portal/desktop/ooze",
+                                    NULL);
+}

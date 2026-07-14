@@ -17,6 +17,7 @@ mtk_pc = 'mutter-mtk-' + mutter_api_version
 
 cc = meson.get_compiler('c')
 fs = import('fs')
+gnome = import('gnome')
 
 mutter_dep = dependency(libmutter_pc)
 clutter_dep = dependency(clutter_pc)
@@ -177,6 +178,7 @@ install_data(
   [
     'data/xdg-desktop-portal/portals/ooze-gtk.portal',
     'data/xdg-desktop-portal/portals/ooze-gnome-keyring.portal',
+    'data/xdg-desktop-portal/portals/ooze.portal',
   ],
   install_dir: get_option('datadir') / 'xdg-desktop-portal' / 'portals',
 )
@@ -243,6 +245,53 @@ ooze_app_c_args = [
 ]
 
 if gtk4_dep.found() and adw_dep.found()
+  portal_dbus_sources = gnome.gdbus_codegen(
+    'portal-dbus-generated',
+    sources: 'portal/org.freedesktop.impl.portal.xml',
+    namespace: 'OozePortal',
+    interface_prefix: 'org.freedesktop.impl.portal.',
+  )
+  mutter_screencast_sources = gnome.gdbus_codegen(
+    'mutter-screencast-generated',
+    sources: 'portal/org.gnome.Mutter.ScreenCast.xml',
+    namespace: 'OozeMutter',
+  )
+
+  executable('ooze-portal',
+    'portal/main.c',
+    'portal/portal-backend.c',
+    'ooze-monitor/ooze-display-config.c',
+    portal_dbus_sources,
+    mutter_screencast_sources,
+    ooze_shared_sources,
+    include_directories: ooze_app_inc + [
+      include_directories('portal'),
+      include_directories('ooze-monitor'),
+    ],
+    dependencies: [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+    install_dir: get_option('libexecdir'),
+  )
+
+  ooze_portal_service = configure_file(
+    input: 'data/org.freedesktop.impl.portal.desktop.ooze.service',
+    output: 'org.freedesktop.impl.portal.desktop.ooze.service',
+    configuration: {
+      'libexecdir': join_paths(get_option('prefix'), get_option('libexecdir')),
+    },
+  )
+  install_data(ooze_portal_service,
+    install_dir: get_option('datadir') / 'dbus-1' / 'services',
+  )
+
   executable('spot',
     'spot/main.c',
     'spot/spot-window.c',

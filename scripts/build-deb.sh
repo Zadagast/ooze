@@ -67,6 +67,12 @@ install -m 0644 "$ROOT/data/xdg-desktop-portal/portals/ooze-gtk.portal" \
   "$STAGE/usr/share/xdg-desktop-portal/portals/ooze-gtk.portal"
 install -m 0644 "$ROOT/data/xdg-desktop-portal/portals/ooze-gnome-keyring.portal" \
   "$STAGE/usr/share/xdg-desktop-portal/portals/ooze-gnome-keyring.portal"
+install -m 0644 "$ROOT/data/xdg-desktop-portal/portals/ooze.portal" \
+  "$STAGE/usr/share/xdg-desktop-portal/portals/ooze.portal"
+install -d "$STAGE/usr/share/dbus-1/services"
+sed "s#@libexecdir@#/usr/libexec#g" \
+  "$ROOT/data/org.freedesktop.impl.portal.desktop.ooze.service" \
+  > "$STAGE/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.ooze.service"
 install -d "$STAGE/usr/share/ooze"
 install -m 0755 "$ROOT/packaging/deb/ooze-session-env.sh" \
   "$STAGE/usr/share/ooze/ooze-session-env.sh"
