@@ -682,8 +682,6 @@ ooze_plugin_refresh_wallpapers (OozePlugin *plugin)
     }
 }
 
-static guint chrome_theme_idle_id;
-
 static gboolean
 ooze_plugin_chrome_theme_idle (gpointer user_data)
 {
@@ -692,7 +690,7 @@ ooze_plugin_chrome_theme_idle (gpointer user_data)
   GList *windows;
   GList *l;
 
-  chrome_theme_idle_id = 0;
+  plugin->chrome_theme_idle = 0;
 
   display = meta_plugin_get_display (META_PLUGIN (plugin));
   if (!display)
@@ -720,10 +718,10 @@ ooze_plugin_chrome_theme_idle (gpointer user_data)
 static void
 ooze_plugin_schedule_chrome_theme_refresh (OozePlugin *plugin)
 {
-  if (chrome_theme_idle_id != 0)
+  if (plugin->chrome_theme_idle != 0)
     return;
 
-  chrome_theme_idle_id =
+  plugin->chrome_theme_idle =
     g_idle_add_full (G_PRIORITY_LOW,
                      ooze_plugin_chrome_theme_idle,
                      plugin,
@@ -1643,10 +1641,16 @@ ooze_plugin_dispose (GObject *object)
   ooze_theme_unwatch_will_change (NULL, ooze_plugin_on_theme_will_change, plugin);
   ooze_theme_unwatch (NULL, ooze_plugin_on_theme_changed, plugin);
 
-  if (chrome_theme_idle_id != 0)
+  if (plugin->chrome_theme_idle != 0)
     {
-      g_source_remove (chrome_theme_idle_id);
-      chrome_theme_idle_id = 0;
+      g_source_remove (plugin->chrome_theme_idle);
+      plugin->chrome_theme_idle = 0;
+    }
+
+  if (plugin->dock_reflect_idle != 0)
+    {
+      g_source_remove (plugin->dock_reflect_idle);
+      plugin->dock_reflect_idle = 0;
     }
 
   ooze_aqua_menu_destroy (plugin->menu_popup);

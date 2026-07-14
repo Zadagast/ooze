@@ -52,6 +52,7 @@ struct _OozePlugin
   int           last_panel_width;
   int           last_dock_plate_width;
   guint         dock_reflect_idle;
+  guint         chrome_theme_idle;
 
   /* Lock screen (compositor overlay + PAM helper) */
   gboolean      locked;

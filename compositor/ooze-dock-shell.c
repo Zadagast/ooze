@@ -2570,6 +2570,64 @@ ooze_dock_downloads_actor (void)
   return ooze_dock_find_by_app_id (ooze_dock_icons_container, "org.ooze.Downloads");
 }
 
+/* Everything wired to the icons container must be torn down with it —
+ * the indicator timer, the MetaDnd handlers (the backend outlives the
+ * dock) and any pending timeouts/idles that hold raw container pointers. */
+static void
+ooze_dock_on_container_destroy (ClutterActor *container,
+                                gpointer      user_data G_GNUC_UNUSED)
+{
+  OozeDockIndicatorCtx *indicator_ctx;
+  MetaDnd *dnd;
+  OozeAquaMenu *pin_menu;
+  guint id;
+
+  id = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (container),
+                                            "indicator-timer"));
+  if (id)
+    {
+      g_source_remove (id);
+      g_object_set_data (G_OBJECT (container), "indicator-timer", NULL);
+    }
+
+  indicator_ctx = g_object_get_data (G_OBJECT (container), "indicator-ctx");
+  if (indicator_ctx)
+    {
+      g_object_set_data (G_OBJECT (container), "indicator-ctx", NULL);
+      g_free (indicator_ctx);
+    }
+
+  dnd = g_object_get_data (G_OBJECT (container), "dock-dnd");
+  if (dnd)
+    {
+      g_signal_handlers_disconnect_by_func (dnd, ooze_dock_on_dnd_position,
+                                            container);
+      g_signal_handlers_disconnect_by_func (dnd, ooze_dock_on_dnd_leave,
+                                            container);
+      g_object_set_data (G_OBJECT (container), "dock-dnd", NULL);
+    }
+
+  ooze_dock_spring_cancel (container);
+
+  id = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (container),
+                                            "dock-icon-rebuild-idle"));
+  if (id)
+    {
+      g_source_remove (id);
+      g_object_set_data (G_OBJECT (container), "dock-icon-rebuild-idle", NULL);
+    }
+
+  pin_menu = g_object_get_data (G_OBJECT (container), "pin-menu");
+  if (pin_menu)
+    {
+      g_object_set_data (G_OBJECT (container), "pin-menu", NULL);
+      ooze_aqua_menu_destroy (pin_menu);
+    }
+
+  if (ooze_dock_icons_container == container)
+    ooze_dock_icons_container = NULL;
+}
+
 void
 ooze_dock_populate_container (MetaContext   *context,
                             MetaDisplay   *display,
@@ -2582,6 +2640,13 @@ ooze_dock_populate_container (MetaContext   *context,
   MetaDnd *dnd;
 
   ooze_dock_icons_container = container;
+  if (!g_object_get_data (G_OBJECT (container), "dock-destroy-wired"))
+    {
+      g_signal_connect (container, "destroy",
+                        G_CALLBACK (ooze_dock_on_container_destroy), NULL);
+      g_object_set_data (G_OBJECT (container), "dock-destroy-wired",
+                         GINT_TO_POINTER (1));
+    }
   g_object_set_data (G_OBJECT (container), "dock-display", display);
   g_object_set_data (G_OBJECT (container), "dock-stage", stage);
   if (context)
@@ -2622,6 +2687,7 @@ ooze_dock_populate_container (MetaContext   *context,
                             G_CALLBACK (ooze_dock_on_dnd_position), container);
           g_signal_connect (dnd, "dnd-leave",
                             G_CALLBACK (ooze_dock_on_dnd_leave), container);
+          g_object_set_data (G_OBJECT (container), "dock-dnd", dnd);
           g_object_set_data (G_OBJECT (container), "dock-dnd-wired",
                              GINT_TO_POINTER (1));
         }
