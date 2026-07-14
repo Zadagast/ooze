@@ -50,6 +50,8 @@ install -d "$STAGE/usr/bin"
 install -m 0755 "$ROOT/packaging/deb/ooze-session" "$STAGE/usr/bin/ooze-session"
 install -m 0755 "$ROOT/packaging/deb/ooze-wayland-session" \
   "$STAGE/usr/bin/ooze-wayland-session"
+install -m 0755 "$ROOT/scripts/ooze-doctor" \
+  "$STAGE/usr/bin/ooze-doctor"
 install -d "$STAGE/usr/share/applications"
 install -m 0644 "$ROOT/packaging/deb/ooze-session.desktop" \
   "$STAGE/usr/share/applications/org.ooze.Desktop.desktop"
