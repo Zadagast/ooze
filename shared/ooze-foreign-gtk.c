@@ -1,4 +1,5 @@
 #include "ooze-foreign-gtk.h"
+#include "ooze-color-scheme.h"
 #include "ooze-shared-icons.h"
 
 #include <string.h>
@@ -145,24 +146,13 @@ ooze_foreign_gtk_pref_set (const char *theme_or_auto)
   return g_file_set_contents (path, value, -1, NULL);
 }
 
-static gboolean
-ooze_foreign_session_is_dark (void)
-{
-  g_autoptr (GSettings) iface = g_settings_new ("org.gnome.desktop.interface");
-  g_autofree char *scheme = NULL;
-
-  if (!iface)
-    return FALSE;
-
-  scheme = g_settings_get_string (iface, "color-scheme");
-  return g_strcmp0 (scheme, "prefer-dark") == 0;
-}
-
 char *
 ooze_foreign_gtk_theme_for_session (void)
 {
   g_autofree char *pref = ooze_foreign_gtk_pref_get ();
-  gboolean dark = ooze_foreign_session_is_dark ();
+  g_autoptr (GSettings) iface =
+    g_settings_new ("org.gnome.desktop.interface");
+  gboolean dark = ooze_color_scheme_is_dark (iface);
   const char *candidate;
 
   if (pref && g_strcmp0 (pref, OOZE_FOREIGN_GTK_AUTO) != 0)

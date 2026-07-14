@@ -1,4 +1,5 @@
 #include "ooze-xsettings.h"
+#include "ooze-color-scheme.h"
 #include "ooze-theme.h"
 #include "ooze-stall.h"
 #include "ooze-shared-appmenu.h"
@@ -127,14 +128,10 @@ ooze_xsettings_current_gtk_theme (void)
 static gboolean
 ooze_xsettings_prefer_dark (void)
 {
-  g_autoptr (GSettings) iface = NULL;
-  g_autofree char *scheme = NULL;
+  g_autoptr (GSettings) iface =
+    g_settings_new ("org.gnome.desktop.interface");
 
-  iface = g_settings_new ("org.gnome.desktop.interface");
-  if (!iface)
-    return FALSE;
-  scheme = g_settings_get_string (iface, "color-scheme");
-  return g_strcmp0 (scheme, "prefer-dark") == 0;
+  return ooze_color_scheme_is_dark (iface);
 }
 
 static GByteArray *

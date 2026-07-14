@@ -1,4 +1,5 @@
 #include "ooze-theme.h"
+#include "ooze-color-scheme.h"
 #include "ooze-foreign-gtk.h"
 #include "ooze-xsettings.h"
 
@@ -44,7 +45,6 @@ struct _OozeTheme
 {
   GSettings *settings;
   gulong color_scheme_handler;
-  gulong gtk_theme_handler;
   GFileMonitor *foreign_gtk_monitor;
   gboolean dark;
   GSList *watchers;
@@ -154,35 +154,6 @@ ooze_theme_apply_foreign_gtk (gboolean dark G_GNUC_UNUSED)
   ooze_theme_recover_ooze_from_foreign_gtk ();
 }
 
-static gboolean
-ooze_theme_gtk_theme_is_dark (GSettings *settings)
-{
-  g_autofree char *gtk_theme = NULL;
-
-  gtk_theme = g_settings_get_string (settings, "gtk-theme");
-  if (!gtk_theme)
-    return FALSE;
-
-  return g_str_has_suffix (gtk_theme, "-dark") ||
-         g_str_has_suffix (gtk_theme, "-Dark");
-}
-
-static gboolean
-ooze_theme_read_dark (GSettings *settings)
-{
-  g_autofree char *scheme = NULL;
-
-  scheme = g_settings_get_string (settings, "color-scheme");
-  if (!scheme || g_strcmp0 (scheme, "default") == 0)
-    return ooze_theme_gtk_theme_is_dark (settings);
-  if (g_strcmp0 (scheme, "prefer-dark") == 0)
-    return TRUE;
-  if (g_strcmp0 (scheme, "prefer-light") == 0)
-    return FALSE;
-
-  return ooze_theme_gtk_theme_is_dark (settings);
-}
-
 static void
 ooze_theme_emit_watchers (GSList *watchers)
 {
@@ -221,7 +192,7 @@ ooze_theme_apply (OozeTheme *theme)
 {
   gboolean dark;
 
-  dark = ooze_theme_read_dark (theme->settings);
+  dark = ooze_color_scheme_is_dark (theme->settings);
   if (dark == theme->dark)
     return;
 
@@ -244,16 +215,6 @@ ooze_theme_on_color_scheme_changed (GSettings *settings G_GNUC_UNUSED,
 }
 
 static void
-ooze_theme_on_gtk_theme_changed (GSettings *settings G_GNUC_UNUSED,
-                                 const char *key G_GNUC_UNUSED,
-                                 OozeTheme *theme)
-{
-  /* Fallback when color-scheme is "default"; otherwise dark is unchanged. */
-  ooze_theme_apply (theme);
-  ooze_theme_schedule_xsettings_republish ();
-}
-
-static void
 ooze_theme_on_foreign_gtk_changed (GFileMonitor      *monitor G_GNUC_UNUSED,
                                    GFile             *file G_GNUC_UNUSED,
                                    GFile             *other_file G_GNUC_UNUSED,
@@ -271,17 +232,12 @@ ooze_theme_new (void)
 
   theme = g_new0 (OozeTheme, 1);
   theme->settings = g_settings_new ("org.gnome.desktop.interface");
-  theme->dark = ooze_theme_read_dark (theme->settings);
+  theme->dark = ooze_color_scheme_is_dark (theme->settings);
 
   theme->color_scheme_handler =
     g_signal_connect (theme->settings,
                       "changed::color-scheme",
                       G_CALLBACK (ooze_theme_on_color_scheme_changed),
-                      theme);
-  theme->gtk_theme_handler =
-    g_signal_connect (theme->settings,
-                      "changed::gtk-theme",
-                      G_CALLBACK (ooze_theme_on_gtk_theme_changed),
                       theme);
   {
     g_autofree char *pref_path = ooze_foreign_gtk_pref_path ();
@@ -433,9 +389,6 @@ ooze_theme_free (OozeTheme *theme)
 
   if (theme->color_scheme_handler)
     g_signal_handler_disconnect (theme->settings, theme->color_scheme_handler);
-  if (theme->gtk_theme_handler)
-    g_signal_handler_disconnect (theme->settings, theme->gtk_theme_handler);
-
   g_clear_object (&theme->foreign_gtk_monitor);
   g_clear_object (&theme->settings);
   g_slist_free_full (theme->watchers, g_free);
