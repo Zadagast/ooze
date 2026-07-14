@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+# Collect Ooze session and portal diagnostics, with an optional portal repair.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+FIX=0
+
+usage() {
+  cat <<'EOF'
+Usage: ooze-doctor [--fix]
+
+Collect Ooze session and portal diagnostics.
+
+  --fix    Import the Ooze identity and restart the portal services.
+EOF
+}
+
+section() {
+  printf '\n== %s ==\n' "$1"
+}
+
+print_var() {
+  local name="$1"
+  printf '%s=%s\n' "$name" "${!name-<unset>}"
+}
+
+version="unknown"
+if command -v dpkg-query >/dev/null 2>&1; then
+  version="$(dpkg-query -W -f='${Version}' ooze 2>/dev/null || true)"
+fi
+if [[ -z "$version" || "$version" == "unknown" ]]; then
+  if [[ -f "$ROOT/meson.build" ]]; then
+    version="$(sed -n "s/.*version: '\\([^']*\\)'.*/\\1/p" "$ROOT/meson.build" | head -1)"
+  fi
+fi
+version="${version:-unknown}"
+
+portal_config_dirs=()
+portal_config_dirs+=("${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal")
+if [[ -n "${XDG_CONFIG_DIRS:-}" ]]; then
+  IFS=: read -r -a _xdg_config_dirs <<< "$XDG_CONFIG_DIRS"
+else
+  _xdg_config_dirs=(/etc/xdg /usr/local/share /usr/share)
+fi
+for _config_root in "${_xdg_config_dirs[@]}"; do
+  portal_config_dirs+=("$_config_root/xdg-desktop-portal")
+done
+# Keep the standard system locations in the report even when a desktop
+# provides a partial XDG_CONFIG_DIRS value.
+portal_config_dirs+=(
+  /etc/xdg/xdg-desktop-portal
+  /usr/local/share/xdg-desktop-portal
+  /usr/share/xdg-desktop-portal
+)
+if [[ -n "${XDG_DESKTOP_PORTAL_DIR:-}" ]]; then
+  portal_config_dirs=("$XDG_DESKTOP_PORTAL_DIR" "${portal_config_dirs[@]}")
+fi
+
+find_portal_config() {
+  local desktop="$1"
+  local config_dir config_name
+  config_name="${desktop,,}-portals.conf"
+  for config_dir in "${portal_config_dirs[@]}"; do
+    if [[ -f "$config_dir/$config_name" ]]; then
+      printf '%s\n' "$config_dir/$config_name"
+      return 0
+    fi
+  done
+  for config_dir in "${portal_config_dirs[@]}"; do
+    if [[ -f "$config_dir/portals.conf" ]]; then
+      printf '%s\n' "$config_dir/portals.conf"
+      return 0
+    fi
+  done
+  return 1
+}
+
+show_installed_portals() {
+  local portal_dir="/usr/share/xdg-desktop-portal/portals"
+  if [[ ! -d "$portal_dir" ]]; then
+    echo "$portal_dir: missing"
+    return 0
+  fi
+  find "$portal_dir" -maxdepth 1 -type f -name '*.portal' -printf '%f\n' 2>/dev/null |
+    sort || true
+}
+
+show_portal_configs() {
+  local config_dir
+  local found=0
+  for config_dir in "${portal_config_dirs[@]}"; do
+    [[ -d "$config_dir" ]] || continue
+    while IFS= read -r config; do
+      printf '%s\n' "$config"
+      found=1
+    done < <(find "$config_dir" -maxdepth 1 -type f \
+      \( -name 'portals.conf' -o -name '*-portals.conf' \) -print 2>/dev/null | sort)
+  done
+  ((found)) || echo "No portals.conf files found in the standard search paths."
+}
+
+show_effective_settings() {
+  local desktop_list="${XDG_CURRENT_DESKTOP:-}"
+  local desktop config=""
+  local settings default
+  local -a desktops=()
+
+  if [[ -n "$desktop_list" ]]; then
+    IFS=: read -r -a desktops <<< "$desktop_list"
+    for desktop in "${desktops[@]}"; do
+      [[ -n "$desktop" ]] || continue
+      if config="$(find_portal_config "$desktop")"; then
+        break
+      fi
+    done
+  fi
+  if [[ -z "$config" ]]; then
+    echo "Effective config: not found"
+    echo "Settings routing: unavailable"
+    return 0
+  fi
+
+  settings="$(awk -F= '$1 == "org.freedesktop.impl.portal.Settings" { print $2; exit }' "$config")"
+  default="$(awk -F= '$1 == "default" { print $2; exit }' "$config")"
+  echo "Effective config: $config"
+  if [[ -n "$settings" ]]; then
+    echo "Settings routing: $settings"
+  elif [[ -n "$default" ]]; then
+    echo "Settings routing: (default) $default"
+  else
+    echo "Settings routing: unavailable"
+  fi
+}
+
+show_unit_status() {
+  local unit="$1"
+  local state
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "$unit: systemctl not found"
+    return 0
+  fi
+  state="$(systemctl --user is-active "$unit" 2>/dev/null || true)"
+  printf '%s: %s\n' "$unit" "${state:-unknown}"
+  systemctl --user --no-pager --full status "$unit" 2>&1 | sed -n '1,18p' || true
+}
+
+run_fix() {
+  local -a env_vars=(
+    XDG_CURRENT_DESKTOP
+    XDG_SESSION_DESKTOP
+    DESKTOP_SESSION
+    XDG_SESSION_TYPE
+  )
+
+  run_best_effort() {
+    local label="$1"
+    shift
+    if "$@" 2>/dev/null; then
+      echo "$label: ok"
+    else
+      echo "$label: failed (ignored)"
+    fi
+  }
+
+  section "Portal repair"
+  export XDG_CURRENT_DESKTOP=Ooze
+  export XDG_SESSION_DESKTOP=Ooze
+  export DESKTOP_SESSION=Ooze
+  export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
+
+  if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+    run_best_effort "D-Bus activation environment update" \
+      dbus-update-activation-environment --systemd "${env_vars[@]}"
+  else
+    echo "dbus-update-activation-environment: unavailable"
+  fi
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "systemctl: unavailable; portal repair could not run."
+    return 0
+  fi
+
+  run_best_effort "systemd user environment import" \
+    systemctl --user import-environment "${env_vars[@]}"
+  run_best_effort "Reset-failed xdg-desktop-portal.service" \
+    systemctl --user reset-failed xdg-desktop-portal.service
+  run_best_effort "Restart xdg-desktop-portal-gtk.service" \
+    systemctl --user restart xdg-desktop-portal-gtk.service
+  run_best_effort "Restart xdg-desktop-portal.service" \
+    systemctl --user restart xdg-desktop-portal.service
+}
+
+case "${1:-}" in
+  "")
+    ;;
+  --fix)
+    FIX=1
+    ;;
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if ((FIX)); then
+  run_fix
+fi
+
+section "Ooze"
+printf 'version=%s\n' "$version"
+print_var XDG_CURRENT_DESKTOP
+print_var XDG_SESSION_DESKTOP
+print_var DESKTOP_SESSION
+print_var XDG_SESSION_TYPE
+
+section "systemd user desktop identity"
+if command -v systemctl >/dev/null 2>&1; then
+  systemd_environment="$(systemctl --user show-environment 2>/dev/null || true)"
+  if [[ -n "$systemd_environment" ]]; then
+    if grep -E '^(XDG_CURRENT_DESKTOP|XDG_SESSION_DESKTOP|DESKTOP_SESSION|XDG_SESSION_TYPE)=' \
+      <<< "$systemd_environment"; then
+      :
+    else
+      echo "Desktop identity variables are not set."
+    fi
+  else
+    echo "Unable to read the systemd user environment."
+  fi
+else
+  echo "systemctl: unavailable"
+fi
+
+section "Portal backends"
+show_installed_portals
+
+section "Portal configuration files"
+show_portal_configs
+show_effective_settings
+
+section "Portal services"
+show_unit_status xdg-desktop-portal.service
+show_unit_status xdg-desktop-portal-gtk.service
+
+section "Recent portal journal"
+if command -v journalctl >/dev/null 2>&1; then
+  journalctl --user \
+    -u xdg-desktop-portal.service \
+    -u xdg-desktop-portal-gtk.service \
+    -n 25 --no-pager 2>&1 || true
+else
+  echo "journalctl: unavailable"
+fi
+
+section "Settings portal timing"
+if command -v gdbus >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  _doctor_tmp="$(mktemp)"
+  _doctor_start="$(date +%s%N)"
+  set +e
+  timeout 35s gdbus call \
+    --session \
+    --dest org.freedesktop.portal.Desktop \
+    --object-path /org/freedesktop/portal/desktop \
+    --method org.freedesktop.portal.Settings.ReadAll \
+    '["org.freedesktop.appearance"]' >"$_doctor_tmp" 2>&1
+  _doctor_status=$?
+  set -e
+  _doctor_end="$(date +%s%N)"
+  _doctor_elapsed_ms=$(( (_doctor_end - _doctor_start) / 1000000 ))
+  printf 'elapsed_ms=%s exit_status=%s\n' "$_doctor_elapsed_ms" "$_doctor_status"
+  cat "$_doctor_tmp"
+  rm -f "$_doctor_tmp"
+else
+  echo "gdbus or timeout: unavailable"
+fi

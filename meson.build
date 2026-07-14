@@ -164,6 +164,11 @@ install_data('packaging/deb/ooze-wayland-session',
   install_mode: 'rwxr-xr-x',
 )
 
+install_data('scripts/ooze-doctor',
+  install_dir: get_option('bindir'),
+  install_mode: 'rwxr-xr-x',
+)
+
 install_data('data/xdg-desktop-portal/ooze-portals.conf',
   install_dir: get_option('datadir') / 'xdg-desktop-portal',
 )
