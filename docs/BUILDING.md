@@ -91,6 +91,7 @@ Portals: the package installs `ooze-portals.conf` plus `UseIn=ooze` wrappers tha
 ```bash
 sudo apt install mutter libmutter-18-0 xwayland dbus-user-session \
   xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-gnome gnome-keyring \
+  qt6-gtk-platformtheme qt5-gtk-platformtheme \
   libgtk-4-1 libadwaita-1-0 \
   libvte-2.91-gtk4-0 libgtop-2.0-11 libudisks2-0 libpipewire-0.3-0t64 \
   libgdk-pixbuf-2.0-0 libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libx11-6 \
@@ -103,7 +104,9 @@ sudo apt install mutter libmutter-18-0 xwayland dbus-user-session \
 | `xwayland` | X11 path for Inkscape / appmenu |
 | `dbus-user-session` | Session bus + AppMenu registrar |
 | `xdg-desktop-portal` | Portal front-end (**Depends**) |
-| `xdg-desktop-portal-gtk` / `-gnome` | FileChooser / ScreenCast backends (**Recommends**) |
+| `xdg-desktop-portal-gtk` | Settings (light/dark) + FileChooser backend (**Depends**) |
+| `xdg-desktop-portal-gnome` | ScreenCast / RemoteDesktop backend (**Recommends**) |
+| `qt6-gtk-platformtheme` / `qt5-gtk-platformtheme` | Qt apps follow the session light/dark (**Recommends**) |
 | `gnome-keyring` | Secret portal (**Recommends**) |
 | `libgtk-4-1`, `libadwaita-1-0` | First-party apps |
 | `libvte-2.91-gtk4-0` | Ooze Command |

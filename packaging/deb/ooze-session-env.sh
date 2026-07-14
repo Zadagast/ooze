@@ -12,6 +12,11 @@ export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-Ooze}"
 export DESKTOP_SESSION="${DESKTOP_SESSION:-Ooze}"
 export XDG_DATA_DIRS="/usr/share/ooze${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 
+# Qt apps follow the session light/dark via the GTK platform theme, which
+# tracks org.gnome.desktop.interface color-scheme (same authority as the
+# shell, XSETTINGS, and the Settings portal). Respect a user override.
+export QT_QPA_PLATFORMTHEME="${QT_QPA_PLATFORMTHEME:-gtk3}"
+
 # Do NOT export GTK_THEME into the compositor session.
 # Session-wide GTK_THEME bleeds into portals/devkit and Ooze apps, and causes
 # WhiteSur CSS warnings. Foreign apps get WhiteSur only via launch helpers
