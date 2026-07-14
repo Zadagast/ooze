@@ -20,6 +20,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CACHE="${ROOT}/.cache/whitesur-gtk-theme"
 REPO_URL="https://github.com/vinceliuice/WhiteSur-gtk-theme.git"
+# Pin upstream WhiteSur to a known-good commit so packaging is reproducible and
+# a breaking change on their main branch cannot silently break our build.
+REPO_REF="${WHITESUR_REF:-fd7d1a97cd6de09b53a0dae8f9749cdeb43d5a59}"
+
+# WhiteSur's installer resolves the target user via
+#   ${SUDO_USER:-$(logname ...)}
+# On a headless/root CI runner there is no login session, so logname yields
+# nothing and its passwd lookup aborts the installer under `set -e`. Pin the
+# identity to the current user; since it equals the running user, the installer
+# never attempts a sudo elevation.
+export SUDO_USER="${SUDO_USER:-$(id -un)}"
 
 XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 if [[ -n "${OOZE_THEMES_DEST:-}" ]]; then
@@ -131,11 +142,15 @@ if [[ "$SYSTEM_INSTALL" == 0 ]]; then
 fi
 
 if [[ ! -d "$CACHE/.git" ]]; then
-  log "Cloning WhiteSur into $CACHE"
-  git clone --depth 1 "$REPO_URL" "$CACHE"
-else
-  log "Updating WhiteSur cache"
-  git -C "$CACHE" pull --ff-only || true
+  log "Cloning WhiteSur ($REPO_REF) into $CACHE"
+  git init -q "$CACHE"
+  git -C "$CACHE" remote add origin "$REPO_URL" 2>/dev/null || \
+    git -C "$CACHE" remote set-url origin "$REPO_URL"
+fi
+if [[ "$(git -C "$CACHE" rev-parse --verify -q HEAD 2>/dev/null)" != "$REPO_REF" ]]; then
+  log "Fetching pinned WhiteSur $REPO_REF"
+  git -C "$CACHE" fetch --depth 1 origin "$REPO_REF"
+  git -C "$CACHE" checkout -q FETCH_HEAD
 fi
 
 log "Installing WhiteSur-Light / WhiteSur-Dark into $THEMES_DEST"
