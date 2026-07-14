@@ -68,22 +68,28 @@ ooze_export_appmenu_modules () {
 # xdg-desktop-portal / gnome-keyring see XDG_CURRENT_DESKTOP=Ooze.
 # Soft-fail if tools are missing. Native GDM only — not for nest.
 ooze_push_activation_environment () {
+  local _env_vars=(
+    XDG_CURRENT_DESKTOP
+    XDG_SESSION_DESKTOP
+    DESKTOP_SESSION
+    XDG_SESSION_TYPE
+    XDG_RUNTIME_DIR
+    DBUS_SESSION_BUS_ADDRESS
+    WAYLAND_DISPLAY
+    DISPLAY
+    XAUTHORITY
+  )
+
   if ! command -v dbus-update-activation-environment >/dev/null 2>&1; then
     return 0
   fi
+
   # Explicit short list: avoid dumping nest-only or accidental GTK_THEME.
   # --systemd mirrors env into systemd --user for socket-activated services.
-  dbus-update-activation-environment --systemd \
-    XDG_CURRENT_DESKTOP \
-    XDG_SESSION_TYPE \
-    XDG_SESSION_DESKTOP \
-    DESKTOP_SESSION \
-    XDG_RUNTIME_DIR \
-    DBUS_SESSION_BUS_ADDRESS \
-    WAYLAND_DISPLAY \
-    DISPLAY \
-    XAUTHORITY \
-    2>/dev/null || true
+  dbus-update-activation-environment --systemd "${_env_vars[@]}" 2>/dev/null || true
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user import-environment "${_env_vars[@]}" 2>/dev/null || true
+  fi
 }
 
 # Start gnome-keyring on the *current* session bus when available.
@@ -109,8 +115,12 @@ ooze_kick_portals () {
   if ! command -v systemctl >/dev/null 2>&1; then
     return 0
   fi
-  # try-restart if already running (picks up new XDG_CURRENT_DESKTOP);
-  # start if idle. Soft-fail either way.
+  systemctl --user reset-failed xdg-desktop-portal.service 2>/dev/null || true
+  # Restart the GTK backend before the portal front-end so the frontend re-reads
+  # the Ooze desktop identity and can resolve the gnome-free routing.
+  systemctl --user try-restart xdg-desktop-portal-gtk.service 2>/dev/null \
+    || systemctl --user start xdg-desktop-portal-gtk.service 2>/dev/null \
+    || true
   systemctl --user try-restart xdg-desktop-portal.service 2>/dev/null \
     || systemctl --user start xdg-desktop-portal.service 2>/dev/null \
     || true
