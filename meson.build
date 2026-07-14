@@ -380,6 +380,28 @@ if gtk4_dep.found() and adw_dep.found()
     install_dir: get_option('datadir') / 'applications',
   )
 
+  executable('ooze-defaults',
+    'ooze-defaults/main.c',
+    'ooze-defaults/ooze-defaults-window.c',
+    'ooze-defaults/ooze-defaults-pane.c',
+    ooze_shared_sources,
+    include_directories: ooze_app_inc + [include_directories('ooze-defaults')],
+    dependencies: [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.Defaults.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
   executable('ooze-eye',
     'ooze-eye/main.c',
     'ooze-eye/ooze-eye-window.c',

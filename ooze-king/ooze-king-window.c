@@ -52,11 +52,15 @@ static const char * const king_icon_pak[] = {
 static const char * const king_icon_torrent[] = {
   "application-x-bittorrent", "network-workgroup", NULL
 };
+static const char * const king_icon_defaults[] = {
+  "preferences-desktop-default-applications", "application-x-executable", NULL
+};
 
 static const KingAppEntry king_apps[] = {
   { king_icon_about,   "About This Computer", "ooze-about" },
   { king_icon_monitor, "Displays",            "ooze-monitor" },
   { king_icon_themes,  "Themes",              "ooze-themes" },
+  { king_icon_defaults, "Default Apps",       "ooze-defaults" },
   { king_icon_spot,    "Spot",                "spot" },
   { king_icon_command, "Terminal",       "ooze-command" },
   { king_icon_ear,     "Sound Settings", "ooze-ear" },

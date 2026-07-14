@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Default Applications
+GenericName=Default Applications
+Comment=Choose the default applications for common tasks
+Exec=ooze-defaults
+Icon=preferences-desktop-default-applications
+Terminal=false
+Type=Application
+Categories=Settings;GTK;
+StartupWMClass=org.ooze.Defaults
