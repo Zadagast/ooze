@@ -780,6 +780,6 @@ ooze_portal_backend_start (GDBusConnection *connection)
                     G_CALLBACK (on_start), state);
   g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (state->screen_cast),
                                     connection,
-                                    "/org/freedesktop/impl/portal/desktop/ooze",
+                                    "/org/freedesktop/portal/desktop",
                                     NULL);
 }
