@@ -1,0 +1,7 @@
+[Unit]
+Description=Portal service (Ooze ScreenCast implementation)
+
+[Service]
+Type=dbus
+BusName=org.freedesktop.impl.portal.desktop.ooze
+ExecStart=/usr/libexec/ooze-portal

@@ -291,6 +291,9 @@ if gtk4_dep.found() and adw_dep.found()
   install_data(ooze_portal_service,
     install_dir: get_option('datadir') / 'dbus-1' / 'services',
   )
+  install_data('data/systemd/user/xdg-desktop-portal-ooze.service',
+    install_dir: get_option('prefix') / 'lib' / 'systemd' / 'user',
+  )
 
   executable('spot',
     'spot/main.c',
