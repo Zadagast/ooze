@@ -5,6 +5,7 @@
 #include "ooze-dnd-bridge.h"
 #include "ooze-foreign-gtk.h"
 #include "ooze-icon-lookup.h"
+#include "ooze-window-tracker.h"
 #include "ooze-shared-appmenu.h"
 #include "ooze-shared-icons.h"
 #include "ooze-stall.h"
@@ -1067,12 +1068,9 @@ ooze_dock_attach_indicator (ClutterActor *launcher, float launcher_w)
   g_object_set_data (G_OBJECT (launcher), "indicator", indicator);
 }
 
-/* ── Indicator update timer ───────────────────────────────────────────────── */
+/* ── Running-state refresh (event-driven via OozeWindowTracker) ───────────────────────────────────────────────── */
 
-typedef struct {
-  MetaDisplay  *display;
-  ClutterActor *container;   /* aqua_dock_icons */
-} OozeDockIndicatorCtx;
+
 
 static gboolean
 ooze_dock_check_by_id (MetaDisplay *display, const char *app_id)
@@ -1192,13 +1190,13 @@ ooze_dock_update_icon_geometries (MetaDisplay  *display,
     }
 }
 
-static gboolean
-ooze_dock_update_indicators_cb (gpointer user_data)
+static void
+ooze_dock_refresh_running_state (MetaDisplay  *display,
+                                 ClutterActor *container)
 {
-  OozeDockIndicatorCtx *ctx   = user_data;
-  ClutterActor       *child;
+  ClutterActor *child;
 
-  for (child = clutter_actor_get_first_child (ctx->container);
+  for (child = clutter_actor_get_first_child (container);
        child != NULL;
        child = clutter_actor_get_next_sibling (child))
     {
@@ -1213,7 +1211,7 @@ ooze_dock_update_indicators_cb (gpointer user_data)
       {
         const char *app_id = g_object_get_data (G_OBJECT (child), "app-id");
         if (app_id)
-          running = ooze_dock_check_by_id (ctx->display, app_id);
+          running = ooze_dock_check_by_id (display, app_id);
       }
 
       /* Then try GDesktopAppInfo (generic launchers) */
@@ -1221,13 +1219,13 @@ ooze_dock_update_indicators_cb (gpointer user_data)
         {
           GDesktopAppInfo *info = g_object_get_data (G_OBJECT (child), "app-info");
           if (info)
-            running = ooze_dock_check_by_info (ctx->display, info);
+            running = ooze_dock_check_by_info (display, info);
         }
 
       clutter_actor_set_opacity (indicator, running ? 255 : 0);
     }
 
-  ooze_dock_update_icon_geometries (ctx->display, ctx->container);
+  ooze_dock_update_icon_geometries (display, container);
 
   /* Keep temporary running icons in sync with the pin list. */
   {
@@ -1240,8 +1238,8 @@ ooze_dock_update_indicators_cb (gpointer user_data)
     for (i = 0; i < G_N_ELEMENTS (ooze_dock_app_catalog); i++)
       {
         const char *id = ooze_dock_app_catalog[i].app_id;
-        ClutterActor *icon = ooze_dock_find_by_app_id (ctx->container, id);
-        gboolean running = ooze_dock_check_by_id (ctx->display, id);
+        ClutterActor *icon = ooze_dock_find_by_app_id (container, id);
+        gboolean running = ooze_dock_check_by_id (display, id);
         gboolean pinned = icon && ooze_dock_app_is_pinned (icon);
 
         if (running && !icon)
@@ -1253,7 +1251,7 @@ ooze_dock_update_indicators_cb (gpointer user_data)
 
     if (!need_rebuild)
       {
-        all = meta_display_list_all_windows (ctx->display);
+        all = meta_display_list_all_windows (display);
         for (l = all; l != NULL; l = l->next)
           {
             g_autofree char *app_id = NULL;
@@ -1263,7 +1261,7 @@ ooze_dock_update_indicators_cb (gpointer user_data)
               continue;
             if (ooze_dock_find_spec (app_id))
               continue;
-            if (!ooze_dock_find_by_app_id (ctx->container, app_id))
+            if (!ooze_dock_find_by_app_id (container, app_id))
               {
                 need_rebuild = TRUE;
                 break;
@@ -1274,7 +1272,7 @@ ooze_dock_update_indicators_cb (gpointer user_data)
 
     if (!need_rebuild)
       {
-        for (child = clutter_actor_get_first_child (ctx->container);
+        for (child = clutter_actor_get_first_child (container);
              child != NULL;
              child = clutter_actor_get_next_sibling (child))
           {
@@ -1290,9 +1288,9 @@ ooze_dock_update_indicators_cb (gpointer user_data)
             app_id = g_object_get_data (G_OBJECT (child), "app-id");
             info = g_object_get_data (G_OBJECT (child), "app-info");
             if (app_id)
-              running = ooze_dock_check_by_id (ctx->display, app_id);
+              running = ooze_dock_check_by_id (display, app_id);
             if (!running && info)
-              running = ooze_dock_check_by_info (ctx->display, info);
+              running = ooze_dock_check_by_info (display, info);
             if (!running)
               {
                 need_rebuild = TRUE;
@@ -1302,11 +1300,9 @@ ooze_dock_update_indicators_cb (gpointer user_data)
       }
 
     if (need_rebuild &&
-        !g_object_get_data (G_OBJECT (ctx->container), "dock-dragging-any"))
-      ooze_dock_schedule_rebuild_icons (ctx->container);
+        !g_object_get_data (G_OBJECT (container), "dock-dragging-any"))
+      ooze_dock_schedule_rebuild_icons (container);
   }
-
-  return G_SOURCE_CONTINUE;
 }
 
 static gboolean
@@ -1738,6 +1734,7 @@ ooze_dock_rebuild_icons (ClutterActor *container)
    * GSettings/click stack; only via ooze_dock_schedule_rebuild_icons. */
   stall = ooze_stall_begin ("dock-rebuild-icons");
   ooze_dock_fill_icons (container, display, stage);
+  ooze_dock_refresh_running_state (display, container);
   ooze_dock_notify_changed (container);
 }
 
@@ -2570,31 +2567,34 @@ ooze_dock_downloads_actor (void)
   return ooze_dock_find_by_app_id (ooze_dock_icons_container, "org.ooze.Downloads");
 }
 
+static void
+ooze_dock_on_windows_changed (gpointer user_data)
+{
+  ClutterActor *container = user_data;
+  MetaDisplay *display;
+
+  display = g_object_get_data (G_OBJECT (container), "dock-display");
+  if (display)
+    ooze_dock_refresh_running_state (display, container);
+}
+
 /* Everything wired to the icons container must be torn down with it —
- * the indicator timer, the MetaDnd handlers (the backend outlives the
+ * the window tracker, the MetaDnd handlers (the backend outlives the
  * dock) and any pending timeouts/idles that hold raw container pointers. */
 static void
 ooze_dock_on_container_destroy (ClutterActor *container,
                                 gpointer      user_data G_GNUC_UNUSED)
 {
-  OozeDockIndicatorCtx *indicator_ctx;
+  OozeWindowTracker *tracker;
   MetaDnd *dnd;
   OozeAquaMenu *pin_menu;
   guint id;
 
-  id = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (container),
-                                            "indicator-timer"));
-  if (id)
+  tracker = g_object_get_data (G_OBJECT (container), "window-tracker");
+  if (tracker)
     {
-      g_source_remove (id);
-      g_object_set_data (G_OBJECT (container), "indicator-timer", NULL);
-    }
-
-  indicator_ctx = g_object_get_data (G_OBJECT (container), "indicator-ctx");
-  if (indicator_ctx)
-    {
-      g_object_set_data (G_OBJECT (container), "indicator-ctx", NULL);
-      g_free (indicator_ctx);
+      g_object_set_data (G_OBJECT (container), "window-tracker", NULL);
+      ooze_window_tracker_free (tracker);
     }
 
   dnd = g_object_get_data (G_OBJECT (container), "dock-dnd");
@@ -2634,8 +2634,6 @@ ooze_dock_populate_container (MetaContext   *context,
                             ClutterActor  *stage,
                             ClutterActor  *container)
 {
-  OozeDockIndicatorCtx *indicator_ctx;
-  guint timer_id;
   MetaBackend *backend;
   MetaDnd *dnd;
 
@@ -2666,16 +2664,17 @@ ooze_dock_populate_container (MetaContext   *context,
                               settings, g_object_unref);
     }
 
-  if (!g_object_get_data (G_OBJECT (container), "indicator-timer"))
+  if (!g_object_get_data (G_OBJECT (container), "window-tracker"))
     {
-      indicator_ctx = g_new0 (OozeDockIndicatorCtx, 1);
-      indicator_ctx->display = display;
-      indicator_ctx->container = container;
-      timer_id = g_timeout_add (600, ooze_dock_update_indicators_cb, indicator_ctx);
-      g_object_set_data (G_OBJECT (container), "indicator-timer",
-                         GUINT_TO_POINTER (timer_id));
-      g_object_set_data (G_OBJECT (container), "indicator-ctx", indicator_ctx);
+      OozeWindowTracker *tracker = ooze_window_tracker_new (display);
+
+      ooze_window_tracker_set_changed_callback (tracker,
+                                                ooze_dock_on_windows_changed,
+                                                container);
+      g_object_set_data (G_OBJECT (container), "window-tracker", tracker);
     }
+
+  ooze_dock_refresh_running_state (display, container);
 
   if (!g_object_get_data (G_OBJECT (container), "dock-dnd-wired") && context)
     {
