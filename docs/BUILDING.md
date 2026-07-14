@@ -84,13 +84,13 @@ sudo apt install ./dist/ooze_0.3.0_amd64.deb
 
 Global menus for classic GTK3 apps (Inkscape) need Xwayland (on by default in both launchers).
 
-Portals: the package installs `ooze-portals.conf` plus `UseIn=ooze` wrappers that still talk to **xdg-desktop-portal-gtk** / **xdg-desktop-portal-gnome** (FileChooser themed via session `GTK_THEME=WhiteSur-*` when WhiteSur is installed). A full Ooze Gel portal daemon is not shipped yet. Other gaps: idle/lock and some GNOME autostarts without a full `gnome-session` wrapper.
+Portals: the package installs `ooze-portals.conf` plus `UseIn=ooze` wrappers for **xdg-desktop-portal-gtk** and GNOME Keyring (FileChooser themed via session `GTK_THEME=WhiteSur-*` when WhiteSur is installed). ScreenCast, RemoteDesktop, and Screenshot are provided by a native Ooze backend (work in progress). Other gaps: idle/lock and some GNOME autostarts without a full `gnome-session` wrapper.
 
 **Runtime packages (Ubuntu 26.04 / Mutter 18)** — install before or with the `.deb`:
 
 ```bash
 sudo apt install mutter libmutter-18-0 xwayland dbus-user-session \
-  xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-gnome gnome-keyring \
+  xdg-desktop-portal xdg-desktop-portal-gtk gnome-keyring \
   qt6-gtk-platformtheme qt5-gtk-platformtheme \
   libgtk-4-1 libadwaita-1-0 \
   libvte-2.91-gtk4-0 libgtop-2.0-11 libudisks2-0 libpipewire-0.3-0t64 \
@@ -105,7 +105,7 @@ sudo apt install mutter libmutter-18-0 xwayland dbus-user-session \
 | `dbus-user-session` | Session bus + AppMenu registrar |
 | `xdg-desktop-portal` | Portal front-end (**Depends**) |
 | `xdg-desktop-portal-gtk` | Settings (light/dark) + FileChooser backend (**Depends**) |
-| `xdg-desktop-portal-gnome` | ScreenCast / RemoteDesktop backend (**Recommends**) |
+| native Ooze portal backend | ScreenCast / RemoteDesktop / Screenshot (work in progress) |
 | `qt6-gtk-platformtheme` / `qt5-gtk-platformtheme` | Qt apps follow the session light/dark (**Recommends**) |
 | `gnome-keyring` | Secret portal (**Recommends**) |
 | `libgtk-4-1`, `libadwaita-1-0` | First-party apps |

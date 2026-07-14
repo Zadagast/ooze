@@ -59,14 +59,12 @@ install -d "$STAGE/usr/share/wayland-sessions"
 install -m 0644 "$ROOT/data/wayland-sessions/ooze.desktop" \
   "$STAGE/usr/share/wayland-sessions/ooze.desktop"
 
-# Ooze-owned portal preference + UseIn=ooze wrappers (backends stay gtk/gnome)
+# Ooze-owned portal preference + UseIn=ooze wrappers (remaining backends stay gtk/keyring)
 install -d "$STAGE/usr/share/xdg-desktop-portal/portals"
 install -m 0644 "$ROOT/data/xdg-desktop-portal/ooze-portals.conf" \
   "$STAGE/usr/share/xdg-desktop-portal/ooze-portals.conf"
 install -m 0644 "$ROOT/data/xdg-desktop-portal/portals/ooze-gtk.portal" \
   "$STAGE/usr/share/xdg-desktop-portal/portals/ooze-gtk.portal"
-install -m 0644 "$ROOT/data/xdg-desktop-portal/portals/ooze-gnome.portal" \
-  "$STAGE/usr/share/xdg-desktop-portal/portals/ooze-gnome.portal"
 install -m 0644 "$ROOT/data/xdg-desktop-portal/portals/ooze-gnome-keyring.portal" \
   "$STAGE/usr/share/xdg-desktop-portal/portals/ooze-gnome-keyring.portal"
 install -d "$STAGE/usr/share/ooze"

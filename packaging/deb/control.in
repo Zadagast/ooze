@@ -7,7 +7,7 @@ Architecture: amd64
 Maintainer: Ooze Desktop <ooze@localhost>
 Homepage: https://github.com/Zadagast/ooze
 Depends: mutter, libmutter-18-0, xwayland, dbus-user-session, xdg-desktop-portal, xdg-desktop-portal-gtk, libgtk-4-1, libadwaita-1-0, libvte-2.91-gtk4-0, libgtop-2.0-11, libudisks2-0, libpipewire-0.3-0t64, libgdk-pixbuf-2.0-0, libcairo2, libpango-1.0-0, libpangocairo-1.0-0, libx11-6, libglib2.0-0t64
-Recommends: xdg-desktop-portal-gnome, qt6-gtk-platformtheme, qt5-gtk-platformtheme, gnome-keyring, appmenu-gtk3-module, appmenu-gtk-module-common, appmenu-registrar, libayatana-appindicator3-1
+Recommends: qt6-gtk-platformtheme, qt5-gtk-platformtheme, gnome-keyring, appmenu-gtk3-module, appmenu-gtk-module-common, appmenu-registrar, libayatana-appindicator3-1
 Suggests: xsettingsd
 Description: Ooze Wayland desktop (Mutter 18)
  Ooze is a Mutter-based desktop shell with Spot, Command, King, and related
@@ -15,7 +15,7 @@ Description: Ooze Wayland desktop (Mutter 18)
  launcher for testing inside an existing login.
  .
  Ships ooze-portals.conf and UseIn=ooze portal wrappers so xdg-desktop-portal
- selects gtk/gnome backends under XDG_CURRENT_DESKTOP=Ooze. Native sessions
+ selects the remaining Ooze backends under XDG_CURRENT_DESKTOP=Ooze. Native sessions
  publish that desktop id to systemd --user and start gnome-keyring when
  installed. Lock screen is a Mutter overlay + ooze-pam-helper (not
  ext-session-lock-v1).
