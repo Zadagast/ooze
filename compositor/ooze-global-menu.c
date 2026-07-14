@@ -61,6 +61,11 @@ struct _OozeGlobalMenu
   guint       registrar_retry_left;
   MetaWindow *registrar_retry_window; /* non-owning */
 
+  GCancellable *cancellable;       /* whole-object lifetime */
+  GCancellable *bind_cancellable;  /* in-flight registrar query */
+  MetaWindow   *pending_bind_window; /* weak pointer */
+  gboolean      registrar_service_requested;
+
   /* Strong refs so GDBusMenuModel submenu Start() stays alive. */
   GMenuModel *submenu_models[OOZE_GLOBAL_MENU_MAX_TOP];
   gulong      submenu_handlers[OOZE_GLOBAL_MENU_MAX_TOP];
@@ -104,6 +109,13 @@ static MetaWindow *ooze_global_menu_find_window_by_xid (OozeGlobalMenu *menu,
 static void ooze_global_menu_log_registrar_miss (OozeGlobalMenu *menu,
                                                  MetaWindow     *window);
 static void ooze_global_menu_ensure_registrar_watch (OozeGlobalMenu *menu);
+static void ooze_global_menu_ensure_registrar_service (OozeGlobalMenu *menu);
+static void ooze_global_menu_cancel_bind_query (OozeGlobalMenu *menu);
+static void on_dbusmenu_changed (gpointer user_data);
+static void ooze_global_menu_bind_window_with_registrar (OozeGlobalMenu *menu,
+                                                         MetaWindow     *window,
+                                                         const char     *registrar_bus,
+                                                         const char     *registrar_menubar);
 static gboolean ooze_global_menu_action_sensitive (OozeGlobalMenu *menu,
                                                  const char   *action);
 static void ooze_global_menu_append_model (OozeGlobalMenu *menu,
@@ -333,87 +345,150 @@ ooze_global_menu_kick_actions (GActionGroup *group)
   names = g_action_group_list_actions (group);
 }
 
-static gboolean
-ooze_global_menu_query_appmenu_registrar_xid (OozeGlobalMenu *menu,
-                                            guint32       xid,
-                                            char        **bus_out,
-                                            char        **menubar_out)
+typedef struct
 {
-  g_autoptr (GError) error = NULL;
-  g_autoptr (GVariant) reply = NULL;
-  g_autoptr (OozeStallScope) stall = NULL;
+  OozeGlobalMenu *menu;
+  guint32       xids[2];
+  guint         n_xids;
+  guint         index;
+} OozeGlobalMenuRegistrarQuery;
 
-  *bus_out = NULL;
-  *menubar_out = NULL;
+static void
+ooze_global_menu_registrar_query_step (OozeGlobalMenuRegistrarQuery *query);
 
-  if (xid == 0 || !menu->session)
-    return FALSE;
+static void
+ooze_global_menu_registrar_query_done (OozeGlobalMenuRegistrarQuery *query,
+                                       const char                   *bus,
+                                       const char                   *menubar)
+{
+  OozeGlobalMenu *menu = query->menu;
+  MetaWindow *window = menu->pending_bind_window;
 
-  stall = ooze_stall_begin ("appmenu-GetMenuForWindow");
-  reply = g_dbus_connection_call_sync (menu->session,
-                                       "com.canonical.AppMenu.Registrar",
-                                       "/com/canonical/AppMenu/Registrar",
-                                       "com.canonical.AppMenu.Registrar",
-                                       "GetMenuForWindow",
-                                       g_variant_new ("(u)", xid),
-                                       G_VARIANT_TYPE ("(so)"),
-                                       G_DBUS_CALL_FLAGS_NONE,
-                                       800,
-                                       NULL,
-                                       &error);
-  if (!reply)
-    return FALSE;
+  g_free (query);
 
-  g_variant_get (reply, "(so)", bus_out, menubar_out);
-  if (!*bus_out || !**bus_out || !*menubar_out || !**menubar_out)
-    {
-      g_clear_pointer (bus_out, g_free);
-      g_clear_pointer (menubar_out, g_free);
-      return FALSE;
-    }
+  if (window)
+    g_object_remove_weak_pointer (G_OBJECT (window),
+                                  (gpointer *) &menu->pending_bind_window);
+  menu->pending_bind_window = NULL;
+  g_clear_object (&menu->bind_cancellable);
 
-  return TRUE;
+  /* Focus moved on while the query was in flight. */
+  if (!window || window != menu->watched_window)
+    return;
+
+  ooze_global_menu_bind_window_with_registrar (menu, window, bus, menubar);
 }
 
-static gboolean
-ooze_global_menu_query_appmenu_registrar (OozeGlobalMenu *menu,
-                                        MetaWindow   *window,
-                                        char        **bus_out,
-                                        char        **menubar_out)
+static void
+ooze_global_menu_registrar_query_cb (GObject      *source,
+                                     GAsyncResult *res,
+                                     gpointer      user_data)
 {
+  OozeGlobalMenuRegistrarQuery *query = user_data;
   g_autoptr (GError) error = NULL;
+  g_autoptr (GVariant) reply = NULL;
+
+  reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), res,
+                                         &error);
+  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    {
+      g_free (query);
+      return;
+    }
+
+  if (reply)
+    {
+      g_autofree char *bus = NULL;
+      g_autofree char *menubar = NULL;
+
+      g_variant_get (reply, "(so)", &bus, &menubar);
+      if (bus && *bus && menubar && *menubar)
+        {
+          ooze_global_menu_registrar_query_done (query, bus, menubar);
+          return;
+        }
+    }
+
+  query->index++;
+  if (query->index < query->n_xids)
+    {
+      ooze_global_menu_registrar_query_step (query);
+      return;
+    }
+
+  ooze_global_menu_registrar_query_done (query, NULL, NULL);
+}
+
+static void
+ooze_global_menu_registrar_query_step (OozeGlobalMenuRegistrarQuery *query)
+{
+  OozeGlobalMenu *menu = query->menu;
+
+  g_dbus_connection_call (menu->session,
+                          "com.canonical.AppMenu.Registrar",
+                          "/com/canonical/AppMenu/Registrar",
+                          "com.canonical.AppMenu.Registrar",
+                          "GetMenuForWindow",
+                          g_variant_new ("(u)", query->xids[query->index]),
+                          G_VARIANT_TYPE ("(so)"),
+                          G_DBUS_CALL_FLAGS_NONE,
+                          800,
+                          menu->bind_cancellable,
+                          ooze_global_menu_registrar_query_cb,
+                          query);
+}
+
+static void
+ooze_global_menu_cancel_bind_query (OozeGlobalMenu *menu)
+{
+  if (menu->bind_cancellable)
+    {
+      g_cancellable_cancel (menu->bind_cancellable);
+      g_clear_object (&menu->bind_cancellable);
+    }
+  if (menu->pending_bind_window)
+    {
+      g_object_remove_weak_pointer (G_OBJECT (menu->pending_bind_window),
+                                    (gpointer *) &menu->pending_bind_window);
+      menu->pending_bind_window = NULL;
+    }
+}
+
+/* GTK appmenu-gtk-module registers the Gdk toplevel XID; Mutter exposes
+ * both the client xwindow and the toplevel — try both, asynchronously. */
+static void
+ooze_global_menu_query_appmenu_registrar_async (OozeGlobalMenu *menu,
+                                                MetaWindow     *window)
+{
+  OozeGlobalMenuRegistrarQuery *query;
   guint32 xid;
   guint32 toplevel_xid;
 
-  *bus_out = NULL;
-  *menubar_out = NULL;
+  ooze_global_menu_cancel_bind_query (menu);
+  ooze_global_menu_ensure_registrar_service (menu);
 
-  if (!window ||
-      meta_window_get_client_type (window) != META_WINDOW_CLIENT_TYPE_X11)
-    return FALSE;
-
-  ooze_appmenu_ensure_registrar ();
-
-  if (!menu->session)
-    {
-      menu->session = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, &error);
-      if (!menu->session)
-        return FALSE;
-    }
-
-  /* GTK appmenu-gtk-module registers the Gdk toplevel XID; Mutter exposes
-   * both the client xwindow and the toplevel — try both. */
   xid = (guint32) meta_window_x11_get_xwindow (window);
   toplevel_xid = (guint32) meta_window_x11_get_toplevel_xwindow (window);
 
-  if (ooze_global_menu_query_appmenu_registrar_xid (menu, xid, bus_out, menubar_out))
-    return TRUE;
-  if (toplevel_xid != xid &&
-      ooze_global_menu_query_appmenu_registrar_xid (menu, toplevel_xid,
-                                                  bus_out, menubar_out))
-    return TRUE;
+  query = g_new0 (OozeGlobalMenuRegistrarQuery, 1);
+  query->menu = menu;
+  if (xid != 0)
+    query->xids[query->n_xids++] = xid;
+  if (toplevel_xid != 0 && toplevel_xid != xid)
+    query->xids[query->n_xids++] = toplevel_xid;
 
-  return FALSE;
+  if (query->n_xids == 0)
+    {
+      g_free (query);
+      ooze_global_menu_bind_window_with_registrar (menu, window, NULL, NULL);
+      return;
+    }
+
+  menu->bind_cancellable = g_cancellable_new ();
+  menu->pending_bind_window = window;
+  g_object_add_weak_pointer (G_OBJECT (window),
+                             (gpointer *) &menu->pending_bind_window);
+  ooze_global_menu_registrar_query_step (query);
 }
 
 static void
@@ -446,8 +521,8 @@ ooze_global_menu_registrar_retry_cb (gpointer user_data)
       return G_SOURCE_REMOVE;
     }
 
-  if (menu->dbusmenu || (menu->menubar &&
-                         g_menu_model_get_n_items (menu->menubar) > 0))
+  if (ooze_global_menu_has_dbusmenu (menu) ||
+      (menu->menubar && g_menu_model_get_n_items (menu->menubar) > 0))
     {
       menu->registrar_retry_left = 0;
       menu->registrar_retry_window = NULL;
@@ -468,8 +543,8 @@ ooze_global_menu_registrar_retry_cb (gpointer user_data)
   if (menu->registrar_retry_id != 0)
     return G_SOURCE_REMOVE;
 
-  if (menu->dbusmenu || (menu->menubar &&
-                         g_menu_model_get_n_items (menu->menubar) > 0))
+  if (ooze_global_menu_has_dbusmenu (menu) ||
+      (menu->menubar && g_menu_model_get_n_items (menu->menubar) > 0))
     {
       ooze_global_menu_cancel_registrar_retry (menu);
       return G_SOURCE_REMOVE;
@@ -497,7 +572,7 @@ ooze_global_menu_schedule_registrar_retry (OozeGlobalMenu *menu,
     return;
   if (meta_window_get_client_type (window) != META_WINDOW_CLIENT_TYPE_X11)
     return;
-  if (menu->dbusmenu)
+  if (ooze_global_menu_has_dbusmenu (menu))
     return;
 
   menu->registrar_retry_window = window;
@@ -553,21 +628,86 @@ on_appmenu_window_registered (GDBusConnection *connection G_GNUC_UNUSED,
 }
 
 static void
-ooze_global_menu_ensure_registrar_watch (OozeGlobalMenu *menu)
+ooze_global_menu_registrar_start_cb (GObject      *source,
+                                     GAsyncResult *res,
+                                     gpointer      user_data G_GNUC_UNUSED)
 {
   g_autoptr (GError) error = NULL;
+  g_autoptr (GVariant) reply = NULL;
 
+  reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), res,
+                                         &error);
+  if (!reply &&
+      !g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    g_warning ("Ooze global menu: could not activate AppMenu registrar: %s "
+               "(install appmenu-registrar / run scripts/install-appmenu.sh)",
+               error ? error->message : "unknown");
+}
+
+static void
+ooze_global_menu_registrar_owner_cb (GObject      *source,
+                                     GAsyncResult *res,
+                                     gpointer      user_data)
+{
+  OozeGlobalMenu *menu = user_data;
+  g_autoptr (GVariant) owner = NULL;
+
+  owner = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), res, NULL);
+  if (owner)
+    return;
+
+  g_dbus_connection_call (menu->session,
+                          "org.freedesktop.DBus",
+                          "/org/freedesktop/DBus",
+                          "org.freedesktop.DBus",
+                          "StartServiceByName",
+                          g_variant_new ("(su)",
+                                         "com.canonical.AppMenu.Registrar",
+                                         0u),
+                          G_VARIANT_TYPE ("(u)"),
+                          G_DBUS_CALL_FLAGS_NONE,
+                          3000,
+                          menu->cancellable,
+                          ooze_global_menu_registrar_start_cb,
+                          NULL);
+}
+
+/* Async counterpart of ooze_appmenu_ensure_registrar() — never blocks the
+ * compositor thread. */
+static void
+ooze_global_menu_ensure_registrar_service (OozeGlobalMenu *menu)
+{
+  if (!ooze_appmenu_foreign_enabled ())
+    return;
+  if (!menu->session || menu->registrar_service_requested)
+    return;
+
+  menu->registrar_service_requested = TRUE;
+  g_dbus_connection_call (menu->session,
+                          "org.freedesktop.DBus",
+                          "/org/freedesktop/DBus",
+                          "org.freedesktop.DBus",
+                          "GetNameOwner",
+                          g_variant_new ("(s)",
+                                         "com.canonical.AppMenu.Registrar"),
+                          G_VARIANT_TYPE ("(s)"),
+                          G_DBUS_CALL_FLAGS_NONE,
+                          500,
+                          menu->cancellable,
+                          ooze_global_menu_registrar_owner_cb,
+                          menu);
+}
+
+static void
+ooze_global_menu_ensure_registrar_watch (OozeGlobalMenu *menu)
+{
   if (!menu || menu->registrar_signal_id != 0)
     return;
 
-  ooze_appmenu_ensure_registrar ();
-
   if (!menu->session)
-    {
-      menu->session = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, &error);
-      if (!menu->session)
-        return;
-    }
+    return;
+
+  ooze_global_menu_ensure_registrar_service (menu);
 
   menu->registrar_signal_id =
     g_dbus_connection_signal_subscribe (menu->session,
@@ -787,11 +927,8 @@ static void
 ooze_global_menu_log_registrar_miss (OozeGlobalMenu *menu,
                                      MetaWindow     *window)
 {
-  g_autofree char *bus = NULL;
-  g_autofree char *path = NULL;
   guint32 xid = 0;
   guint32 toplevel = 0;
-  gboolean have_reg;
 
   if (!menu || !window)
     return;
@@ -802,19 +939,15 @@ ooze_global_menu_log_registrar_miss (OozeGlobalMenu *menu,
 
   xid = (guint32) meta_window_x11_get_xwindow (window);
   toplevel = (guint32) meta_window_x11_get_toplevel_xwindow (window);
-  have_reg = ooze_global_menu_query_appmenu_registrar (menu, window, &bus, &path);
 
   g_warning ("Ooze global menu: no menu export for X11 \"%s\" wm_class=%s "
-             "xid=%u toplevel=%u GetMenuForWindow=%s%s%s "
+             "xid=%u toplevel=%u "
              "gtk_bus=%s gtk_menubar=%s — "
              "in-app bar may remain if ShellShowsMenubar was late",
              meta_window_get_title (window) ? meta_window_get_title (window) : "?",
              meta_window_get_wm_class (window)
                ? meta_window_get_wm_class (window) : "?",
              xid, toplevel,
-             have_reg ? "yes " : "no",
-             have_reg && bus ? bus : "",
-             have_reg && path ? path : "",
              meta_window_get_gtk_unique_bus_name (window)
                ? meta_window_get_gtk_unique_bus_name (window) : "-",
              meta_window_get_gtk_menubar_object_path (window)
@@ -883,17 +1016,11 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
                             MetaWindow   *window)
 {
   g_autoptr (OozeStallScope) stall = NULL;
-  const char *bus = NULL;
-  const char *menubar = NULL;
-  const char *app_path = NULL;
-  const char *win_path = NULL;
-  g_autofree char *registrar_bus = NULL;
-  g_autofree char *registrar_menubar = NULL;
-  gboolean have_export;
   gboolean is_x11;
 
   stall = ooze_stall_begin ("focus-bind");
 
+  ooze_global_menu_cancel_bind_query (menu);
   ooze_global_menu_watch_window (menu, window);
   ooze_global_menu_ensure_registrar_watch (menu);
 
@@ -921,8 +1048,7 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
   ooze_global_menu_set_x11_launch_hint (menu, NULL);
 
   /*
-   * Foreign X11 AppMenu (registrar / dbusmenu) is off by default — it does
-   * sync D-Bus on the compositor main thread and freezes the session.
+   * Foreign X11 AppMenu (registrar / dbusmenu) is off by default.
    * Wayland gtk-shell exports (Ooze apps) still bind below.
    */
   if (is_x11 && !ooze_appmenu_foreign_enabled ())
@@ -945,29 +1071,80 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
    *   _GTK_UNIQUE_BUS_NAME / _GTK_MENUBAR_OBJECT_PATH — same gtk-shell props
    *   Mutter exposes on MetaWindow. Prefer registrar when present; otherwise
    *   bind those props (not empty unlabeled stubs from bare Wayland export).
+   * The registrar lookup is asynchronous; binding completes in
+   * ooze_global_menu_bind_window_with_registrar().
    */
-  if (is_x11)
+  if (ooze_appmenu_foreign_enabled () && menu->session)
     {
-      ooze_appmenu_ensure_shell_shows_menubar ();
-      if (ooze_global_menu_query_appmenu_registrar (menu, window,
-                                                  &registrar_bus,
-                                                  &registrar_menubar))
+      if (is_x11)
         {
-          bus = registrar_bus;
-          menubar = registrar_menubar;
+          ooze_appmenu_ensure_shell_shows_menubar ();
+          ooze_global_menu_query_appmenu_registrar_async (menu, window);
+          return;
         }
-      else
-        {
-          bus = meta_window_get_gtk_unique_bus_name (window);
-          menubar = meta_window_get_gtk_menubar_object_path (window);
-          if (!menubar || !*menubar)
-            menubar = meta_window_get_gtk_app_menu_object_path (window);
-          app_path = meta_window_get_gtk_application_object_path (window);
-          win_path = meta_window_get_gtk_window_object_path (window);
-        }
+
+      {
+        const char *bus = meta_window_get_gtk_unique_bus_name (window);
+        const char *menubar = meta_window_get_gtk_menubar_object_path (window);
+
+        if (!menubar || !*menubar)
+          menubar = meta_window_get_gtk_app_menu_object_path (window);
+        if (!bus || !*bus || !menubar || !*menubar)
+          {
+            ooze_global_menu_query_appmenu_registrar_async (menu, window);
+            return;
+          }
+      }
+    }
+
+  ooze_global_menu_bind_window_with_registrar (menu, window, NULL, NULL);
+}
+
+/* Legacy dbusmenu layout data landed — refresh the cached tops. */
+static void
+on_dbusmenu_changed (gpointer user_data)
+{
+  OozeGlobalMenu *menu = user_data;
+  OozeDbusmenuItem *tops = NULL;
+  gsize n_tops = 0;
+
+  if (!menu->dbusmenu)
+    return;
+
+  if (ooze_dbusmenu_get_top_items (menu->dbusmenu, &tops, &n_tops))
+    {
+      ooze_dbusmenu_items_free (menu->dbus_tops, menu->n_dbus_tops);
+      menu->dbus_tops = tops;
+      menu->n_dbus_tops = n_tops;
+    }
+
+  ooze_global_menu_emit_changed (menu);
+}
+
+static void
+ooze_global_menu_bind_window_with_registrar (OozeGlobalMenu *menu,
+                                             MetaWindow     *window,
+                                             const char     *registrar_bus,
+                                             const char     *registrar_menubar)
+{
+  const char *bus = NULL;
+  const char *menubar = NULL;
+  const char *app_path = NULL;
+  const char *win_path = NULL;
+  gboolean have_export;
+  gboolean is_x11;
+
+  is_x11 = meta_window_get_client_type (window) == META_WINDOW_CLIENT_TYPE_X11;
+
+  if (registrar_bus && *registrar_bus && registrar_menubar && *registrar_menubar)
+    {
+      bus = registrar_bus;
+      menubar = registrar_menubar;
     }
   else
     {
+      registrar_bus = NULL;
+      registrar_menubar = NULL;
       bus = meta_window_get_gtk_unique_bus_name (window);
       menubar = meta_window_get_gtk_menubar_object_path (window);
       /* Inkscape / older GTK often export the app-menu path instead of menubar. */
@@ -975,16 +1152,6 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
         menubar = meta_window_get_gtk_app_menu_object_path (window);
       app_path = meta_window_get_gtk_application_object_path (window);
       win_path = meta_window_get_gtk_window_object_path (window);
-
-      if (ooze_appmenu_foreign_enabled () &&
-          (!bus || !*bus || !menubar || !*menubar) &&
-          ooze_global_menu_query_appmenu_registrar (menu, window,
-                                                  &registrar_bus,
-                                                  &registrar_menubar))
-        {
-          bus = registrar_bus;
-          menubar = registrar_menubar;
-        }
     }
 
   have_export = bus && *bus && menubar && *menubar;
@@ -1079,17 +1246,10 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
 
   ooze_global_menu_clear_proxy (menu);
 
+  /* Session bus is acquired asynchronously at startup; a re-bind runs
+   * once it is ready. */
   if (!menu->session)
-    {
-      g_autoptr (GError) error = NULL;
-      menu->session = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, &error);
-      if (!menu->session)
-        {
-          g_warning ("Ooze global menu: session bus unavailable: %s",
-                     error ? error->message : "unknown");
-          return;
-        }
-    }
+    return;
 
   menu->bound_window = window;
   menu->bus_name = g_strdup (bus);
@@ -1100,44 +1260,31 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
   /* Registrar paths are dbusmenu; gtk-shell / modern appmenu paths are org.gtk.Menus. */
   if (registrar_bus && registrar_menubar)
     {
-      g_autoptr (OozeStallScope) stall = NULL;
+      /* Don't wrap dbusmenu paths as GDBusMenuModel — that yields "Menu" stubs. */
       OozeDbusmenu *dm = ooze_dbusmenu_new (menu->session,
                                         menu->bus_name,
                                         menu->menubar_path);
-      OozeDbusmenuItem *tops = NULL;
-      gsize n_tops = 0;
 
-      stall = ooze_stall_begin ("appmenu-dbusmenu-GetLayout");
-      if (dm && ooze_dbusmenu_get_top_items (dm, &tops, &n_tops) && n_tops > 0)
+      if (!dm)
         {
-          g_print ("Ooze global menu: dbusmenu bound (%s %s) tops=%u title=\"%s\"\n",
-                   menu->bus_name, menu->menubar_path,
-                   (unsigned) n_tops,
-                   meta_window_get_title (window) ?
-                     meta_window_get_title (window) : "");
-          menu->dbusmenu = dm;
-          menu->dbus_tops = tops;
-          menu->n_dbus_tops = n_tops;
-          ooze_global_menu_emit_changed (menu);
+          g_clear_pointer (&menu->bus_name, g_free);
+          g_clear_pointer (&menu->menubar_path, g_free);
+          g_clear_pointer (&menu->app_path, g_free);
+          g_clear_pointer (&menu->win_path, g_free);
+          menu->bound_window = NULL;
+          ooze_global_menu_schedule_registrar_retry (menu, window);
           return;
         }
 
-      g_warning ("Ooze global menu: registrar path %s %s has no dbusmenu tops "
-                 "(title=\"%s\")",
-                 menu->bus_name ? menu->bus_name : "?",
-                 menu->menubar_path ? menu->menubar_path : "?",
-                 meta_window_get_title (window) ?
-                   meta_window_get_title (window) : "");
-      ooze_dbusmenu_items_free (tops, n_tops);
-      ooze_dbusmenu_free (dm);
-      /* Don't wrap dbusmenu paths as GDBusMenuModel — that yields "Menu" stubs. */
-      g_clear_pointer (&menu->bus_name, g_free);
-      g_clear_pointer (&menu->menubar_path, g_free);
-      g_clear_pointer (&menu->app_path, g_free);
-      g_clear_pointer (&menu->win_path, g_free);
-      menu->bound_window = NULL;
-      ooze_global_menu_schedule_registrar_retry (menu, window);
-      ooze_global_menu_emit_changed (menu);
+      g_print ("Ooze global menu: dbusmenu bound (%s %s) title=\"%s\"\n",
+               menu->bus_name, menu->menubar_path,
+               meta_window_get_title (window) ?
+                 meta_window_get_title (window) : "");
+
+      /* Tops arrive asynchronously; on_dbusmenu_changed refreshes them. */
+      menu->dbusmenu = dm;
+      ooze_dbusmenu_set_changed_callback (dm, on_dbusmenu_changed, menu);
+      ooze_dbusmenu_start (dm);
       return;
     }
 
@@ -1183,6 +1330,35 @@ on_focus_window_changed (MetaDisplay  *display G_GNUC_UNUSED,
   ooze_global_menu_schedule_focus_sync (menu);
 }
 
+static void
+on_session_bus_ready (GObject      *source G_GNUC_UNUSED,
+                      GAsyncResult *res,
+                      gpointer      user_data)
+{
+  OozeGlobalMenu *menu;
+  g_autoptr (GError) error = NULL;
+  GDBusConnection *session;
+
+  session = g_bus_get_finish (res, &error);
+  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    {
+      g_clear_object (&session);
+      return;
+    }
+
+  menu = user_data;
+  if (!session)
+    {
+      g_warning ("Ooze global menu: session bus unavailable: %s",
+                 error ? error->message : "unknown");
+      return;
+    }
+
+  menu->session = session;
+  ooze_global_menu_ensure_registrar_watch (menu);
+  ooze_global_menu_sync_focus (menu);
+}
+
 OozeGlobalMenu *
 ooze_global_menu_new (MetaDisplay *display)
 {
@@ -1192,11 +1368,13 @@ ooze_global_menu_new (MetaDisplay *display)
 
   menu = g_new0 (OozeGlobalMenu, 1);
   menu->display = display;
+  menu->cancellable = g_cancellable_new ();
   menu->focus_handler =
     g_signal_connect (display, "notify::focus-window",
                       G_CALLBACK (on_focus_window_changed), menu);
 
-  ooze_global_menu_ensure_registrar_watch (menu);
+  g_bus_get (G_BUS_TYPE_SESSION, menu->cancellable,
+             on_session_bus_ready, menu);
   ooze_global_menu_sync_focus (menu);
   return menu;
 }
@@ -1210,6 +1388,9 @@ ooze_global_menu_free (OozeGlobalMenu *menu)
   if (menu->display && menu->focus_handler)
     g_signal_handler_disconnect (menu->display, menu->focus_handler);
 
+  g_cancellable_cancel (menu->cancellable);
+  g_clear_object (&menu->cancellable);
+  ooze_global_menu_cancel_bind_query (menu);
   ooze_global_menu_cancel_focus_sync (menu);
   ooze_global_menu_cancel_registrar_retry (menu);
   if (menu->session && menu->registrar_signal_id != 0)
@@ -1818,13 +1999,9 @@ ooze_global_menu_fill_entries (OozeGlobalMenu     *menu,
 
       menu->suppress_changed--;
 
+      /* Children may still be in flight; the changed callback re-opens. */
       if (rows->len == 0)
-        {
-          g_warning ("Ooze global menu: dbusmenu top %u id=%d produced 0 rows "
-                     "(title bind still active)",
-                     top_index, parent_id);
-          return FALSE;
-        }
+        return FALSE;
 
       menu->n_entries = rows->len;
       menu->entries = g_new0 (OozeAquaMenuEntry, menu->n_entries);

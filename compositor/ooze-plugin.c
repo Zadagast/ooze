@@ -1561,7 +1561,7 @@ ooze_plugin_start (MetaPlugin *plugin)
   g_print ("OozePlugin: compositor plugin started successfully\n");
 
   ooze_appmenu_setup_environment ();
-  ooze_appmenu_ensure_registrar ();
+  /* Registrar activation happens asynchronously in OozeGlobalMenu. */
 
   /* Xwayland / MetaX11Display often arrives after plugin start. */
   ooze_plugin_schedule_xsettings (self);
