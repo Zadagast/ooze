@@ -8,6 +8,7 @@
 #include <meta/meta-context.h>
 #include <meta/meta-monitor-manager.h>
 #include <clutter/clutter.h>
+#include <gio/gio.h>
 
 struct _OozePlugin
 {
@@ -50,4 +51,33 @@ struct _OozePlugin
   gulong        stage_key_handler;
   int           last_panel_width;
   int           last_dock_plate_width;
+  guint         dock_reflect_idle;
+
+  /* Lock screen (compositor overlay + PAM helper) */
+  gboolean      locked;
+  gboolean      lock_enabled;
+  ClutterActor *lock_overlay;
+  ClutterActor *lock_card;
+  ClutterActor *lock_clock_label;
+  ClutterActor *lock_user_label;
+  ClutterActor *lock_entry_box;
+  ClutterActor *lock_password;
+  ClutterActor *lock_unlock_btn;
+  ClutterActor *lock_status_label;
+  ClutterGrab  *lock_grab;
+  GSubprocess  *lock_auth_proc;
+  guint         lock_clock_timer;
+  guint         lock_idle_watch_id;
+  guint         lock_logind_sub_id;
+  GDBusConnection *lock_logind_conn;
+  GSettings    *session_settings;
+  GSettings    *screensaver_settings;
+
+  /* StatusNotifier tray (AppIndicator host) */
+  ClutterActor *tray_box;
+  GPtrArray    *tray_icons; /* OozeTrayIcon* */
+  gpointer      sni_watcher; /* OozeSniWatcher* */
+  gpointer      tray_menu_ctx;
+  OozeAquaMenu *tray_popup;
+  guint         tray_appearance_idle;
 };

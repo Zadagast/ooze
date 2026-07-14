@@ -6,6 +6,7 @@
 #include "ooze-global-menu.h"
 #include "ooze-theme.h"
 #include "ooze-dock-shell.h"
+#include "ooze-stall.h"
 
 #include "../common/aqua-chrome.h"
 #include "../common/ooze-font.h"
@@ -14,6 +15,7 @@
 #include <meta/display.h>
 #include <meta/meta-context.h>
 #include <clutter/clutter.h>
+#include <string.h>
 
 #include <time.h>
 
@@ -22,6 +24,7 @@
 #define OOZE_BUTTON_PAD_Y    2.0f
 #define MENU_ITEM_GAP       18.0f
 #define MENU_BAR_HIT_HEIGHT PANEL_HEIGHT
+#define PANEL_REBUILD_DEBOUNCE_MS 40
 
 /* ── Text rendering helpers ──────────────────────────────────────────────── */
 
@@ -104,7 +107,8 @@ static gboolean
 panel_child_is_fixed_chrome (OozePlugin *plugin, ClutterActor *child)
 {
   return child == plugin->menu_icon ||
-         child == plugin->clock_label;
+         child == plugin->clock_label ||
+         child == plugin->tray_box;
 }
 
 /* ── Menu label utilities ────────────────────────────────────────────────── */
@@ -212,6 +216,7 @@ on_ooze_button_pressed (ClutterActor *actor,
     { NULL,            0,                       FALSE },
     { "About Ooze...", OOZE_MENU_HELP_ABOUT,      TRUE  },
     { NULL,            0,                       FALSE },
+    { "Lock Screen",   OOZE_MENU_OOZE_LOCK,       TRUE  },
     { "Restart...",    OOZE_MENU_OOZE_RESTART,    TRUE  },
     { "Shut Down...",  OOZE_MENU_OOZE_SHUTDOWN,   TRUE  },
     { NULL,            0,                       FALSE },
@@ -227,7 +232,7 @@ on_ooze_button_pressed (ClutterActor *actor,
   entries[0].label = dark ? "Switch to Light Mode" : "Switch to Dark Mode";
 
   logout_label = g_strdup_printf ("Log Out %s...", g_get_user_name ());
-  entries[7].label = logout_label;
+  entries[8].label = logout_label;
 
   ooze_aqua_menu_toggle_for_anchor (plugin->menu_popup,
                                   actor,
@@ -563,16 +568,49 @@ panel_retry_pending_menu (gpointer user_data)
 
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
+static gboolean
+panel_menu_bar_labels_unchanged (OozePlugin  *plugin,
+                                 gboolean     from_app,
+                                 const char **texts,
+                                 guint        n_texts)
+{
+  guint i;
+
+  if (plugin->n_menu_bar_labels != n_texts)
+    return FALSE;
+  if (plugin->menu_bar_from_app != from_app)
+    return FALSE;
+
+  for (i = 0; i < n_texts; i++)
+    {
+      const char *cur;
+
+      if (!plugin->menu_bar_labels[i])
+        return FALSE;
+      cur = g_object_get_data (G_OBJECT (plugin->menu_bar_labels[i]),
+                               "ooze-menu-label-text");
+      if (g_strcmp0 (cur, texts[i]) != 0)
+        return FALSE;
+    }
+
+  return TRUE;
+}
+
 void
 ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
 {
+  g_autoptr (OozeStallScope) stall = NULL;
   const OozeAquaPalette *palette;
   guint n;
   guint i;
   gboolean from_app;
+  const char *texts[OOZE_GLOBAL_MENU_MAX_TOP];
+  guint n_texts = 0;
 
   if (!plugin->panel)
     return;
+
+  stall = ooze_stall_begin ("panel-rebuild");
 
   palette = ooze_theme_get_palette (NULL);
   from_app = plugin->global_menu &&
@@ -590,13 +628,9 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
   if (n > OOZE_GLOBAL_MENU_MAX_TOP)
     n = OOZE_GLOBAL_MENU_MAX_TOP;
 
-  panel_clear_menu_bar_labels (plugin);
-  plugin->menu_bar_from_app = from_app;
-
   for (i = 0; i < n; i++)
     {
       const char *text;
-      ClutterActor *label;
       const char *hint;
 
       if (from_app)
@@ -609,6 +643,24 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
         text = hint;
       else
         text = ooze_shell_menu_bar_items[i];
+
+      texts[n_texts++] = text;
+    }
+
+  if (panel_menu_bar_labels_unchanged (plugin, from_app, texts, n_texts))
+    {
+      /* Same tops — keep widgets, just re-lay out if needed. */
+      ooze_panel_layout_labels (plugin);
+      return;
+    }
+
+  panel_clear_menu_bar_labels (plugin);
+  plugin->menu_bar_from_app = from_app;
+
+  for (i = 0; i < n_texts; i++)
+    {
+      ClutterActor *label;
+      const char *text = texts[i];
 
       label = panel_create_menu_bar_item (plugin->panel,
                                           OOZE_UI_FONT,
@@ -806,10 +858,10 @@ void
 ooze_panel_schedule_rebuild (OozePlugin *plugin)
 {
   if (plugin->menubar_rebuild_idle != 0)
-    return;
+    g_source_remove (plugin->menubar_rebuild_idle);
 
   plugin->menubar_rebuild_idle =
-    g_timeout_add (40, panel_rebuild_idle, plugin);
+    g_timeout_add (PANEL_REBUILD_DEBOUNCE_MS, panel_rebuild_idle, plugin);
 }
 
 void
@@ -949,6 +1001,7 @@ ooze_panel_dispose (OozePlugin *plugin)
   g_clear_pointer (&plugin->panel, clutter_actor_destroy);
   plugin->menu_icon = NULL;
   plugin->clock_label = NULL;
+  plugin->tray_box = NULL;
   memset (plugin->menu_bar_labels, 0, sizeof plugin->menu_bar_labels);
   plugin->n_menu_bar_labels = 0;
   plugin->menu_bar_from_app = FALSE;

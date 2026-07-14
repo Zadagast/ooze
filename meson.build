@@ -16,6 +16,7 @@ cogl_pc = 'mutter-cogl-' + mutter_api_version
 mtk_pc = 'mutter-mtk-' + mutter_api_version
 
 cc = meson.get_compiler('c')
+fs = import('fs')
 
 mutter_dep = dependency(libmutter_pc)
 clutter_dep = dependency(clutter_pc)
@@ -88,6 +89,9 @@ executable('ooze',
   'compositor/ooze-magic-lamp.c',
   'compositor/ooze-transition.c',
   'compositor/ooze-stall.c',
+  'compositor/ooze-lock.c',
+  'compositor/ooze-sni.c',
+  'compositor/ooze-tray.c',
   'shared/ooze-shared-icons.c',
   'shared/ooze-shared-appmenu.c',
   'shared/ooze-dnd-bridge.c',
@@ -113,6 +117,40 @@ executable('ooze',
   ],
   build_rpath: mutter_typelibdir,
   install: true,
+)
+
+# PAM runs out-of-process so the compositor never blocks on pam_authenticate.
+# Prefer -lpam (needs libpam0g-dev); otherwise link the SONAME directly so
+# builds still work on hosts that only ship the runtime .so.0.
+pam_lib = cc.find_library('pam', required: false)
+if not pam_lib.found()
+  pam_so = [
+    '/usr/lib/x86_64-linux-gnu/libpam.so.0',
+    '/usr/lib64/libpam.so.0',
+    '/lib/x86_64-linux-gnu/libpam.so.0',
+  ]
+  pam_link = []
+  foreach candidate : pam_so
+    if fs.exists(candidate)
+      pam_link = [candidate]
+      break
+    endif
+  endforeach
+  if pam_link.length() == 0
+    error('libpam not found (install libpam0g-dev or libpam runtime)')
+  endif
+  pam_lib = declare_dependency(link_args: pam_link)
+endif
+executable('ooze-pam-helper',
+  'compositor/ooze-pam-helper.c',
+  include_directories: [inc_compositor],
+  dependencies: [pam_lib],
+  install: true,
+)
+
+install_data('data/pam/ooze-lock',
+  install_dir: get_option('sysconfdir') / 'pam.d',
+  rename: 'ooze-lock',
 )
 
 install_data('data/wayland-sessions/ooze.desktop',

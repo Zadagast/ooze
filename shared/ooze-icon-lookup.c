@@ -10,20 +10,113 @@
  * OozeStall: dock-rebuild-icons.
  */
 
-static const char *const icon_contexts[] = {
+/* Prefer app/mime/place contexts first; skip the long category/emblem walks
+ * unless those miss. Caps main-thread FS noise on dock rebuild. */
+static const char *const icon_contexts_primary[] = {
   "apps",
-  "actions",
-  "devices",
   "places",
   "mimes",
   "mimetypes",
+  "devices",
+  "actions",
+  NULL,
+};
+
+static const char *const icon_contexts_fallback[] = {
   "categories",
   "status",
   "emblems",
   NULL,
 };
 
-static const int icon_sizes[] = { 256, 128, 96, 64, 48, 32, 24, 22, 16, 0 };
+/* Prefer requested size, then a short nearby ladder (not every size). */
+static const int icon_size_ladder[] = { 0 /* filled with request */, 64, 48, 32, 128, 24, 16, 0 };
+
+#define OOZE_ICON_CACHE_MAX 192
+
+typedef struct
+{
+  char      *key;
+  GdkPixbuf *pixbuf;
+} OozeIconCacheEntry;
+
+static GHashTable *ooze_icon_cache = NULL; /* key -> OozeIconCacheEntry* */
+static char       *ooze_icon_cache_theme = NULL;
+
+static void
+ooze_icon_cache_entry_free (gpointer data)
+{
+  OozeIconCacheEntry *e = data;
+
+  if (!e)
+    return;
+  g_free (e->key);
+  g_clear_object (&e->pixbuf);
+  g_free (e);
+}
+
+void
+ooze_icon_lookup_cache_invalidate (void)
+{
+  g_clear_pointer (&ooze_icon_cache, g_hash_table_unref);
+  g_clear_pointer (&ooze_icon_cache_theme, g_free);
+}
+
+static void
+ooze_icon_cache_ensure (const char *theme)
+{
+  if (!ooze_icon_cache)
+    {
+      ooze_icon_cache = g_hash_table_new_full (g_str_hash, g_str_equal,
+                                               NULL, ooze_icon_cache_entry_free);
+    }
+
+  if (g_strcmp0 (ooze_icon_cache_theme, theme) != 0)
+    {
+      g_hash_table_remove_all (ooze_icon_cache);
+      g_free (ooze_icon_cache_theme);
+      ooze_icon_cache_theme = g_strdup (theme ? theme : "");
+    }
+}
+
+static GdkPixbuf *
+ooze_icon_cache_lookup (const char *theme,
+                        const char *icon_name,
+                        int         size)
+{
+  g_autofree char *key = NULL;
+  OozeIconCacheEntry *e;
+
+  ooze_icon_cache_ensure (theme);
+  key = g_strdup_printf ("%s\n%s\n%d", theme ? theme : "", icon_name, size);
+  e = g_hash_table_lookup (ooze_icon_cache, key);
+  if (!e || !e->pixbuf)
+    return NULL;
+  return g_object_ref (e->pixbuf);
+}
+
+static void
+ooze_icon_cache_store (const char *theme,
+                       const char *icon_name,
+                       int         size,
+                       GdkPixbuf  *pixbuf)
+{
+  OozeIconCacheEntry *e;
+  g_autofree char *key = NULL;
+
+  if (!pixbuf)
+    return;
+
+  ooze_icon_cache_ensure (theme);
+  if (g_hash_table_size (ooze_icon_cache) >= OOZE_ICON_CACHE_MAX)
+    g_hash_table_remove_all (ooze_icon_cache);
+
+  key = g_strdup_printf ("%s\n%s\n%d", theme ? theme : "", icon_name, size);
+  e = g_new0 (OozeIconCacheEntry, 1);
+  e->key = g_steal_pointer (&key);
+  e->pixbuf = g_object_ref (pixbuf);
+  g_hash_table_replace (ooze_icon_cache, e->key, e);
+}
 
 static char *
 ooze_icon_get_gsettings_theme (void)
@@ -142,89 +235,113 @@ ooze_icon_scale_if_needed (GdkPixbuf *pixbuf,
 }
 
 static GdkPixbuf *
+ooze_icon_try_contexts_size (const char *icon_base,
+                             const char *theme,
+                             const char *icon_name,
+                             int         size,
+                             const char * const *contexts,
+                             gboolean    modern_layout)
+{
+  gsize c;
+
+  for (c = 0; contexts[c]; c++)
+    {
+      g_autofree char *dir = NULL;
+      GdkPixbuf *pixbuf;
+
+      if (modern_layout)
+        dir = g_strdup_printf ("%s/%s/%s/%d", icon_base, theme, contexts[c], size);
+      else
+        dir = g_strdup_printf ("%s/%s/%dx%d/%s", icon_base, theme, size, size, contexts[c]);
+
+      pixbuf = ooze_icon_try_in_dir (dir, icon_name, size);
+      if (pixbuf)
+        return pixbuf;
+    }
+
+  return NULL;
+}
+
+static GdkPixbuf *
 ooze_icon_try_theme_in_base (const char *icon_base,
                              const char *theme,
                              const char *icon_name,
                              int         size)
 {
-  gsize c;
+  int sizes[G_N_ELEMENTS (icon_size_ladder)];
   gsize s;
+  gsize n = 0;
 
   if (!theme || theme[0] == '\0' || !icon_name)
     return NULL;
 
-  /* Prefer exact size under modern layout: theme/context/size/name */
-  for (c = 0; icon_contexts[c]; c++)
+  sizes[n++] = size;
+  for (s = 1; icon_size_ladder[s] != 0; s++)
     {
-      g_autofree char *dir = g_strdup_printf ("%s/%s/%s/%d",
-                                              icon_base, theme,
-                                              icon_contexts[c], size);
-      GdkPixbuf *pixbuf = ooze_icon_try_in_dir (dir, icon_name, size);
+      int cand = icon_size_ladder[s];
+      gsize k;
+      gboolean dup = FALSE;
 
-      if (pixbuf)
-        return pixbuf;
-    }
-
-  for (s = 0; icon_sizes[s] != 0; s++)
-    {
-      if (icon_sizes[s] == size)
+      if (cand == size)
         continue;
-      for (c = 0; icon_contexts[c]; c++)
+      for (k = 0; k < n; k++)
         {
-          g_autofree char *dir = g_strdup_printf ("%s/%s/%s/%d",
-                                                  icon_base, theme,
-                                                  icon_contexts[c],
-                                                  icon_sizes[s]);
-          GdkPixbuf *pixbuf = ooze_icon_try_in_dir (dir, icon_name,
-                                                    icon_sizes[s]);
-
-          if (pixbuf)
-            return ooze_icon_scale_if_needed (pixbuf, size);
+          if (sizes[k] == cand)
+            {
+              dup = TRUE;
+              break;
+            }
         }
+      if (!dup)
+        sizes[n++] = cand;
     }
 
-  /* Legacy: theme/NxN/context/name */
-  for (c = 0; icon_contexts[c]; c++)
+  /* Exact + short ladder, primary contexts, modern then legacy layouts. */
+  for (s = 0; s < n; s++)
     {
-      g_autofree char *dir = g_strdup_printf ("%s/%s/%dx%d/%s",
-                                              icon_base, theme,
-                                              size, size, icon_contexts[c]);
-      GdkPixbuf *pixbuf = ooze_icon_try_in_dir (dir, icon_name, size);
+      GdkPixbuf *pixbuf;
 
+      pixbuf = ooze_icon_try_contexts_size (icon_base, theme, icon_name,
+                                            sizes[s], icon_contexts_primary, TRUE);
       if (pixbuf)
-        return pixbuf;
-    }
+        return ooze_icon_scale_if_needed (pixbuf, size);
 
-  for (s = 0; icon_sizes[s] != 0; s++)
-    {
-      if (icon_sizes[s] == size)
-        continue;
-      for (c = 0; icon_contexts[c]; c++)
-        {
-          g_autofree char *dir =
-            g_strdup_printf ("%s/%s/%dx%d/%s",
-                             icon_base, theme,
-                             icon_sizes[s], icon_sizes[s],
-                             icon_contexts[c]);
-          GdkPixbuf *pixbuf = ooze_icon_try_in_dir (dir, icon_name,
-                                                    icon_sizes[s]);
-
-          if (pixbuf)
-            return ooze_icon_scale_if_needed (pixbuf, size);
-        }
-    }
-
-  for (c = 0; icon_contexts[c]; c++)
-    {
-      g_autofree char *scalable =
-        g_strdup_printf ("%s/%s/scalable/%s", icon_base, theme, icon_contexts[c]);
-      GdkPixbuf *pixbuf = ooze_icon_try_in_dir (scalable, icon_name, size);
-
+      pixbuf = ooze_icon_try_contexts_size (icon_base, theme, icon_name,
+                                            sizes[s], icon_contexts_primary, FALSE);
       if (pixbuf)
-        return pixbuf;
+        return ooze_icon_scale_if_needed (pixbuf, size);
     }
 
-  /* Loose file under theme root or base (pixmaps). */
+  for (s = 0; s < n; s++)
+    {
+      GdkPixbuf *pixbuf;
+
+      pixbuf = ooze_icon_try_contexts_size (icon_base, theme, icon_name,
+                                            sizes[s], icon_contexts_fallback, TRUE);
+      if (pixbuf)
+        return ooze_icon_scale_if_needed (pixbuf, size);
+
+      pixbuf = ooze_icon_try_contexts_size (icon_base, theme, icon_name,
+                                            sizes[s], icon_contexts_fallback, FALSE);
+      if (pixbuf)
+        return ooze_icon_scale_if_needed (pixbuf, size);
+    }
+
+  {
+    gsize c;
+
+    for (c = 0; icon_contexts_primary[c]; c++)
+      {
+        g_autofree char *scalable =
+          g_strdup_printf ("%s/%s/scalable/%s", icon_base, theme,
+                           icon_contexts_primary[c]);
+        GdkPixbuf *pixbuf = ooze_icon_try_in_dir (scalable, icon_name, size);
+
+        if (pixbuf)
+          return pixbuf;
+      }
+  }
+
   {
     g_autofree char *theme_dir = g_build_filename (icon_base, theme, NULL);
     GdkPixbuf *pixbuf = ooze_icon_try_in_dir (theme_dir, icon_name, size);
@@ -337,6 +454,7 @@ ooze_icon_lookup_load (const char *icon_name,
   g_autofree char *primary = NULL;
   guint b;
   guint t;
+  GdkPixbuf *cached;
 
   if (!icon_name || icon_name[0] == '\0' || size <= 0)
     return NULL;
@@ -353,8 +471,12 @@ ooze_icon_lookup_load (const char *icon_name,
         return pixbuf;
     }
 
-  bases = ooze_icon_collect_bases ();
   primary = ooze_icon_get_gsettings_theme ();
+  cached = ooze_icon_cache_lookup (primary, icon_name, size);
+  if (cached)
+    return cached;
+
+  bases = ooze_icon_collect_bases ();
   themes = ooze_icon_build_theme_chain (primary, bases);
 
   for (t = 0; t < themes->len; t++)
@@ -368,7 +490,10 @@ ooze_icon_lookup_load (const char *icon_name,
                                          size);
 
           if (pixbuf)
-            return pixbuf;
+            {
+              ooze_icon_cache_store (primary, icon_name, size, pixbuf);
+              return pixbuf;
+            }
         }
     }
 

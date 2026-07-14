@@ -85,4 +85,10 @@ fi
 
 # AppMenu registrar is D-Bus-activated (com.canonical.AppMenu.Registrar.service).
 # Do not pre-spawn it — a second instance fails on org.valapanel.AppMenu.Registrar.
-exec dbus-run-session -- "$ROOT/build/ooze" "${desktop_args[@]}"
+# Private nest bus: start keyring there only. Never push activation env into
+# host systemd --user (that would overwrite the login desktop id).
+export OOZE_BIN="$ROOT/build/ooze"
+export OOZE_SESSION_ENV_FILE="$ROOT/packaging/deb/ooze-session-env.sh"
+exec dbus-run-session -- bash -c \
+  'source "$OOZE_SESSION_ENV_FILE"; ooze_export_foreign_gtk_theme; ooze_start_gnome_keyring; exec "$OOZE_BIN" "$@"' \
+  bash "${desktop_args[@]}"

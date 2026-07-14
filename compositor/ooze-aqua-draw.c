@@ -144,7 +144,7 @@ ooze_aqua_load_data_pixbuf (const char *filename,
                                             &error);
 }
 
-static ClutterContent *
+ClutterContent *
 ooze_aqua_content_from_pixbuf (ClutterActor *ref_actor,
                              GdkPixbuf    *pixbuf)
 {
@@ -773,6 +773,161 @@ ooze_aqua_ooze_button_content (ClutterActor *ref_actor,
   if (height_out)
     *height_out = (int) ceil (height);
 
+  return content;
+}
+
+ClutterContent *
+ooze_aqua_squircle_panel_content (ClutterActor *ref_actor,
+                                  int           width,
+                                  int           height,
+                                  gboolean      inset)
+{
+  cairo_surface_t *surface;
+  cairo_t *cr;
+  cairo_pattern_t *gradient;
+  ClutterContent *content;
+  gdouble radius;
+  gboolean dark = ooze_theme_is_dark (NULL);
+
+  if (width < 1)
+    width = 1;
+  if (height < 1)
+    height = 1;
+
+  surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
+  cr = cairo_create (surface);
+
+  /* Squircle: rounded square, not a macOS pill. */
+  radius = CLAMP (MIN (width, height) * 0.14, 8.0, 16.0);
+  ooze_aqua_rounded_rect (cr, 0.5, 0.5, width - 1.0, height - 1.0, radius);
+
+  gradient = cairo_pattern_create_linear (0, 0, 0, height);
+  if (inset)
+    {
+      if (dark)
+        {
+          cairo_pattern_add_color_stop_rgba (gradient, 0.0, 0.08, 0.09, 0.12, 0.96);
+          cairo_pattern_add_color_stop_rgba (gradient, 1.0, 0.12, 0.13, 0.17, 0.98);
+        }
+      else
+        {
+          cairo_pattern_add_color_stop_rgba (gradient, 0.0, 0.86, 0.88, 0.92, 0.95);
+          cairo_pattern_add_color_stop_rgba (gradient, 1.0, 0.94, 0.95, 0.97, 0.98);
+        }
+    }
+  else
+    {
+      if (dark)
+        {
+          cairo_pattern_add_color_stop_rgba (gradient, 0.0, 0.22, 0.24, 0.30, 0.92);
+          cairo_pattern_add_color_stop_rgba (gradient, 0.45, 0.16, 0.17, 0.22, 0.94);
+          cairo_pattern_add_color_stop_rgba (gradient, 1.0, 0.12, 0.13, 0.16, 0.96);
+        }
+      else
+        {
+          cairo_pattern_add_color_stop_rgba (gradient, 0.0, 1.0, 1.0, 1.0, 0.88);
+          cairo_pattern_add_color_stop_rgba (gradient, 0.5, 0.94, 0.95, 0.97, 0.90);
+          cairo_pattern_add_color_stop_rgba (gradient, 1.0, 0.86, 0.88, 0.92, 0.92);
+        }
+    }
+  cairo_set_source (cr, gradient);
+  cairo_fill_preserve (cr);
+  cairo_pattern_destroy (gradient);
+
+  cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, dark ? 0.22 : 0.55);
+  cairo_set_line_width (cr, 1.0);
+  cairo_stroke (cr);
+
+  ooze_aqua_rounded_rect (cr, 1.0, 1.0, width - 2.0, height - 2.0, radius - 0.5);
+  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, dark ? 0.35 : 0.18);
+  cairo_set_line_width (cr, 1.0);
+  cairo_stroke (cr);
+
+  if (!inset)
+    {
+      ooze_aqua_rounded_rect (cr, 2.5, 2.5,
+                              width - 5.0, height * 0.34,
+                              MAX (radius - 2.5, 3.0));
+      cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, dark ? 0.12 : 0.40);
+      cairo_fill (cr);
+    }
+
+  cairo_destroy (cr);
+  content = ooze_aqua_content_from_surface (ref_actor, surface);
+  cairo_surface_destroy (surface);
+  return content;
+}
+
+ClutterContent *
+ooze_aqua_kit_button_content (ClutterActor *ref_actor,
+                              const char   *label,
+                              int           width,
+                              int           height)
+{
+  cairo_surface_t *surface;
+  cairo_t *cr;
+  cairo_pattern_t *gradient;
+  ClutterContent *content;
+  PangoLayout *layout;
+  PangoFontDescription *font;
+  PangoRectangle ink;
+  PangoRectangle logical;
+  gdouble radius;
+  gdouble text_x;
+  gdouble text_y;
+  const char *text = label && label[0] ? label : "Unlock";
+
+  if (width < 1)
+    width = 1;
+  if (height < 1)
+    height = 1;
+
+  surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
+  cr = cairo_create (surface);
+
+  radius = CLAMP (height * 0.22, 6.0, 11.0);
+  ooze_aqua_rounded_rect (cr, 0.5, 0.5, width - 1.0, height - 1.0, radius);
+
+  /* Same lime Ooze push finish as the panel 🝖 Ooze control. */
+  gradient = cairo_pattern_create_linear (0, 0, 0, height);
+  cairo_pattern_add_color_stop_rgb (gradient, 0.00, 0.42, 0.78, 0.22);
+  cairo_pattern_add_color_stop_rgb (gradient, 0.40, 0.22, 0.68, 0.12);
+  cairo_pattern_add_color_stop_rgb (gradient, 0.70, 0.10, 0.50, 0.08);
+  cairo_pattern_add_color_stop_rgb (gradient, 1.00, 0.05, 0.32, 0.04);
+  cairo_set_source (cr, gradient);
+  cairo_fill_preserve (cr);
+  cairo_pattern_destroy (gradient);
+
+  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.40);
+  cairo_set_line_width (cr, 1.0);
+  cairo_stroke (cr);
+
+  ooze_aqua_rounded_rect (cr, 1.5, 1.5, width - 3.0, (height - 3.0) * 0.32, radius - 1.0);
+  cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 0.42);
+  cairo_fill (cr);
+
+  font = pango_font_description_from_string (OOZE_UI_FONT_EMPHASIS);
+  layout = pango_cairo_create_layout (cr);
+  pango_layout_set_font_description (layout, font);
+  pango_layout_set_text (layout, text, -1);
+  pango_layout_get_pixel_extents (layout, &ink, &logical);
+  text_x = (width - logical.width) / 2.0;
+  text_y = (height - ink.height) / 2.0 - ink.y;
+
+  cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.55);
+  cairo_move_to (cr, text_x + 0.5, text_y + 0.5);
+  pango_cairo_show_layout (cr, layout);
+
+  cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
+  cairo_move_to (cr, text_x, text_y);
+  pango_cairo_show_layout (cr, layout);
+
+  g_object_unref (layout);
+  pango_font_description_free (font);
+  cairo_destroy (cr);
+
+  content = ooze_aqua_content_from_surface (ref_actor, surface);
+  cairo_surface_destroy (surface);
   return content;
 }
 

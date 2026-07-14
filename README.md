@@ -12,8 +12,9 @@ An Aqua-inspired Wayland desktop built on [Mutter](https://gitlab.gnome.org/GNOM
 
 ## Highlights
 
-- Global menu bar, floating dock, and desktop icons
+- Global menu bar, floating dock, desktop icons, and StatusNotifier / AppIndicator tray
 - One-click light / dark mode for the whole desktop
+- Compositor session lock (PAM) for native Wayland sessions
 - First-party apps: files (Spot), terminal (Command), image viewer (Eye), settings (King), and more
 - Runs any Wayland or X11 app via Xwayland
 
@@ -23,10 +24,14 @@ An Aqua-inspired Wayland desktop built on [Mutter](https://gitlab.gnome.org/GNOM
 
 ## Try it
 
-Grab the AppImage from [Releases](https://github.com/Zadagast/ooze/releases) — it runs as a nested window on any Wayland desktop:
+Grab the AppImage or `.deb` from [Releases](https://github.com/Zadagast/ooze/releases) — the AppImage runs as a nested window on any Wayland desktop:
 
 ```sh
 chmod +x Ooze-*.AppImage && ./Ooze-*.AppImage
+```
+
+```sh
+sudo apt install ./ooze_0.4.0_amd64.deb
 ```
 
 Or build from source (needs Mutter 18 dev packages — Ubuntu 26.04):

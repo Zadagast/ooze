@@ -67,6 +67,11 @@ install -m 0644 "$ROOT/data/xdg-desktop-portal/portals/ooze-gnome-keyring.portal
 install -d "$STAGE/usr/share/ooze"
 install -m 0755 "$ROOT/packaging/deb/ooze-session-env.sh" \
   "$STAGE/usr/share/ooze/ooze-session-env.sh"
+# PAM stack for ooze-pam-helper (meson install may already place this)
+if [[ -f "$ROOT/data/pam/ooze-lock" ]]; then
+  install -d "$STAGE/etc/pam.d"
+  install -m 0644 "$ROOT/data/pam/ooze-lock" "$STAGE/etc/pam.d/ooze-lock"
+fi
 
 # Prefer a simple branded icon if present
 if [[ -f "$ROOT/data/spot-logo.svg" ]]; then

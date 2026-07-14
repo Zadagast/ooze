@@ -14,6 +14,8 @@
 #include "ooze-window.h"
 #include "ooze-xsettings.h"
 #include "ooze-stall.h"
+#include "ooze-lock.h"
+#include "ooze-tray.h"
 
 #include "../common/aqua-chrome.h"
 #include "../common/ooze-font.h"
@@ -70,17 +72,7 @@ ooze_plugin_get_focus_window (OozePlugin *plugin)
 static void
 ooze_plugin_cancel_window_idle_ops (MetaWindowActor *actor)
 {
-  gpointer map_id;
-
   ooze_window_chrome_cancel_sync (actor);
-
-  map_id = g_object_get_data (G_OBJECT (actor), "ooze-post-map-id");
-  if (map_id)
-    {
-      g_source_remove (GPOINTER_TO_UINT (map_id));
-      g_object_set_data (G_OBJECT (actor), "ooze-post-map-id", NULL);
-    }
-
   ooze_window_cancel_scheduled_sync (actor);
 }
 
@@ -115,22 +107,45 @@ ooze_plugin_clear_dock_reflections (OozePlugin *plugin)
     clutter_actor_destroy (child);
 }
 
+/*
+ * Dock shelf reflections. Default uses a cheap Clutter flip (no GPU
+ * texture download / Cairo). OOZE_DOCK_HQ_REFLECTIONS=1 restores the
+ * older cogl_texture_get_data path (expensive; idle-only).
+ */
+static gboolean
+ooze_plugin_dock_hq_reflections (void)
+{
+  const char *v = g_getenv ("OOZE_DOCK_HQ_REFLECTIONS");
+
+  if (!v || !*v)
+    return FALSE;
+  return g_ascii_strcasecmp (v, "1") == 0 ||
+         g_ascii_strcasecmp (v, "true") == 0 ||
+         g_ascii_strcasecmp (v, "yes") == 0 ||
+         g_ascii_strcasecmp (v, "on") == 0;
+}
+
 static void
 ooze_plugin_sync_dock_reflections (OozePlugin *plugin)
 {
+  g_autoptr (OozeStallScope) stall = NULL;
   ClutterActor *icon;
   int reflect_h;
   int logical;
+  gboolean hq;
 
   if (!plugin->aqua_dock_icons || !plugin->aqua_dock_reflections)
     return;
 
+  stall = ooze_stall_begin ("dock-reflections");
   ooze_plugin_clear_dock_reflections (plugin);
 
   logical = (int) AQUA_DOCK_ITEM_SIZE;
   reflect_h = (int) AQUA_DOCK_REFLECT_H;
   if (reflect_h < 1)
     return;
+
+  hq = ooze_plugin_dock_hq_reflections ();
 
   for (icon = clutter_actor_get_first_child (plugin->aqua_dock_icons);
        icon != NULL;
@@ -143,16 +158,17 @@ ooze_plugin_sync_dock_reflections (OozePlugin *plugin)
       int texture_h = logical;
 
       source = clutter_actor_get_content (icon);
+      mirror = clutter_actor_new ();
+      clutter_actor_set_reactive (mirror, FALSE);
+
       if (!source)
         {
-          mirror = clutter_actor_new ();
           clutter_actor_set_size (mirror, (gfloat) logical, (gfloat) reflect_h);
-          clutter_actor_set_reactive (mirror, FALSE);
           clutter_actor_add_child (plugin->aqua_dock_reflections, mirror);
           continue;
         }
 
-      if (CLUTTER_IS_TEXTURE_CONTENT (source))
+      if (hq && CLUTTER_IS_TEXTURE_CONTENT (source))
         {
           CoglTexture *tex;
 
@@ -162,42 +178,83 @@ ooze_plugin_sync_dock_reflections (OozePlugin *plugin)
               texture_w = cogl_texture_get_width (tex);
               texture_h = cogl_texture_get_height (tex);
             }
+
+          {
+            int tex_reflect_h;
+
+            tex_reflect_h = (int) (AQUA_DOCK_REFLECT_H * (gfloat) texture_h /
+                                   (gfloat) MAX (logical, 1) + 0.5f);
+            if (tex_reflect_h < 1)
+              tex_reflect_h = 1;
+
+            reflected = ooze_aqua_dock_reflection_content (icon, source,
+                                                          tex_reflect_h);
+            if (reflected)
+              {
+                ooze_aqua_actor_set_scaled_content (mirror,
+                                                    g_steal_pointer (&reflected),
+                                                    logical,
+                                                    reflect_h,
+                                                    texture_w,
+                                                    tex_reflect_h);
+                clutter_actor_add_child (plugin->aqua_dock_reflections, mirror);
+                continue;
+              }
+          }
         }
 
+      /*
+       * Cheap path: flip the existing icon content (no GPU readback).
+       *
+       * Pivot at the top of a strip sized reflect_h flips paint UP into the
+       * icon band. Instead: full-size icon child bottom-aligned to the shelf
+       * (y=0 of this strip), flipped around that bottom edge so content
+       * extends downward; outer clips to the reflection strip below the plate.
+       */
       {
-        int tex_reflect_h;
+        ClutterActor *inner;
 
-        tex_reflect_h = (int) (AQUA_DOCK_REFLECT_H * (gfloat) texture_h /
-                               (gfloat) MAX (logical, 1) + 0.5f);
-        if (tex_reflect_h < 1)
-          tex_reflect_h = 1;
+        clutter_actor_set_size (mirror, (gfloat) logical, (gfloat) reflect_h);
+        clutter_actor_set_clip_to_allocation (mirror, TRUE);
+        clutter_actor_set_opacity (mirror, 90);
 
-        reflected = ooze_aqua_dock_reflection_content (icon, source, tex_reflect_h);
-        mirror = clutter_actor_new ();
-        clutter_actor_set_reactive (mirror, FALSE);
-        if (reflected)
-          {
-            ooze_aqua_actor_set_scaled_content (mirror,
-                                              g_steal_pointer (&reflected),
-                                              logical,
-                                              reflect_h,
-                                              texture_w,
-                                              tex_reflect_h);
-          }
-        else
-          {
-            clutter_actor_set_size (mirror, (gfloat) logical, (gfloat) reflect_h);
-            clutter_actor_set_content (mirror, source);
-            clutter_actor_set_pivot_point (mirror, 0.5f, 0.0f);
-            clutter_actor_set_scale (mirror, 1.0f, -1.0f);
-            clutter_actor_set_opacity (mirror, 90);
-            clutter_actor_set_clip (mirror, 0.0f, 0.0f,
-                                    (gfloat) logical, (gfloat) reflect_h);
-          }
+        inner = clutter_actor_new ();
+        clutter_actor_set_reactive (inner, FALSE);
+        clutter_actor_set_size (inner, (gfloat) logical, (gfloat) logical);
+        clutter_actor_set_content (inner, source);
+        /* Bottom of upright icon sits on the shelf line (parent y=0). */
+        clutter_actor_set_position (inner, 0.0f, (gfloat) (-logical));
+        clutter_actor_set_pivot_point (inner, 0.5f, 1.0f);
+        clutter_actor_set_scale (inner, 1.0f, -1.0f);
+        clutter_actor_add_child (mirror, inner);
       }
-
       clutter_actor_add_child (plugin->aqua_dock_reflections, mirror);
     }
+}
+
+static gboolean
+ooze_plugin_dock_reflections_idle (gpointer user_data)
+{
+  OozePlugin *plugin = user_data;
+
+  plugin->dock_reflect_idle = 0;
+  ooze_plugin_sync_dock_reflections (plugin);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+ooze_plugin_schedule_dock_reflections (OozePlugin *plugin)
+{
+  if (!plugin)
+    return;
+  if (plugin->dock_reflect_idle)
+    return;
+
+  plugin->dock_reflect_idle =
+    g_idle_add_full (G_PRIORITY_DEFAULT_IDLE,
+                     ooze_plugin_dock_reflections_idle,
+                     plugin,
+                     NULL);
 }
 
 /* ── Dock layout ─────────────────────────────────────────────────────────── */
@@ -576,6 +633,7 @@ ooze_plugin_update_layout (OozePlugin *plugin, MetaDisplay *display)
                                   ((gfloat) PANEL_HEIGHT -
                                    clutter_actor_get_height (plugin->clock_label)) / 2.0f);
     }
+  ooze_tray_layout (plugin, (gfloat) primary.width, (gfloat) PANEL_HEIGHT);
 
   ooze_panel_layout_labels (plugin);
 
@@ -699,6 +757,7 @@ ooze_plugin_refresh_theme (OozePlugin *plugin)
 
   ooze_panel_refresh_ooze_button (plugin);
   ooze_panel_recolor_menu_bar (plugin);
+  ooze_tray_refresh_appearance (plugin);
   ooze_plugin_update_layout (plugin, display);
   ooze_plugin_refresh_wallpapers (plugin);
   ooze_plugin_schedule_chrome_theme_refresh (plugin);
@@ -714,48 +773,6 @@ static void
 ooze_plugin_on_theme_changed (gpointer user_data)
 {
   ooze_plugin_refresh_theme (OOZE_PLUGIN (user_data));
-}
-
-/* ── Post-map / window lifecycle ─────────────────────────────────────────── */
-
-static gboolean
-ooze_plugin_post_map_idle (gpointer user_data)
-{
-  MetaWindowActor *actor = META_WINDOW_ACTOR (user_data);
-
-  g_object_set_data (G_OBJECT (actor), "ooze-post-map-id", NULL);
-
-  ooze_window_setup (actor);
-
-  if (g_object_get_data (G_OBJECT (actor), "ooze-window-chrome"))
-    {
-      ooze_window_chrome_raise_ssd (actor);
-      ooze_window_chrome_schedule_sync (actor);
-    }
-  else
-    {
-      ooze_window_schedule_sync (actor);
-    }
-
-  return G_SOURCE_REMOVE;
-}
-
-static void
-ooze_plugin_schedule_post_map (MetaWindowActor *actor)
-{
-  guint id;
-
-  if (g_object_get_data (G_OBJECT (actor), "ooze-post-map-id"))
-    return;
-
-  g_object_ref (actor);
-  id = g_idle_add_full (G_PRIORITY_DEFAULT_IDLE,
-                        ooze_plugin_post_map_idle,
-                        actor,
-                        g_object_unref);
-  g_object_set_data (G_OBJECT (actor),
-                     "ooze-post-map-id",
-                     GUINT_TO_POINTER (id));
 }
 
 /* ── Dock setup ──────────────────────────────────────────────────────────── */
@@ -830,7 +847,8 @@ ooze_plugin_dock_icons_changed (gpointer user_data)
     return;
   display = meta_plugin_get_display (META_PLUGIN (plugin));
   plugin->last_dock_plate_width = 0;
-  ooze_plugin_sync_dock_reflections (plugin);
+  /* Reflections after icons; never block the dock rebuild callback. */
+  ooze_plugin_schedule_dock_reflections (plugin);
   ooze_plugin_update_aqua_dock_layout (plugin, display);
 }
 
@@ -869,6 +887,8 @@ ooze_plugin_setup_aqua_dock (OozePlugin       *plugin,
 
   plugin->aqua_dock_reflections = clutter_actor_new ();
   clutter_actor_set_reactive (plugin->aqua_dock_reflections, FALSE);
+  /* Keep flipped overflow inside the below-plate strip. */
+  clutter_actor_set_clip_to_allocation (plugin->aqua_dock_reflections, TRUE);
   {
     ClutterLayoutManager *reflect_layout = clutter_box_layout_new ();
     clutter_box_layout_set_orientation (CLUTTER_BOX_LAYOUT (reflect_layout),
@@ -893,7 +913,7 @@ ooze_plugin_setup_aqua_dock (OozePlugin       *plugin,
 
   clutter_actor_add_child (plugin->aqua_dock, plugin->aqua_dock_icons);
   clutter_actor_add_child (plugin->aqua_dock, plugin->aqua_dock_reflections);
-  ooze_plugin_sync_dock_reflections (plugin);
+  ooze_plugin_schedule_dock_reflections (plugin);
 
   clutter_actor_add_child (stage, plugin->aqua_dock);
   clutter_actor_set_child_above_sibling (stage, plugin->aqua_dock, window_group);
@@ -968,6 +988,7 @@ ooze_plugin_on_monitors_changed (MetaMonitorManager *monitor_manager G_GNUC_UNUS
   clutter_actor_show (plugin->background_group);
 
   ooze_panel_setup (plugin, display, compositor);
+  ooze_tray_setup (plugin);
   ooze_plugin_setup_aqua_dock (plugin, display, compositor);
   ooze_plugin_update_layout (plugin, display);
 }
@@ -1037,7 +1058,7 @@ ooze_plugin_init_ui (OozePlugin *plugin)
       ooze_global_menu_set_changed_callback (plugin->global_menu,
                                            ooze_panel_on_global_menu_changed,
                                            plugin);
-      ooze_panel_rebuild_menu_bar (plugin);
+      ooze_panel_schedule_rebuild (plugin);
     }
 }
 
@@ -1187,7 +1208,6 @@ ooze_plugin_map (MetaPlugin *plugin, MetaWindowActor *actor)
     meta_window_focus (window, clutter_get_current_event_time ());
 
   meta_plugin_map_completed (plugin, actor);
-  ooze_plugin_schedule_post_map (actor);
 }
 
 static void
@@ -1201,13 +1221,12 @@ ooze_plugin_destroy (MetaPlugin *plugin, MetaWindowActor *actor)
 
 static void
 ooze_plugin_size_change (MetaPlugin      *plugin G_GNUC_UNUSED,
-                       MetaWindowActor *actor,
+                       MetaWindowActor *actor G_GNUC_UNUSED,
                        MetaSizeChange   which_change G_GNUC_UNUSED,
                        MtkRectangle    *old_frame_rect G_GNUC_UNUSED,
                        MtkRectangle    *old_buffer_rect G_GNUC_UNUSED)
 {
-  ooze_window_chrome_schedule_sync (actor);
-  ooze_window_schedule_sync (actor);
+  /* Mutter owns tile/maximize geometry. No grab-overlay / SSD sync here. */
   meta_plugin_size_change_completed (plugin, actor);
 }
 
@@ -1219,6 +1238,9 @@ on_stage_key_press (ClutterActor *stage G_GNUC_UNUSED,
                     OozePlugin    *plugin)
 {
   ClutterModifierType state;
+
+  if (plugin->locked)
+    return CLUTTER_EVENT_PROPAGATE;
 
   if (plugin->menu_popup &&
       ooze_aqua_menu_handle_key (plugin->menu_popup, event))
@@ -1338,6 +1360,7 @@ ooze_plugin_show_tile_preview (MetaPlugin   *plugin,
 {
   OozePlugin *self = OOZE_PLUGIN (plugin);
   MetaDisplay *display;
+  MetaContext *context;
   MetaBackend *backend;
   ClutterActor *stage;
   CoglColor color;
@@ -1346,8 +1369,17 @@ ooze_plugin_show_tile_preview (MetaPlugin   *plugin,
     return;
 
   display = meta_plugin_get_display (plugin);
-  backend = meta_context_get_backend (meta_display_get_context (display));
+  if (!display)
+    return;
+  context = meta_display_get_context (display);
+  if (!context)
+    return;
+  backend = meta_context_get_backend (context);
+  if (!backend)
+    return;
   stage = CLUTTER_ACTOR (meta_backend_get_stage (backend));
+  if (!stage)
+    return;
 
   if (!self->tile_preview)
     {
@@ -1549,7 +1581,7 @@ ooze_plugin_start (MetaPlugin *plugin)
                           G_CALLBACK (on_stage_key_press), self);
     }
 
-  ooze_window_connect_display (display);
+  ooze_lock_init (self);
 
   clutter_actor_show (stage);
 }
@@ -1561,6 +1593,8 @@ ooze_plugin_dispose (GObject *object)
 {
   OozePlugin *plugin = OOZE_PLUGIN (object);
 
+  ooze_lock_dispose (plugin);
+  ooze_tray_dispose (plugin);
   ooze_panel_dispose (plugin);
   ooze_plugin_clear_aux_panels (plugin);
 
@@ -1614,13 +1648,6 @@ ooze_plugin_dispose (GObject *object)
       g_source_remove (chrome_theme_idle_id);
       chrome_theme_idle_id = 0;
     }
-
-  {
-    MetaDisplay *display = meta_plugin_get_display (META_PLUGIN (plugin));
-
-    if (display)
-      ooze_window_disconnect_display (display);
-  }
 
   ooze_aqua_menu_destroy (plugin->menu_popup);
   plugin->menu_popup = NULL;
@@ -1685,4 +1712,23 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->stage_key_handler = 0;
   plugin->last_panel_width = 0;
   plugin->last_dock_plate_width = 0;
+  plugin->dock_reflect_idle = 0;
+  plugin->locked = FALSE;
+  plugin->lock_enabled = TRUE;
+  plugin->lock_overlay = NULL;
+  plugin->lock_card = NULL;
+  plugin->lock_clock_label = NULL;
+  plugin->lock_user_label = NULL;
+  plugin->lock_entry_box = NULL;
+  plugin->lock_password = NULL;
+  plugin->lock_unlock_btn = NULL;
+  plugin->lock_status_label = NULL;
+  plugin->lock_grab = NULL;
+  plugin->lock_auth_proc = NULL;
+  plugin->lock_clock_timer = 0;
+  plugin->lock_idle_watch_id = 0;
+  plugin->lock_logind_sub_id = 0;
+  plugin->lock_logind_conn = NULL;
+  plugin->session_settings = NULL;
+  plugin->screensaver_settings = NULL;
 }

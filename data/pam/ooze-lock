@@ -1,0 +1,4 @@
+#%PAM-1.0
+# Ooze lock screen PAM stack (used by ooze-pam-helper).
+@include common-auth
+@include common-account

@@ -47,7 +47,7 @@ const OozeAquaPalette *ooze_theme_get_palette (OozeTheme *theme);
 void ooze_theme_toggle (OozeTheme *theme);
 
 /* WhiteSur helpers — never applied globally via GSettings (that breaks Ooze Gel).
- * X11 foreign apps get WhiteSur through XSETTINGS + launch-scoped GTK_THEME. */
+ * Foreign classic GTK gets WhiteSur via launch-scoped GTK_THEME + Xwayland XSETTINGS. */
 const char *ooze_theme_foreign_gtk_name (gboolean dark);
 gboolean    ooze_theme_foreign_gtk_installed (gboolean dark);
 /* Returns an allocated selected foreign GTK theme, or NULL if missing. */

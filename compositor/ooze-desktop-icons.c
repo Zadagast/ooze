@@ -3,6 +3,7 @@
 #include "ooze-aqua-draw.h"
 #include "ooze-dock-shell.h"
 #include "ooze-dnd-bridge.h"
+#include "ooze-stall.h"
 #include "../common/ooze-font.h"
 
 #include <meta/meta-backend.h>
@@ -59,9 +60,13 @@ typedef struct
   ClutterGrab *grab;
   GHashTable *layout; /* path -> graphene_point_t* */
   gulong dnd_enter_handler;
+  guint rebuild_idle;
 } OozeDesktopIconData;
 
+#define DESKTOP_REBUILD_DEBOUNCE_MS 200
+
 static void ooze_desktop_icons_rebuild (OozeDesktopIconData *data);
+static void ooze_desktop_icons_schedule_rebuild (OozeDesktopIconData *data);
 static void ooze_desktop_layout_save (OozeDesktopIconData *data);
 static gboolean ooze_desktop_spring_fire (gpointer user_data);
 static void on_desktop_changed (GFileMonitor     *monitor,
@@ -438,6 +443,11 @@ ooze_desktop_icon_data_free (gpointer user_data)
 {
   OozeDesktopIconData *data = user_data;
 
+  if (data->rebuild_idle)
+    {
+      g_source_remove (data->rebuild_idle);
+      data->rebuild_idle = 0;
+    }
   ooze_desktop_spring_cancel (data);
   ooze_desktop_dismiss_grab (data);
   ooze_desktop_destroy_ghost (data);
@@ -1042,6 +1052,7 @@ ooze_desktop_place_at (ClutterActor *container,
 static void
 ooze_desktop_icons_rebuild (OozeDesktopIconData *data)
 {
+  g_autoptr (OozeStallScope) stall = NULL;
   static const char *hd_icons[] = { "drive-harddisk", NULL };
   static const char *home_icons[] = { "user-home", "go-home", NULL };
   static const char *folder_icons[] = { "folder", NULL };
@@ -1057,6 +1068,7 @@ ooze_desktop_icons_rebuild (OozeDesktopIconData *data)
   if (!data || !data->container)
     return;
 
+  stall = ooze_stall_begin ("desktop-rebuild");
   ooze_desktop_clear_children (data);
 
   view_path = ooze_desktop_root_path ();
@@ -1149,6 +1161,33 @@ ooze_desktop_icons_rebuild (OozeDesktopIconData *data)
   clutter_actor_set_size (data->container, (gfloat) data->width, (gfloat) data->height);
 }
 
+static gboolean
+ooze_desktop_icons_rebuild_idle (gpointer user_data)
+{
+  OozeDesktopIconData *data = user_data;
+
+  data->rebuild_idle = 0;
+  if (data->dragging)
+    return G_SOURCE_REMOVE;
+  ooze_desktop_icons_rebuild (data);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+ooze_desktop_icons_schedule_rebuild (OozeDesktopIconData *data)
+{
+  if (!data)
+    return;
+  if (data->dragging)
+    return;
+  if (data->rebuild_idle)
+    g_source_remove (data->rebuild_idle);
+  data->rebuild_idle =
+    g_timeout_add (DESKTOP_REBUILD_DEBOUNCE_MS,
+                   ooze_desktop_icons_rebuild_idle,
+                   data);
+}
+
 static void
 on_desktop_changed (GFileMonitor *monitor G_GNUC_UNUSED,
                     GFile *file G_GNUC_UNUSED,
@@ -1161,7 +1200,7 @@ on_desktop_changed (GFileMonitor *monitor G_GNUC_UNUSED,
   /* Avoid stomping an active drag; release/spring rebuild instead. */
   if (data->dragging)
     return;
-  ooze_desktop_icons_rebuild (data);
+  ooze_desktop_icons_schedule_rebuild (data);
 }
 
 static ClutterActor *

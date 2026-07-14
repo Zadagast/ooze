@@ -30,14 +30,15 @@ void ooze_appmenu_apply_to_launcher (GSubprocessLauncher *launcher);
 void ooze_appmenu_force_wayland_backend (GSubprocessLauncher *launcher);
 
 /*
- * Foreign AppMenu clients (debug only): force Xwayland for appmenu-gtk-module.
+ * Foreign GTK: force Xwayland so WhiteSur follows XSETTINGS Light↔Dark.
+ * With OOZE_FOREIGN_GLOBAL_MENU=1 also used for appmenu-gtk-module.
  */
 void ooze_appmenu_force_x11_backend (GSubprocessLauncher *launcher);
 
 /*
  * Foreign launch via g_app_info_launch.
- * Default: WhiteSur theme only (in-window menus).
- * With OOZE_FOREIGN_GLOBAL_MENU=1: modules + X11 + ShellShowsMenubar.
+ * Default: WhiteSur + GDK_BACKEND=x11 (in-window menus; live XSETTINGS theme).
+ * With OOZE_FOREIGN_GLOBAL_MENU=1: also modules + ShellShowsMenubar.
  */
 void ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx);
 
@@ -52,8 +53,8 @@ void ooze_appmenu_prepare_launch_context_for_info (GAppLaunchContext *ctx,
                                                    GAppInfo          *info);
 
 /*
- * Environ for VTE / Command shells. Default: WhiteSur only.
- * Debug flag: also inject modules + GDK_BACKEND=x11.
+ * Environ for VTE / Command shells: WhiteSur + GDK_BACKEND=x11.
+ * With OOZE_FOREIGN_GLOBAL_MENU=1: also inject modules.
  * Caller owns the result.
  */
 char **ooze_appmenu_environ_for_foreign (char **envp);

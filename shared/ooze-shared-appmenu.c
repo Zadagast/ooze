@@ -175,12 +175,13 @@ ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx)
 {
   g_return_if_fail (G_IS_APP_LAUNCH_CONTEXT (ctx));
 
+  /* Xwayland so XSETTINGS can flip WhiteSur-Light↔Dark live. AppMenu modules
+   * stay off unless OOZE_FOREIGN_GLOBAL_MENU=1. */
+  g_app_launch_context_setenv (ctx, "GDK_BACKEND", "x11");
+  ooze_appmenu_apply_foreign_theme_to_context (ctx);
+
   if (!ooze_appmenu_foreign_enabled ())
-    {
-      /* In-window menus; WhiteSur via launch GTK_THEME only. */
-      ooze_appmenu_apply_foreign_theme_to_context (ctx);
-      return;
-    }
+    return;
 
   ooze_appmenu_setup_environment ();
 
@@ -194,8 +195,6 @@ ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx)
       g_app_launch_context_setenv (ctx, "UBUNTU_MENUPROXY", proxy);
   }
 
-  g_app_launch_context_setenv (ctx, "GDK_BACKEND", "x11");
-  ooze_appmenu_apply_foreign_theme_to_context (ctx);
   ooze_appmenu_ensure_shell_shows_menubar ();
 }
 
@@ -204,14 +203,13 @@ ooze_appmenu_apply_foreign_to_launcher (GSubprocessLauncher *launcher)
 {
   g_return_if_fail (launcher != NULL);
 
+  /* WhiteSur + X11 always; modules only when foreign AppMenu debug is on. */
+  ooze_appmenu_force_x11_backend (launcher);
+
   if (!ooze_appmenu_foreign_enabled ())
-    {
-      ooze_appmenu_apply_foreign_theme_to_launcher (launcher);
-      return;
-    }
+    return;
 
   ooze_appmenu_apply_to_launcher (launcher);
-  ooze_appmenu_force_x11_backend (launcher);
 }
 
 void
@@ -251,6 +249,9 @@ ooze_appmenu_environ_for_foreign (char **envp)
   if (theme)
     envp = g_environ_setenv (envp, "GTK_THEME", theme, TRUE);
 
+  /* Xwayland for live Appearance via XSETTINGS (menus still default off). */
+  envp = g_environ_setenv (envp, "GDK_BACKEND", "x11", TRUE);
+
   if (!ooze_appmenu_foreign_enabled ())
     return envp;
 
@@ -264,7 +265,6 @@ ooze_appmenu_environ_for_foreign (char **envp)
     if (proxy && *proxy)
       envp = g_environ_setenv (envp, "UBUNTU_MENUPROXY", proxy, TRUE);
   }
-  envp = g_environ_setenv (envp, "GDK_BACKEND", "x11", TRUE);
   ooze_appmenu_ensure_shell_shows_menubar ();
   return envp;
 }

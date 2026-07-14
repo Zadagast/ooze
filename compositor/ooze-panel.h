@@ -31,7 +31,7 @@ void ooze_panel_refresh_ooze_button (OozePlugin *plugin);
 /* Redraw the panel pinstripe texture at the given width. */
 void ooze_panel_refresh_texture    (OozePlugin *plugin, int width);
 
-/* Queue a deferred menu bar rebuild (skips if a rebuild is already pending). */
+/* Queue a deferred menu bar rebuild (trailing 40ms debounce). */
 void ooze_panel_schedule_rebuild   (OozePlugin *plugin);
 
 /*

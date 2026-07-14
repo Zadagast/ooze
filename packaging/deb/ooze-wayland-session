@@ -27,6 +27,13 @@ export XDG_DATA_DIRS="${OOZE_DATA_DIR}${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 ooze_export_foreign_gtk_theme
 ooze_export_appmenu_modules
 
+# Native login session: publish desktop id to systemd --user / D-Bus activation,
+# start keyring (Recommends), and soft-kick portals. Do not wrap in
+# dbus-run-session (that would nest a second bus over the login session).
+ooze_push_activation_environment
+ooze_start_gnome_keyring
+ooze_kick_portals
+
 # Never force nest virtual modes on a real login session.
 unset MUTTER_DEBUG_DUMMY_MODE_SPECS
 
@@ -42,6 +49,9 @@ if command -v gsettings >/dev/null 2>&1; then
   gsettings set org.gnome.desktop.peripherals.mouse drag-threshold 20 2>/dev/null || true
   gsettings set org.gnome.mutter.keybindings toggle-tiled-left "['<Super>Left']" 2>/dev/null || true
   gsettings set org.gnome.mutter.keybindings toggle-tiled-right "['<Super>Right']" 2>/dev/null || true
+  # Prefs only — Mutter without GNOME Shell / Ooze lock UI still will not
+  # present a lock screen. See README Stability.
+  gsettings set org.gnome.desktop.screensaver lock-enabled true 2>/dev/null || true
 fi
 
 OOZE_BIN="${OOZE_BIN:-ooze}"

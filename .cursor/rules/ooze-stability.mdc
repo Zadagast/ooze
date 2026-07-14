@@ -21,7 +21,7 @@ Ooze’s shell UI runs **inside** Mutter (GNOME-like). On Wayland, a compositor 
 1. **Compositor main-thread budget** — Do not do unbounded icon theme walks, Cairo dock reflection rebuilds, full-stage snapshots, or synchronous `XSync` on user input / GSettings notify. Use `g_idle_add` / workers; cap work. Tag stalls with `OozeStall:`.
 2. **Appearance toggle is O(panel + wallpaper)** — `ooze_plugin_refresh_theme` must stay cheap. Regressions are P0. Never reintroduce `clutter_stage_paint_to_content` for Light↔Dark.
 3. **No assert-abort in first-party UI** — Prefer `g_warning` + empty models over patterns that fatal-abort GTK (bad `GtkDropDown` model replace). Follow Monitor/Themes `set_model` pattern.
-4. **Foreign theming is launch-scoped** — Never session-wide `GTK_THEME` or global `~/.config/gtk-4.0` WhiteSur. XSETTINGS + launch helpers only.
+4. **Foreign theming is launch-scoped** — Never session-wide `GTK_THEME` or global `~/.config/gtk-4.0` WhiteSur. Foreign classic GTK launches get `GTK_THEME` + `GDK_BACKEND=x11` so XSETTINGS can flip Light↔Dark live; AppMenu/dbusmenu stays opt-in. Ooze apps stay Wayland with `GTK_THEME` unset.
 5. **Settings notify hygiene** — Dock icon rebuild only on `icon-theme` (not cursor/color-scheme fan-out).
 6. **Honest Wayland limit** — Do not promise “restart Ooze without losing apps.” Promise “don’t freeze; don’t kill the compositor for UI bugs.”
 

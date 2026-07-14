@@ -2,12 +2,16 @@
 
 #include <cairo/cairo.h>
 #include <clutter/clutter.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
 #include <meta/display.h>
 
 G_BEGIN_DECLS
 
 ClutterContent *ooze_aqua_content_from_surface (ClutterActor    *ref_actor,
                                               cairo_surface_t *surface);
+
+ClutterContent *ooze_aqua_content_from_pixbuf (ClutterActor *ref_actor,
+                                             GdkPixbuf    *pixbuf);
 
 ClutterContent *ooze_aqua_pinstripe_content (ClutterActor *ref_actor,
                                            int           width,
@@ -50,6 +54,18 @@ ClutterContent *ooze_aqua_menu_feather_content (ClutterActor *ref_actor,
 ClutterContent *ooze_aqua_ooze_button_content (ClutterActor *ref_actor,
                                              int          *width_out,
                                              int          *height_out);
+
+/* Squircle glass card (inset=FALSE) or recessed password field (inset=TRUE). */
+ClutterContent *ooze_aqua_squircle_panel_content (ClutterActor *ref_actor,
+                                                int           width,
+                                                int           height,
+                                                gboolean      inset);
+
+/* OozeKit primary push — rounded-square lime plate with @label. */
+ClutterContent *ooze_aqua_kit_button_content (ClutterActor *ref_actor,
+                                            const char   *label,
+                                            int           width,
+                                            int           height);
 
 ClutterContent *ooze_aqua_spot_icon_content (ClutterActor *ref_actor,
                                            MetaDisplay  *display,

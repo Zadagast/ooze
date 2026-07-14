@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Launch a nested Ooze session from a system install (/usr).
+#
+# Uses dbus-run-session (private bus). Do NOT push activation environment into
+# systemd --user here — that would overwrite the host login desktop id.
 set -euo pipefail
 
 _OOZE_ENV="${OOZE_SESSION_ENV:-}"
@@ -50,8 +53,17 @@ if [[ "${OOZE_NO_X11:-}" == "1" ]]; then
   desktop_args+=(--no-x11)
 fi
 
+export OOZE_BIN
+export OOZE_SESSION_ENV_FILE="$_OOZE_ENV"
+
+# Inside dbus-run-session: start keyring on the *private* bus only.
+# Never ooze_push_activation_environment / ooze_kick_portals (host systemd).
 if command -v dbus-run-session >/dev/null 2>&1; then
-  exec dbus-run-session -- "$OOZE_BIN" "${desktop_args[@]}" "$@"
+  exec dbus-run-session -- bash -c \
+    'source "$OOZE_SESSION_ENV_FILE"; ooze_export_foreign_gtk_theme; ooze_start_gnome_keyring; exec "$OOZE_BIN" "$@"' \
+    bash "${desktop_args[@]}" "$@"
 fi
 
+# Fallback without dbus-run-session (uses whatever bus is already present).
+ooze_start_gnome_keyring
 exec "$OOZE_BIN" "${desktop_args[@]}" "$@"

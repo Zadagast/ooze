@@ -110,7 +110,8 @@ ooze_xsettings_current_gtk_theme (void)
 
   /*
    * XSETTINGS is only consumed by X11 / Xwayland clients. Foreign GTK apps
-   * are forced onto X11 for appmenu, so publish WhiteSur here.
+   * are launched with GDK_BACKEND=x11 so WhiteSur follows ThemeName live.
+   * AppMenu/dbusmenu stays opt-in (OOZE_FOREIGN_GLOBAL_MENU).
    *
    * Do NOT mirror this into org.gnome.desktop.interface gtk-theme — Wayland
    * Ooze apps read GSettings and WhiteSur there breaks Ooze Gel / OozeKit.
@@ -123,13 +124,28 @@ ooze_xsettings_current_gtk_theme (void)
   return "Adwaita";
 }
 
+static gboolean
+ooze_xsettings_prefer_dark (void)
+{
+  g_autoptr (GSettings) iface = NULL;
+  g_autofree char *scheme = NULL;
+
+  iface = g_settings_new ("org.gnome.desktop.interface");
+  if (!iface)
+    return FALSE;
+  scheme = g_settings_get_string (iface, "color-scheme");
+  return g_strcmp0 (scheme, "prefer-dark") == 0;
+}
+
 static GByteArray *
 ooze_xsettings_build_blob (guint32 serial)
 {
   GByteArray *buf = g_byte_array_new ();
   const char *theme_name;
+  int prefer_dark;
 
   theme_name = ooze_xsettings_current_gtk_theme ();
+  prefer_dark = ooze_xsettings_prefer_dark () ? 1 : 0;
 
   /* GDK compares against Xlib LSBFirst/MSBFirst (0/1), not 'l'/'B'. */
   ooze_xsettings_append_u8 (buf, (guint8) LSBFirst);
@@ -137,7 +153,7 @@ ooze_xsettings_build_blob (guint32 serial)
   ooze_xsettings_append_u8 (buf, 0);
   ooze_xsettings_append_u8 (buf, 0);
   ooze_xsettings_append_u32 (buf, serial);
-  ooze_xsettings_append_u32 (buf, 5);
+  ooze_xsettings_append_u32 (buf, 6);
 
   /* Foreign AppMenu off by default — keep in-window GTK3 menus.
    * OOZE_FOREIGN_GLOBAL_MENU=1 restores ShellShowsMenubar for dbusmenu. */
@@ -157,6 +173,8 @@ ooze_xsettings_build_blob (guint32 serial)
   ooze_xsettings_append_string (buf, "Net/ThemeName",
                                 theme_name ? theme_name : "Adwaita",
                                 serial);
+  ooze_xsettings_append_int (buf, "Gtk/ApplicationPreferDarkTheme",
+                             prefer_dark, serial);
   return buf;
 }
 

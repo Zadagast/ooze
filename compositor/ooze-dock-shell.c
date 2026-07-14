@@ -161,6 +161,7 @@ static void ooze_dock_notify_changed (ClutterActor *container);
 static void ooze_dock_save_pins_from_container (ClutterActor *container);
 static gboolean ooze_dock_app_is_pinned (ClutterActor *launcher);
 static void ooze_dock_rebuild_icons (ClutterActor *container);
+static void ooze_dock_schedule_rebuild_icons (ClutterActor *container);
 static ClutterActor *ooze_dock_find_by_app_id (ClutterActor *container,
                                                const char *app_id);
 static void ooze_dock_fill_icons (ClutterActor *container,
@@ -1302,7 +1303,7 @@ ooze_dock_update_indicators_cb (gpointer user_data)
 
     if (need_rebuild &&
         !g_object_get_data (G_OBJECT (ctx->container), "dock-dragging-any"))
-      ooze_dock_rebuild_icons (ctx->container);
+      ooze_dock_schedule_rebuild_icons (ctx->container);
   }
 
   return G_SOURCE_CONTINUE;
@@ -1766,7 +1767,7 @@ ooze_dock_unpin_anim_finish (OozeDockUnpinAnim *anim)
     }
   g_free (anim);
   if (CLUTTER_IS_ACTOR (container))
-    ooze_dock_rebuild_icons (container);
+    ooze_dock_schedule_rebuild_icons (container);
 }
 
 static void
@@ -1853,7 +1854,7 @@ ooze_dock_pin_menu_action (gpointer user_data, int action_id)
   g_ptr_array_add (next, NULL);
   ooze_dock_pins_save ((char **) next->pdata);
   g_ptr_array_free (next, TRUE);
-  ooze_dock_rebuild_icons (container);
+  ooze_dock_schedule_rebuild_icons (container);
 }
 
 static void
@@ -2661,6 +2662,8 @@ ooze_dock_on_icon_theme_changed (GSettings   *settings G_GNUC_UNUSED,
                                  const char  *key G_GNUC_UNUSED,
                                  gpointer     user_data)
 {
+  /* Drop cached pixbufs before the idle rebuild walks the theme again. */
+  ooze_icon_lookup_cache_invalidate ();
   /* Idle so GSettings churn / Themes UI writes do not block the compositor
    * click that changed the pack (heavy Freedesktop walk per dock icon). */
   ooze_dock_schedule_rebuild_icons (CLUTTER_ACTOR (user_data));

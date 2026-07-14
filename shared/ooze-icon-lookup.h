@@ -19,6 +19,9 @@ GdkPixbuf *ooze_icon_lookup_from_gicon (GIcon *icon,
 GdkPixbuf *ooze_icon_lookup_first (const char * const *icon_names,
                                    int                 size);
 
+/* Drop cached pixbufs (call when icon-theme GSettings changes). */
+void ooze_icon_lookup_cache_invalidate (void);
+
 /* Installed icon themes with index.theme (Directories=). Caller frees. */
 char **ooze_icon_lookup_list_icon_themes (void);
 

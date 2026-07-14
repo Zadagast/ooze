@@ -19,6 +19,7 @@ third-party/libtransmission/
 # Nest session leftovers (do not commit)
 data/xdg-config/org.gnome.Ptyxis/
 data/xdg-config/google-chrome/
+data/xdg-config/discord/
 data/xdg-config/pulse/
 data/xdg-config/monitors.xml
 data/xdg-config/ooze-torrent/

@@ -13,6 +13,8 @@ gulong meta_window_x11_get_toplevel_xwindow (MetaWindow *window);
 
 #define OOZE_REGISTRAR_RETRY_DEFAULT 20   /* ~5s */
 #define OOZE_REGISTRAR_RETRY_INKSCAPE 60  /* ~15s — lazy dbusmenu tops */
+/* Coalesce Alt-Tab focus chatter before GDBus bind / panel emit. */
+#define OOZE_FOCUS_SYNC_DEBOUNCE_MS 60
 
 typedef struct
 {
@@ -53,6 +55,7 @@ struct _OozeGlobalMenu
   gboolean    pending_top_valid;
   guint       suppress_changed;
   guint       prime_idle;
+  guint       focus_sync_idle;
   guint       activate_idle;
   guint       registrar_retry_id;
   guint       registrar_retry_left;
@@ -89,6 +92,9 @@ static void ooze_global_menu_bind_window (OozeGlobalMenu *menu,
                                         MetaWindow   *window);
 static void ooze_global_menu_prime_submenus (OozeGlobalMenu *menu);
 static void ooze_global_menu_schedule_prime (OozeGlobalMenu *menu);
+static void ooze_global_menu_schedule_focus_sync (OozeGlobalMenu *menu);
+static void ooze_global_menu_cancel_focus_sync (OozeGlobalMenu *menu);
+static void ooze_global_menu_flush_focus_sync (OozeGlobalMenu *menu);
 static void ooze_global_menu_cancel_registrar_retry (OozeGlobalMenu *menu);
 static void ooze_global_menu_schedule_registrar_retry (OozeGlobalMenu *menu,
                                                      MetaWindow   *window);
@@ -233,6 +239,49 @@ ooze_global_menu_schedule_prime (OozeGlobalMenu *menu)
     return;
 
   menu->prime_idle = g_idle_add (ooze_global_menu_prime_idle, menu);
+}
+
+static void
+ooze_global_menu_cancel_focus_sync (OozeGlobalMenu *menu)
+{
+  if (!menu || menu->focus_sync_idle == 0)
+    return;
+
+  g_source_remove (menu->focus_sync_idle);
+  menu->focus_sync_idle = 0;
+}
+
+static gboolean
+ooze_global_menu_focus_sync_idle (gpointer user_data)
+{
+  OozeGlobalMenu *menu = user_data;
+
+  menu->focus_sync_idle = 0;
+  ooze_global_menu_sync_focus (menu);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+ooze_global_menu_schedule_focus_sync (OozeGlobalMenu *menu)
+{
+  if (!menu)
+    return;
+
+  ooze_global_menu_cancel_focus_sync (menu);
+  menu->focus_sync_idle =
+    g_timeout_add (OOZE_FOCUS_SYNC_DEBOUNCE_MS,
+                   ooze_global_menu_focus_sync_idle,
+                   menu);
+}
+
+static void
+ooze_global_menu_flush_focus_sync (OozeGlobalMenu *menu)
+{
+  if (!menu || menu->focus_sync_idle == 0)
+    return;
+
+  ooze_global_menu_cancel_focus_sync (menu);
+  ooze_global_menu_sync_focus (menu);
 }
 
 static void
@@ -833,6 +882,7 @@ static void
 ooze_global_menu_bind_window (OozeGlobalMenu *menu,
                             MetaWindow   *window)
 {
+  g_autoptr (OozeStallScope) stall = NULL;
   const char *bus = NULL;
   const char *menubar = NULL;
   const char *app_path = NULL;
@@ -841,6 +891,8 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
   g_autofree char *registrar_menubar = NULL;
   gboolean have_export;
   gboolean is_x11;
+
+  stall = ooze_stall_begin ("focus-bind");
 
   ooze_global_menu_watch_window (menu, window);
   ooze_global_menu_ensure_registrar_watch (menu);
@@ -1128,7 +1180,7 @@ on_focus_window_changed (MetaDisplay  *display G_GNUC_UNUSED,
                          GParamSpec   *pspec G_GNUC_UNUSED,
                          OozeGlobalMenu *menu)
 {
-  ooze_global_menu_sync_focus (menu);
+  ooze_global_menu_schedule_focus_sync (menu);
 }
 
 OozeGlobalMenu *
@@ -1158,6 +1210,7 @@ ooze_global_menu_free (OozeGlobalMenu *menu)
   if (menu->display && menu->focus_handler)
     g_signal_handler_disconnect (menu->display, menu->focus_handler);
 
+  ooze_global_menu_cancel_focus_sync (menu);
   ooze_global_menu_cancel_registrar_retry (menu);
   if (menu->session && menu->registrar_signal_id != 0)
     {
@@ -1284,6 +1337,9 @@ ooze_global_menu_prepare_for_open (OozeGlobalMenu *menu)
   MetaWindow *window;
 
   g_return_if_fail (menu != NULL);
+
+  /* Flush any pending focus debounce so the click path binds the real focus. */
+  ooze_global_menu_flush_focus_sync (menu);
 
   window = meta_display_get_focus_window (menu->display);
   if (window && ooze_global_menu_window_is_minimized (window))

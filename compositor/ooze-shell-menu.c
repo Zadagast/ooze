@@ -3,6 +3,7 @@
 #include "ooze-global-menu.h"
 #include "ooze-dock-shell.h"
 #include "ooze-theme.h"
+#include "ooze-lock.h"
 
 #include <meta/display.h>
 #include <meta/meta-plugin.h>
@@ -23,37 +24,74 @@ const char *const ooze_shell_menu_bar_items[] = {
 };
 const gsize ooze_shell_menu_bar_n_items = G_N_ELEMENTS (ooze_shell_menu_bar_items);
 
-/* ── logind ──────────────────────────────────────────────────────────────── */
+/* ── logind (async — never block the compositor main thread forever) ───── */
+
+#define OOZE_LOGIND_TIMEOUT_MS 8000
+
+typedef struct
+{
+  char *method;
+} OozeLogindCall;
+
+static void
+ooze_plugin_menu_logind_call_done (GObject      *source,
+                                   GAsyncResult *res,
+                                   gpointer      user_data)
+{
+  OozeLogindCall *call = user_data;
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GVariant) reply = NULL;
+
+  reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), res, &error);
+  if (error)
+    g_warning ("Ooze menu: logind %s failed: %s",
+               call->method ? call->method : "?",
+               error->message);
+
+  g_free (call->method);
+  g_free (call);
+}
+
+static void
+ooze_plugin_menu_logind_bus_got (GObject      *source G_GNUC_UNUSED,
+                                 GAsyncResult *res,
+                                 gpointer      user_data)
+{
+  OozeLogindCall *call = user_data;
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GDBusConnection) conn = NULL;
+
+  conn = g_bus_get_finish (res, &error);
+  if (!conn)
+    {
+      g_warning ("Ooze menu: logind unavailable: %s", error->message);
+      g_free (call->method);
+      g_free (call);
+      return;
+    }
+
+  g_dbus_connection_call (conn,
+                          "org.freedesktop.login1",
+                          "/org/freedesktop/login1",
+                          "org.freedesktop.login1.Manager",
+                          call->method,
+                          g_variant_new ("(b)", TRUE),
+                          NULL,
+                          G_DBUS_CALL_FLAGS_NONE,
+                          OOZE_LOGIND_TIMEOUT_MS,
+                          NULL,
+                          ooze_plugin_menu_logind_call_done,
+                          call);
+}
 
 static void
 ooze_plugin_menu_logind_call (const char *method)
 {
-  g_autoptr (GDBusProxy) proxy = NULL;
-  g_autoptr (GError) error = NULL;
+  OozeLogindCall *call;
 
-  proxy = g_dbus_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
-                                         G_DBUS_PROXY_FLAGS_NONE,
-                                         NULL,
-                                         "org.freedesktop.login1",
-                                         "/org/freedesktop/login1",
-                                         "org.freedesktop.login1.Manager",
-                                         NULL,
-                                         &error);
-  if (!proxy)
-    {
-      g_warning ("Ooze menu: logind unavailable: %s", error->message);
-      return;
-    }
-
-  g_dbus_proxy_call_sync (proxy,
-                          method,
-                          g_variant_new ("(b)", TRUE),
-                          G_DBUS_CALL_FLAGS_NONE,
-                          -1,
-                          NULL,
-                          &error);
-  if (error)
-    g_warning ("Ooze menu: %s failed: %s", method, error->message);
+  call = g_new0 (OozeLogindCall, 1);
+  call->method = g_strdup (method);
+  g_bus_get (G_BUS_TYPE_SYSTEM, NULL, ooze_plugin_menu_logind_bus_got, call);
 }
 
 /* ── Action dispatch ─────────────────────────────────────────────────────── */
@@ -193,8 +231,13 @@ ooze_shell_menu_action (gpointer user_data, int action_id)
       break;
 
     case OOZE_MENU_OOZE_LOGOUT:
+      /* Local terminate — no sync logind EndSession on this path. */
       g_print ("Ooze: ending session\n");
       meta_context_terminate (plugin->context);
+      break;
+
+    case OOZE_MENU_OOZE_LOCK:
+      ooze_lock_request (plugin);
       break;
 
     case OOZE_MENU_OOZE_APPEARANCE:
