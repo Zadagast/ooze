@@ -7,9 +7,9 @@
 # never call ooze_push_activation_environment there (would pollute host).
 
 # Portal backends match UseIn=ooze (see data/xdg-desktop-portal/portals/).
-export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-Ooze}"
-export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-Ooze}"
-export DESKTOP_SESSION="${DESKTOP_SESSION:-Ooze}"
+export XDG_CURRENT_DESKTOP="Ooze"
+export XDG_SESSION_DESKTOP="Ooze"
+export DESKTOP_SESSION="Ooze"
 export XDG_DATA_DIRS="/usr/share/ooze${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 
 # Qt apps follow the session light/dark via the GTK platform theme, which
