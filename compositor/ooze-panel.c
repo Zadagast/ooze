@@ -217,6 +217,7 @@ on_ooze_button_pressed (ClutterActor *actor,
     { "About Ooze...", OOZE_MENU_HELP_ABOUT,      TRUE  },
     { NULL,            0,                       FALSE },
     { "Lock Screen",   OOZE_MENU_OOZE_LOCK,       TRUE  },
+    { "Suspend",       OOZE_MENU_OOZE_SUSPEND,    TRUE  },
     { "Restart...",    OOZE_MENU_OOZE_RESTART,    TRUE  },
     { "Shut Down...",  OOZE_MENU_OOZE_SHUTDOWN,   TRUE  },
     { NULL,            0,                       FALSE },
@@ -232,7 +233,7 @@ on_ooze_button_pressed (ClutterActor *actor,
   entries[0].label = dark ? "Switch to Light Mode" : "Switch to Dark Mode";
 
   logout_label = g_strdup_printf ("Log Out %s...", g_get_user_name ());
-  entries[8].label = logout_label;
+  entries[9].label = logout_label;
 
   ooze_aqua_menu_toggle_for_anchor (plugin->menu_popup,
                                   actor,

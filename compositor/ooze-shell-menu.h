@@ -34,6 +34,7 @@ typedef enum
   OOZE_MENU_OOZE_LOGOUT,
   OOZE_MENU_OOZE_LOCK,
   OOZE_MENU_OOZE_APPEARANCE,
+  OOZE_MENU_OOZE_SUSPEND,
 } OozeMenuAction;
 
 /* Shell menu action labels — null-terminated array of strings shown in the

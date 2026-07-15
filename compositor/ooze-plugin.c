@@ -21,6 +21,7 @@
 #include "ooze-portal-env.h"
 #include "ooze-autostart.h"
 #include "ooze-polkit.h"
+#include "ooze-session-dialog.h"
 
 #include "../common/aqua-chrome.h"
 #include "../common/ooze-font.h"
@@ -1712,6 +1713,7 @@ ooze_plugin_begin_shutdown (OozePlugin *plugin)
    * callback before asking MetaContext to dispose the backend.
    */
   ooze_lock_dispose (plugin);
+  ooze_session_dialog_dismiss ();
   ooze_polkit_shutdown ();
   ooze_shot_free (plugin->shot);
   plugin->shot = NULL;
