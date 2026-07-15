@@ -2,21 +2,17 @@
 
 #include "ooze-about.h"
 #include "ooze-button.h"
-#include "ooze-header-bar.h"
 #include "ooze-scroll.h"
 #include "ooze-surface.h"
 #include "ooze-toolbar.h"
-#include "ooze-window-actions.h"
 
-#include <adwaita.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <string.h>
 
 struct _OozeEyeWindow
 {
-  GtkApplicationWindow parent_instance;
+  OozeApplicationWindow parent_instance;
 
-  GtkWidget *header;
   GtkWidget *picture;
   GtkWidget *scrolled;
   GtkWidget *status;
@@ -34,12 +30,20 @@ struct _OozeEyeWindow
   guint      tick_id;
 };
 
-G_DEFINE_FINAL_TYPE (OozeEyeWindow, ooze_eye_window, GTK_TYPE_APPLICATION_WINDOW)
+G_DEFINE_FINAL_TYPE (OozeEyeWindow, ooze_eye_window,
+                     OOZE_TYPE_APPLICATION_WINDOW)
 
 static void eye_rebuild_siblings (OozeEyeWindow *self);
 static void eye_apply_display    (OozeEyeWindow *self);
 static void eye_update_chrome    (OozeEyeWindow *self);
 static void eye_goto_index       (OozeEyeWindow *self, guint index);
+static void ooze_eye_window_constructed (GObject *object);
+
+static const char *const eye_prev_icons[] = { "go-previous", NULL };
+static const char *const eye_next_icons[] = { "go-next", NULL };
+static const char *const eye_zin_icons[]  = { "zoom-in", NULL };
+static const char *const eye_zout_icons[] = { "zoom-out", NULL };
+static const char *const eye_fit_icons[]  = { "zoom-fit-best", "zoom-fit", NULL };
 
 static gboolean
 eye_is_image_path (const char *path)
@@ -196,8 +200,8 @@ eye_update_chrome (OozeEyeWindow *self)
   else
     title = g_strdup ("Ooze Eye");
 
-  gtk_window_set_title (GTK_WINDOW (self), title);
-  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->header), title);
+  ooze_application_window_set_title (
+    OOZE_APPLICATION_WINDOW (self), title);
 
   if (self->status)
     {
@@ -498,43 +502,36 @@ eye_action_next (GSimpleAction *a G_GNUC_UNUSED,
 }
 
 static GMenuModel *
-eye_build_menubar (void)
+eye_build_file_menu (void)
 {
-  GMenu *bar, *file, *view, *help;
-  GMenuItem *item;
+  GMenu *file = g_menu_new ();
 
-  bar = g_menu_new ();
-
-  file = g_menu_new ();
   g_menu_append (file, "Open…", "win.open");
   g_menu_append (file, "Close Window", "win.close");
-  item = g_menu_item_new_submenu ("File", G_MENU_MODEL (file));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
-  g_object_unref (file);
+  return G_MENU_MODEL (file);
+}
 
-  view = g_menu_new ();
+static GMenuModel *
+eye_build_view_menu (void)
+{
+  GMenu *view = g_menu_new ();
+
   g_menu_append (view, "Zoom In", "win.zoom-in");
   g_menu_append (view, "Zoom Out", "win.zoom-out");
   g_menu_append (view, "Actual Size", "win.zoom-100");
   g_menu_append (view, "Fit to Window", "win.zoom-fit");
   g_menu_append (view, "Previous Image", "win.prev");
   g_menu_append (view, "Next Image", "win.next");
-  item = g_menu_item_new_submenu ("View", G_MENU_MODEL (view));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
-  g_object_unref (view);
+  return G_MENU_MODEL (view);
+}
 
-  ooze_menubar_append_window (bar);
+static GMenuModel *
+eye_build_help_menu (void)
+{
+  GMenu *help = g_menu_new ();
 
-  help = g_menu_new ();
   g_menu_append (help, "About Ooze Eye", "win.about");
-  item = g_menu_item_new_submenu ("Help", G_MENU_MODEL (help));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
-  g_object_unref (help);
-
-  return G_MENU_MODEL (bar);
+  return G_MENU_MODEL (help);
 }
 
 static gboolean
@@ -602,6 +599,7 @@ ooze_eye_window_class_init (OozeEyeWindowClass *klass)
 {
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
+  object_class->constructed = ooze_eye_window_constructed;
   object_class->dispose = ooze_eye_window_dispose;
 }
 
@@ -618,12 +616,18 @@ ooze_eye_window_init (OozeEyeWindow *self)
     { .name = "prev",     .activate = eye_action_prev },
     { .name = "next",     .activate = eye_action_next },
   };
-  static const char *const prev_icons[] = { "go-previous", NULL };
-  static const char *const next_icons[] = { "go-next", NULL };
-  static const char *const zin_icons[]  = { "zoom-in", NULL };
-  static const char *const zout_icons[] = { "zoom-out", NULL };
-  static const char *const fit_icons[]  = { "zoom-fit-best", "zoom-fit", NULL };
+  g_action_map_add_action_entries (G_ACTION_MAP (self),
+                                   entries, G_N_ELEMENTS (entries),
+                                   self);
+}
 
+static void
+ooze_eye_window_constructed (GObject *object)
+{
+  OozeEyeWindow *self = OOZE_EYE_WINDOW (object);
+  GMenuModel *file;
+  GMenuModel *view;
+  GMenuModel *help;
   GtkWidget *shell;
   GtkWidget *toolbar;
   GtkWidget *group;
@@ -631,53 +635,49 @@ ooze_eye_window_init (OozeEyeWindow *self)
   GtkEventController *keys;
   GtkWidget *btn;
 
+  G_OBJECT_CLASS (ooze_eye_window_parent_class)->constructed (object);
+
   self->user_zoom = 1.0;
   self->fit_mode = TRUE;
 
   ooze_toolbar_ensure_css ();
 
   gtk_window_set_default_size (GTK_WINDOW (self), 900, 640);
-  gtk_window_set_title (GTK_WINDOW (self), "Ooze Eye");
   gtk_window_set_icon_name (GTK_WINDOW (self), "image-x-generic");
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-eye");
   /* Same Gel CSD class as Spot/King/Pak — corners + shadow from ooze_theme_ensure. */
   gtk_widget_add_css_class (GTK_WIDGET (self), "spot-finder");
 
-  g_action_map_add_action_entries (G_ACTION_MAP (self),
-                                   entries, G_N_ELEMENTS (entries),
-                                   self);
-  ooze_window_actions_add_chrome (GTK_APPLICATION_WINDOW (self));
-
-  self->header = GTK_WIDGET (ooze_header_bar_new ());
-  ooze_header_bar_attach_window (OOZE_HEADER_BAR (self->header), GTK_WINDOW (self));
-  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->header), "Ooze Eye");
-  gtk_window_set_titlebar (GTK_WINDOW (self), self->header);
+  ooze_application_window_set_title (
+    OOZE_APPLICATION_WINDOW (self), "Ooze Eye");
 
   shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
   toolbar = ooze_toolbar_new ();
   group = ooze_toolbar_add_group (toolbar);
 
-  self->btn_prev = ooze_button_new_toolbar (prev_icons, "Previous", "Previous image");
+  self->btn_prev = ooze_button_new_toolbar (
+    eye_prev_icons, "Previous", "Previous image");
   gtk_actionable_set_action_name (GTK_ACTIONABLE (self->btn_prev), "win.prev");
   gtk_box_append (GTK_BOX (group), self->btn_prev);
 
-  self->btn_next = ooze_button_new_toolbar (next_icons, "Next", "Next image");
+  self->btn_next = ooze_button_new_toolbar (
+    eye_next_icons, "Next", "Next image");
   gtk_actionable_set_action_name (GTK_ACTIONABLE (self->btn_next), "win.next");
   gtk_box_append (GTK_BOX (group), self->btn_next);
 
   ooze_toolbar_add_separator (toolbar);
   group = ooze_toolbar_add_group (toolbar);
 
-  btn = ooze_button_new_toolbar (zout_icons, "Smaller", "Zoom out");
+  btn = ooze_button_new_toolbar (eye_zout_icons, "Smaller", "Zoom out");
   gtk_actionable_set_action_name (GTK_ACTIONABLE (btn), "win.zoom-out");
   gtk_box_append (GTK_BOX (group), btn);
 
-  btn = ooze_button_new_toolbar (zin_icons, "Larger", "Zoom in");
+  btn = ooze_button_new_toolbar (eye_zin_icons, "Larger", "Zoom in");
   gtk_actionable_set_action_name (GTK_ACTIONABLE (btn), "win.zoom-in");
   gtk_box_append (GTK_BOX (group), btn);
 
-  btn = ooze_button_new_toolbar (fit_icons, "Fit", "Fit to window");
+  btn = ooze_button_new_toolbar (eye_fit_icons, "Fit", "Fit to window");
   gtk_actionable_set_action_name (GTK_ACTIONABLE (btn), "win.zoom-fit");
   gtk_box_append (GTK_BOX (group), btn);
 
@@ -711,7 +711,8 @@ ooze_eye_window_init (OozeEyeWindow *self)
 
   gtk_box_append (GTK_BOX (surface), self->scrolled);
   gtk_box_append (GTK_BOX (shell), surface);
-  gtk_window_set_child (GTK_WINDOW (self), shell);
+  ooze_application_window_set_content (
+    OOZE_APPLICATION_WINDOW (self), shell);
 
   self->tick_id = gtk_widget_add_tick_callback (GTK_WIDGET (self),
                                                 eye_tick, self, NULL);
@@ -720,25 +721,26 @@ ooze_eye_window_init (OozeEyeWindow *self)
   g_signal_connect (keys, "key-pressed", G_CALLBACK (on_key_pressed), self);
   gtk_widget_add_controller (GTK_WIDGET (self), keys);
 
-  g_signal_connect_object (adw_style_manager_get_default (), "notify::dark",
-                           G_CALLBACK (gtk_widget_queue_draw), self,
-                           G_CONNECT_SWAPPED);
-
   eye_update_chrome (self);
+
+  file = eye_build_file_menu ();
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "File", file);
+  g_object_unref (file);
+  view = eye_build_view_menu ();
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "View", view);
+  g_object_unref (view);
+  help = eye_build_help_menu ();
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "Help", help);
+  g_object_unref (help);
 }
 
 GtkWidget *
 ooze_eye_window_new (GtkApplication *app)
 {
-  OozeEyeWindow *win;
-  GMenuModel *menubar;
-
-  win = g_object_new (OOZE_EYE_TYPE_WINDOW, "application", app, NULL);
-
-  menubar = eye_build_menubar ();
-  gtk_application_set_menubar (app, menubar);
-  g_object_unref (menubar);
-  gtk_application_window_set_show_menubar (GTK_APPLICATION_WINDOW (win), FALSE);
-
-  return GTK_WIDGET (win);
+  return GTK_WIDGET (g_object_new (OOZE_EYE_TYPE_WINDOW,
+                                   "application", app,
+                                   NULL));
 }

@@ -3,19 +3,15 @@
 
 #include "ooze-about.h"
 #include "ooze-button.h"
-#include "ooze-header-bar.h"
 #include "ooze-surface.h"
 #include "ooze-toolbar.h"
-#include "ooze-window-actions.h"
 
-#include <adwaita.h>
 #include <string.h>
 
 struct _OozeTorrentWindow
 {
-  GtkApplicationWindow parent_instance;
+  OozeApplicationWindow parent_instance;
 
-  GtkWidget *header;
   GtkWidget *list;
   GtkWidget *empty;
   GtkWidget *status_label;
@@ -27,9 +23,10 @@ struct _OozeTorrentWindow
 };
 
 G_DEFINE_FINAL_TYPE (OozeTorrentWindow, ooze_torrent_window,
-                     GTK_TYPE_APPLICATION_WINDOW)
+                     OOZE_TYPE_APPLICATION_WINDOW)
 
 static void torrent_refresh (OozeTorrentWindow *self);
+static void ooze_torrent_window_constructed (GObject *object);
 
 static GtkWidget *
 toolbar_btn (const char * const *icons,
@@ -52,33 +49,22 @@ torrent_action_about (GSimpleAction *action G_GNUC_UNUSED,
 }
 
 static GMenuModel *
-torrent_build_menubar (void)
+torrent_build_file_menu (void)
 {
-  GMenu *bar, *file, *help;
-  GMenuItem *item;
-
-  bar = g_menu_new ();
-
-  file = g_menu_new ();
+  GMenu *file = g_menu_new ();
   g_menu_append (file, "Add Torrent…", "win.add-torrent");
   g_menu_append (file, "Add Magnet…", "win.add-magnet");
   g_menu_append (file, "Open Download Folder", "win.open-folder");
-  item = g_menu_item_new_submenu ("File", G_MENU_MODEL (file));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
-  g_object_unref (file);
+  return G_MENU_MODEL (file);
+}
 
-  ooze_menubar_append_edit (bar);
-  ooze_menubar_append_window (bar);
+static GMenuModel *
+torrent_build_help_menu (void)
+{
+  GMenu *help = g_menu_new ();
 
-  help = g_menu_new ();
   g_menu_append (help, "About Ooze Torrent", "win.about");
-  item = g_menu_item_new_submenu ("Help", G_MENU_MODEL (help));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
-  g_object_unref (help);
-
-  return G_MENU_MODEL (bar);
+  return G_MENU_MODEL (help);
 }
 
 static void
@@ -541,6 +527,7 @@ static void
 ooze_torrent_window_class_init (OozeTorrentWindowClass *klass)
 {
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
+  object_class->constructed = ooze_torrent_window_constructed;
   object_class->dispose = ooze_torrent_window_dispose;
 }
 
@@ -556,6 +543,17 @@ ooze_torrent_window_init (OozeTorrentWindow *self)
     { "remove", action_remove, NULL, NULL, NULL },
     { "open-folder", action_open_folder, NULL, NULL, NULL },
   };
+  g_action_map_add_action_entries (G_ACTION_MAP (self),
+                                   entries, G_N_ELEMENTS (entries),
+                                   self);
+}
+
+static void
+ooze_torrent_window_constructed (GObject *object)
+{
+  OozeTorrentWindow *self = OOZE_TORRENT_WINDOW (object);
+  GMenuModel *file;
+  GMenuModel *help;
   GtkWidget *shell;
   GtkWidget *toolbar;
   GtkWidget *scrolled;
@@ -564,21 +562,13 @@ ooze_torrent_window_init (OozeTorrentWindow *self)
   GtkWidget *empty_label;
   g_autoptr (GError) error = NULL;
 
+  G_OBJECT_CLASS (ooze_torrent_window_parent_class)->constructed (object);
+
   gtk_window_set_default_size (GTK_WINDOW (self), 720, 480);
-  gtk_window_set_title (GTK_WINDOW (self), "Ooze Torrent");
   gtk_window_set_icon_name (GTK_WINDOW (self), "application-x-bittorrent");
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-torrent");
-
-  g_action_map_add_action_entries (G_ACTION_MAP (self),
-                                   entries, G_N_ELEMENTS (entries),
-                                   self);
-  ooze_window_actions_add_chrome (GTK_APPLICATION_WINDOW (self));
-  ooze_window_actions_add_edit (GTK_APPLICATION_WINDOW (self));
-
-  self->header = GTK_WIDGET (ooze_header_bar_new ());
-  ooze_header_bar_attach_window (OOZE_HEADER_BAR (self->header), GTK_WINDOW (self));
-  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->header), "Ooze Torrent");
-  gtk_window_set_titlebar (GTK_WINDOW (self), self->header);
+  ooze_application_window_set_title (
+    OOZE_APPLICATION_WINDOW (self), "Ooze Torrent");
 
   self->session = ooze_tr_session_new (&error);
   if (!self->session)
@@ -621,30 +611,28 @@ ooze_torrent_window_init (OozeTorrentWindow *self)
   gtk_box_append (GTK_BOX (statusbar), self->status_label);
   gtk_box_append (GTK_BOX (shell), statusbar);
 
-  gtk_window_set_child (GTK_WINDOW (self), shell);
+  ooze_application_window_set_content (
+    OOZE_APPLICATION_WINDOW (self), shell);
 
   torrent_refresh (self);
   self->refresh_id = g_timeout_add_seconds (1, on_refresh_tick, self);
 
-  g_signal_connect_object (adw_style_manager_get_default (), "notify::dark",
-                           G_CALLBACK (gtk_widget_queue_draw), self,
-                           G_CONNECT_SWAPPED);
+  file = torrent_build_file_menu ();
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "File", file);
+  g_object_unref (file);
+  help = torrent_build_help_menu ();
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "Help", help);
+  g_object_unref (help);
 }
 
 GtkWidget *
 ooze_torrent_window_new (GtkApplication *app)
 {
-  OozeTorrentWindow *win;
-  GMenuModel *menubar;
-
-  win = g_object_new (OOZE_TORRENT_TYPE_WINDOW, "application", app, NULL);
-
-  menubar = torrent_build_menubar ();
-  gtk_application_set_menubar (app, menubar);
-  g_object_unref (menubar);
-  gtk_application_window_set_show_menubar (GTK_APPLICATION_WINDOW (win), FALSE);
-
-  return GTK_WIDGET (win);
+  return GTK_WIDGET (g_object_new (OOZE_TORRENT_TYPE_WINDOW,
+                                   "application", app,
+                                   NULL));
 }
 
 void

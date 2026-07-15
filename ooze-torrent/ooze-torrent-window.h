@@ -1,12 +1,12 @@
 #pragma once
 
-#include <gtk/gtk.h>
+#include "ooze-application-window.h"
 
 G_BEGIN_DECLS
 
 #define OOZE_TORRENT_TYPE_WINDOW (ooze_torrent_window_get_type ())
 G_DECLARE_FINAL_TYPE (OozeTorrentWindow, ooze_torrent_window, OOZE_TORRENT,
-                      WINDOW, GtkApplicationWindow)
+                      WINDOW, OozeApplicationWindow)
 
 GtkWidget *ooze_torrent_window_new (GtkApplication *app);
 

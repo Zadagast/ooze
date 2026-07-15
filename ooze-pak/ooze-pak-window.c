@@ -3,23 +3,21 @@
 
 #include "ooze-about.h"
 #include "ooze-button.h"
-#include "ooze-header-bar.h"
 #include "ooze-icons.h"
 #include "ooze-popover.h"
 #include "ooze-scroll.h"
 #include "ooze-surface.h"
 #include "ooze-toolbar.h"
-#include "ooze-window-actions.h"
 
+#include <adwaita.h>
 #include <string.h>
 
 #define PAK_MIME_UNINSTALL "application/x-ooze-pak-uninstall"
 
 struct _OozePakWindow
 {
-  GtkApplicationWindow parent_instance;
+  OozeApplicationWindow parent_instance;
 
-  GtkWidget *header;
   GtkWidget *flow;
   GtkWidget *scrolled;
   GtkWidget *status;
@@ -30,7 +28,8 @@ struct _OozePakWindow
   guint busy_count;
 };
 
-G_DEFINE_FINAL_TYPE (OozePakWindow, ooze_pak_window, GTK_TYPE_APPLICATION_WINDOW)
+G_DEFINE_FINAL_TYPE (OozePakWindow, ooze_pak_window,
+                     OOZE_TYPE_APPLICATION_WINDOW)
 
 static void ooze_pak_window_reload (OozePakWindow *self);
 static void ooze_pak_confirm_uninstall (OozePakWindow *self,
@@ -532,26 +531,23 @@ pak_action_about (GSimpleAction *action G_GNUC_UNUSED,
 }
 
 static GMenuModel *
-pak_build_menubar (void)
+pak_build_help_menu (void)
 {
-  GMenu *bar, *help;
-  GMenuItem *item;
+  GMenu *help;
 
-  bar = g_menu_new ();
-  ooze_menubar_append_edit (bar);
-  ooze_menubar_append_window (bar);
   help = g_menu_new ();
   g_menu_append (help, "About Ooze Pak", "win.about");
-  item = g_menu_item_new_submenu ("Help", G_MENU_MODEL (help));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
-  g_object_unref (help);
-  return G_MENU_MODEL (bar);
+  return G_MENU_MODEL (help);
 }
 
+static void ooze_pak_window_constructed (GObject *object);
+
 static void
-ooze_pak_window_class_init (OozePakWindowClass *klass G_GNUC_UNUSED)
+ooze_pak_window_class_init (OozePakWindowClass *klass)
 {
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+
+  object_class->constructed = ooze_pak_window_constructed;
 }
 
 static void
@@ -560,6 +556,16 @@ ooze_pak_window_init (OozePakWindow *self)
   static const GActionEntry entries[] = {
     { "about", pak_action_about, NULL, NULL, NULL },
   };
+  g_action_map_add_action_entries (G_ACTION_MAP (self),
+                                   entries, G_N_ELEMENTS (entries),
+                                   self);
+}
+
+static void
+ooze_pak_window_constructed (GObject *object)
+{
+  OozePakWindow *self = OOZE_PAK_WINDOW (object);
+  GMenuModel *help;
   GtkWidget *shell;
   GtkWidget *surface;
   GtkWidget *toolbar;
@@ -573,13 +579,9 @@ ooze_pak_window_init (OozePakWindow *self)
   const char *refresh_icons[] = { "view-refresh", "view-refresh-symbolic", NULL };
   const char *trash_icons[] = { "user-trash", "user-trash-symbolic", "edit-delete", NULL };
 
-  ooze_toolbar_ensure_css ();
+  G_OBJECT_CLASS (ooze_pak_window_parent_class)->constructed (object);
 
-  g_action_map_add_action_entries (G_ACTION_MAP (self),
-                                   entries, G_N_ELEMENTS (entries),
-                                   self);
-  ooze_window_actions_add_chrome (GTK_APPLICATION_WINDOW (self));
-  ooze_window_actions_add_edit (GTK_APPLICATION_WINDOW (self));
+  ooze_toolbar_ensure_css ();
 
   css = gtk_css_provider_new ();
   gtk_css_provider_load_from_string (
@@ -612,11 +614,8 @@ ooze_pak_window_init (OozePakWindow *self)
   gtk_window_set_icon_name (GTK_WINDOW (self), "system-software-install");
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-pak");
   gtk_widget_add_css_class (GTK_WIDGET (self), "spot-finder");
-
-  self->header = GTK_WIDGET (ooze_header_bar_new ());
-  ooze_header_bar_attach_window (OOZE_HEADER_BAR (self->header), GTK_WINDOW (self));
-  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->header), "Software");
-  gtk_window_set_titlebar (GTK_WINDOW (self), self->header);
+  ooze_application_window_set_title (
+    OOZE_APPLICATION_WINDOW (self), "Software");
 
   shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
@@ -691,7 +690,8 @@ ooze_pak_window_init (OozePakWindow *self)
     gtk_box_append (GTK_BOX (shell), status_bar);
   }
 
-  gtk_window_set_child (GTK_WINDOW (self), shell);
+  ooze_application_window_set_content (
+    OOZE_APPLICATION_WINDOW (self), shell);
 
   /* Window accepts package files to install. */
   win_drop = gtk_drop_target_new (GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
@@ -706,20 +706,17 @@ ooze_pak_window_init (OozePakWindow *self)
   gtk_widget_add_controller (self->trash_strip, GTK_EVENT_CONTROLLER (trash_drop));
 
   ooze_pak_window_reload (self);
+
+  help = pak_build_help_menu ();
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "Help", help);
+  g_object_unref (help);
 }
 
 OozePakWindow *
-ooze_pak_window_new (AdwApplication *app)
+ooze_pak_window_new (GtkApplication *app)
 {
-  OozePakWindow *win;
-  GMenuModel *menubar;
-
-  win = g_object_new (OOZE_PAK_TYPE_WINDOW, "application", app, NULL);
-
-  menubar = pak_build_menubar ();
-  gtk_application_set_menubar (GTK_APPLICATION (app), menubar);
-  g_object_unref (menubar);
-  gtk_application_window_set_show_menubar (GTK_APPLICATION_WINDOW (win), FALSE);
-
-  return win;
+  return g_object_new (OOZE_PAK_TYPE_WINDOW,
+                       "application", app,
+                       NULL);
 }

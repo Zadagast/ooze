@@ -1,17 +1,6 @@
 #include "ooze-ear-window.h"
 
-#include "ooze-shared-icons.h"
-#include "ooze-theme.h"
-
-#include <adwaita.h>
-
-static void
-on_startup (AdwApplication *app G_GNUC_UNUSED,
-            gpointer        user_data G_GNUC_UNUSED)
-{
-  ooze_icons_configure_gtk ();
-  ooze_theme_ensure ();
-}
+#include "ooze-application.h"
 
 static void
 on_activate (AdwApplication *app,
@@ -25,12 +14,9 @@ on_activate (AdwApplication *app,
 int
 main (int argc, char **argv)
 {
-  g_autoptr (AdwApplication) app = NULL;
+  g_autoptr (OozeApplication) app = NULL;
 
-  ooze_icons_apply ();
-
-  app = adw_application_new ("org.ooze.Ear", G_APPLICATION_DEFAULT_FLAGS);
-  g_signal_connect (app, "startup", G_CALLBACK (on_startup), NULL);
+  app = ooze_application_new ("org.ooze.Ear", G_APPLICATION_DEFAULT_FLAGS);
   g_signal_connect (app, "activate", G_CALLBACK (on_activate), NULL);
 
   return g_application_run (G_APPLICATION (app), argc, argv);
