@@ -137,6 +137,8 @@ ooze_tray_open_menu_idle (gpointer user_data)
     return G_SOURCE_REMOVE;
 
   plugin = icon->plugin;
+  if (plugin->shutting_down)
+    return G_SOURCE_REMOVE;
   menu_path = ooze_sni_item_menu_path (icon->item);
   bus_name = ooze_sni_item_bus_name (icon->item);
   if (!menu_path || !menu_path[0] || !bus_name)
@@ -295,7 +297,10 @@ ooze_tray_add_or_update (OozePlugin *plugin, OozeSniItem *item)
 static void
 ooze_tray_on_item_changed (OozeSniItem *item, gpointer user_data)
 {
-  ooze_tray_add_or_update (OOZE_PLUGIN (user_data), item);
+  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+
+  if (!plugin->shutting_down)
+    ooze_tray_add_or_update (plugin, item);
 }
 
 static void
@@ -304,7 +309,7 @@ ooze_tray_on_item_removed (OozeSniItem *item, gpointer user_data)
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
   guint i;
 
-  if (!plugin->tray_icons)
+  if (plugin->shutting_down || !plugin->tray_icons)
     return;
 
   for (i = 0; i < plugin->tray_icons->len; i++)
@@ -381,7 +386,7 @@ ooze_tray_appearance_idle (gpointer user_data)
   guint i;
 
   plugin->tray_appearance_idle = 0;
-  if (!plugin->tray_icons)
+  if (plugin->shutting_down || !plugin->tray_icons)
     return G_SOURCE_REMOVE;
 
   for (i = 0; i < plugin->tray_icons->len; i++)

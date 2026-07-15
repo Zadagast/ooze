@@ -288,6 +288,8 @@ ooze_lock_auth_finished (GObject      *source,
   int status = 1;
 
   g_clear_object (&plugin->lock_auth_proc);
+  if (plugin->shutting_down)
+    return;
 
   if (!g_subprocess_communicate_finish (G_SUBPROCESS (source),
                                         res,
@@ -689,7 +691,7 @@ ooze_lock_request (OozePlugin *plugin)
 
   g_return_if_fail (OOZE_IS_PLUGIN (plugin));
 
-  if (plugin->locked)
+  if (plugin->shutting_down || plugin->locked)
     return;
 
   if (plugin->menu_popup && ooze_aqua_menu_is_open (plugin->menu_popup))
@@ -726,7 +728,7 @@ ooze_lock_on_idle (MetaIdleMonitor *monitor G_GNUC_UNUSED,
 {
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
 
-  if (plugin->lock_enabled)
+  if (!plugin->shutting_down && plugin->lock_enabled)
     ooze_lock_request (plugin);
 }
 
@@ -789,7 +791,10 @@ ooze_lock_on_settings_changed (GSettings   *settings G_GNUC_UNUSED,
                                const char  *key G_GNUC_UNUSED,
                                gpointer     user_data)
 {
-  ooze_lock_sync_idle_watch (OOZE_PLUGIN (user_data));
+  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+
+  if (!plugin->shutting_down)
+    ooze_lock_sync_idle_watch (plugin);
 }
 
 static void
@@ -803,7 +808,8 @@ ooze_lock_on_logind_lock_signal (GDBusConnection *connection G_GNUC_UNUSED,
 {
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
 
-  if (g_strcmp0 (signal_name, "Lock") == 0)
+  if (!plugin->shutting_down &&
+      g_strcmp0 (signal_name, "Lock") == 0)
     ooze_lock_request (plugin);
   /* Ignore Unlock from logind — only PAM unlocks the overlay. */
 }
@@ -821,6 +827,12 @@ ooze_lock_bus_got (GObject      *source G_GNUC_UNUSED,
   if (!conn)
     {
       g_warning ("Ooze lock: cannot watch logind Lock: %s", error->message);
+      return;
+    }
+
+  if (plugin->shutting_down)
+    {
+      g_object_unref (conn);
       return;
     }
 

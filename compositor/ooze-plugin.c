@@ -693,6 +693,8 @@ ooze_plugin_chrome_theme_idle (gpointer user_data)
   GList *l;
 
   plugin->chrome_theme_idle = 0;
+  if (plugin->shutting_down)
+    return G_SOURCE_REMOVE;
 
   display = meta_plugin_get_display (META_PLUGIN (plugin));
   if (!display)
@@ -766,13 +768,21 @@ ooze_plugin_refresh_theme (OozePlugin *plugin)
 static void
 ooze_plugin_on_theme_will_change (gpointer user_data)
 {
+  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+
+  if (plugin->shutting_down)
+    return;
+
   ooze_screen_transition_run (META_PLUGIN (user_data));
 }
 
 static void
 ooze_plugin_on_theme_changed (gpointer user_data)
 {
-  ooze_plugin_refresh_theme (OOZE_PLUGIN (user_data));
+  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+
+  if (!plugin->shutting_down)
+    ooze_plugin_refresh_theme (plugin);
 }
 
 /* ── Dock setup ──────────────────────────────────────────────────────────── */
@@ -843,7 +853,7 @@ ooze_plugin_dock_icons_changed (gpointer user_data)
   OozePlugin *plugin = user_data;
   MetaDisplay *display;
 
-  if (!plugin)
+  if (!plugin || plugin->shutting_down)
     return;
   display = meta_plugin_get_display (META_PLUGIN (plugin));
   plugin->last_dock_plate_width = 0;
@@ -1115,6 +1125,15 @@ ooze_plugin_magic_lamp_done (MetaPlugin      *plugin,
                            gboolean         unminimize,
                            gpointer         user_data G_GNUC_UNUSED)
 {
+  if (OOZE_PLUGIN (plugin)->shutting_down)
+    {
+      if (unminimize)
+        meta_plugin_unminimize_completed (plugin, actor);
+      else
+        meta_plugin_minimize_completed (plugin, actor);
+      return;
+    }
+
   if (unminimize)
     {
       if (actor && !meta_window_actor_is_destroyed (actor))
@@ -1160,6 +1179,12 @@ ooze_plugin_run_magic_lamp (MetaPlugin      *plugin,
 static void
 ooze_plugin_minimize (MetaPlugin *plugin, MetaWindowActor *actor)
 {
+  if (OOZE_PLUGIN (plugin)->shutting_down)
+    {
+      meta_plugin_minimize_completed (plugin, actor);
+      return;
+    }
+
   MetaWindow *window = meta_window_actor_get_meta_window (actor);
 
   if (!window || meta_window_get_window_type (window) != META_WINDOW_NORMAL)
@@ -1174,6 +1199,12 @@ ooze_plugin_minimize (MetaPlugin *plugin, MetaWindowActor *actor)
 static void
 ooze_plugin_unminimize (MetaPlugin *plugin, MetaWindowActor *actor)
 {
+  if (OOZE_PLUGIN (plugin)->shutting_down)
+    {
+      meta_plugin_unminimize_completed (plugin, actor);
+      return;
+    }
+
   MetaWindow *window = meta_window_actor_get_meta_window (actor);
 
   if (!window || meta_window_get_window_type (window) != META_WINDOW_NORMAL)
@@ -1190,6 +1221,12 @@ ooze_plugin_map (MetaPlugin *plugin, MetaWindowActor *actor)
 {
   MetaWindow *window;
   ClutterActor *window_actor;
+
+  if (OOZE_PLUGIN (plugin)->shutting_down)
+    {
+      meta_plugin_map_completed (plugin, actor);
+      return;
+    }
 
   window = meta_window_actor_get_meta_window (actor);
   window_actor = CLUTTER_ACTOR (actor);
@@ -1214,6 +1251,12 @@ ooze_plugin_map (MetaPlugin *plugin, MetaWindowActor *actor)
 static void
 ooze_plugin_destroy (MetaPlugin *plugin, MetaWindowActor *actor)
 {
+  if (OOZE_PLUGIN (plugin)->shutting_down)
+    {
+      meta_plugin_destroy_completed (plugin, actor);
+      return;
+    }
+
   ooze_plugin_cancel_window_idle_ops (actor);
   ooze_window_chrome_remove (actor);
   ooze_window_teardown (actor);
@@ -1239,6 +1282,9 @@ on_stage_key_press (ClutterActor *stage G_GNUC_UNUSED,
                     OozePlugin    *plugin)
 {
   ClutterModifierType state;
+
+  if (plugin->shutting_down)
+    return CLUTTER_EVENT_STOP;
 
   if (plugin->locked)
     return CLUTTER_EVENT_PROPAGATE;
@@ -1483,6 +1529,12 @@ ooze_plugin_xsettings_retry_cb (gpointer user_data)
 {
   OozePlugin *self = OOZE_PLUGIN (user_data);
 
+  if (self->shutting_down)
+    {
+      self->xsettings_retry_id = 0;
+      return G_SOURCE_REMOVE;
+    }
+
   if (ooze_plugin_try_setup_xsettings (self))
     {
       self->xsettings_retry_id = 0;
@@ -1517,6 +1569,9 @@ ooze_plugin_on_x11_display_opened (MetaDisplay *display G_GNUC_UNUSED,
                                    gpointer     user_data)
 {
   OozePlugin *self = OOZE_PLUGIN (user_data);
+
+  if (self->shutting_down)
+    return;
 
   if (ooze_plugin_try_setup_xsettings (self))
     {
@@ -1602,11 +1657,23 @@ ooze_plugin_start (MetaPlugin *plugin)
 
 /* ── GObject lifecycle ───────────────────────────────────────────────────── */
 
-static void
-ooze_plugin_dispose (GObject *object)
+void
+ooze_plugin_begin_shutdown (OozePlugin *plugin)
 {
-  OozePlugin *plugin = OOZE_PLUGIN (object);
+  MetaDisplay *display;
+  GList *windows;
+  GList *l;
 
+  if (!plugin || plugin->shutting_down)
+    return;
+
+  plugin->shutting_down = TRUE;
+
+  /*
+   * Logout calls this while Mutter's backend and Clutter seat are still
+   * alive.  Tear down anything that can hold focus, a grab, an actor, or a
+   * callback before asking MetaContext to dispose the backend.
+   */
   ooze_lock_dispose (plugin);
   ooze_shot_free (plugin->shot);
   plugin->shot = NULL;
@@ -1614,68 +1681,72 @@ ooze_plugin_dispose (GObject *object)
   plugin->notifications = NULL;
   ooze_tray_dispose (plugin);
   ooze_panel_dispose (plugin);
+  ooze_dock_cancel_interactions (plugin->aqua_dock_icons);
   ooze_plugin_clear_aux_panels (plugin);
 
   if (plugin->monitors_changed_handler && plugin->monitor_manager)
     {
-      g_signal_handler_disconnect (plugin->monitor_manager,
-                                   plugin->monitors_changed_handler);
-      plugin->monitors_changed_handler = 0;
+      g_clear_signal_handler (&plugin->monitors_changed_handler,
+                              plugin->monitor_manager);
     }
 
-  if (plugin->workspace_added_handler)
+  display = meta_plugin_get_display (META_PLUGIN (plugin));
+  if (display)
     {
-      MetaDisplay *display = meta_plugin_get_display (META_PLUGIN (plugin));
-      MetaWorkspaceManager *wm = display
-        ? meta_display_get_workspace_manager (display) : NULL;
+      windows = meta_display_list_all_windows (display);
+      for (l = windows; l != NULL; l = l->next)
+        {
+          MetaWindow *window = l->data;
+          MetaWindowActor *actor;
 
+          actor = META_WINDOW_ACTOR (meta_window_get_compositor_private (window));
+          if (actor)
+            {
+              ooze_plugin_cancel_window_idle_ops (actor);
+              ooze_magic_lamp_cancel (actor);
+            }
+        }
+      g_list_free (windows);
+    }
+
+  if (plugin->workspace_added_handler && display)
+    {
+      MetaWorkspaceManager *wm =
+        meta_display_get_workspace_manager (display);
       if (wm)
-        g_signal_handler_disconnect (wm, plugin->workspace_added_handler);
-      plugin->workspace_added_handler = 0;
+        g_clear_signal_handler (&plugin->workspace_added_handler, wm);
     }
 
   ooze_plugin_cancel_xsettings_retry (plugin);
-  if (plugin->x11_display_opened_handler)
-    {
-      MetaDisplay *display = meta_plugin_get_display (META_PLUGIN (plugin));
+  if (plugin->x11_display_opened_handler && display)
+    g_clear_signal_handler (&plugin->x11_display_opened_handler, display);
 
-      if (display)
-        g_signal_handler_disconnect (display,
-                                     plugin->x11_display_opened_handler);
-      plugin->x11_display_opened_handler = 0;
-    }
-
-  if (plugin->stage_key_handler)
+  if (plugin->stage_key_handler && display)
     {
-      MetaDisplay *display;
       MetaBackend *backend;
       ClutterActor *stage;
 
-      display = meta_plugin_get_display (META_PLUGIN (plugin));
       backend = meta_context_get_backend (meta_display_get_context (display));
-      stage = CLUTTER_ACTOR (meta_backend_get_stage (backend));
-      g_signal_handler_disconnect (stage, plugin->stage_key_handler);
-      plugin->stage_key_handler = 0;
+      stage = backend ? CLUTTER_ACTOR (meta_backend_get_stage (backend)) : NULL;
+      if (stage)
+        g_clear_signal_handler (&plugin->stage_key_handler, stage);
     }
 
   ooze_theme_unwatch_will_change (NULL, ooze_plugin_on_theme_will_change, plugin);
   ooze_theme_unwatch (NULL, ooze_plugin_on_theme_changed, plugin);
 
-  if (plugin->chrome_theme_idle != 0)
+  if (plugin->chrome_theme_idle)
     {
       g_source_remove (plugin->chrome_theme_idle);
       plugin->chrome_theme_idle = 0;
     }
-
-  if (plugin->dock_reflect_idle != 0)
+  if (plugin->dock_reflect_idle)
     {
       g_source_remove (plugin->dock_reflect_idle);
       plugin->dock_reflect_idle = 0;
     }
 
-  ooze_aqua_menu_destroy (plugin->menu_popup);
-  plugin->menu_popup = NULL;
-
+  g_clear_pointer (&plugin->menu_popup, ooze_aqua_menu_destroy);
   ooze_global_menu_free (plugin->global_menu);
   plugin->global_menu = NULL;
 
@@ -1685,6 +1756,14 @@ ooze_plugin_dispose (GObject *object)
   plugin->aqua_dock_reflections = NULL;
   g_clear_pointer (&plugin->tile_preview, clutter_actor_destroy);
   g_clear_pointer (&plugin->background_group, clutter_actor_destroy);
+}
+
+static void
+ooze_plugin_dispose (GObject *object)
+{
+  OozePlugin *plugin = OOZE_PLUGIN (object);
+
+  ooze_plugin_begin_shutdown (plugin);
   g_clear_object (&plugin->context);
 
   G_OBJECT_CLASS (ooze_plugin_parent_class)->dispose (object);
@@ -1711,6 +1790,7 @@ ooze_plugin_class_init (OozePluginClass *klass)
 static void
 ooze_plugin_init (OozePlugin *plugin)
 {
+  plugin->shutting_down = FALSE;
   plugin->background_group = NULL;
   plugin->panel = NULL;
   plugin->menu_icon = NULL;
