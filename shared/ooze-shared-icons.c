@@ -184,7 +184,7 @@ ooze_icons_theme_is_available (void)
   return ooze_icons_has_index_theme ("/usr/share/icons/" OOZE_ICON_THEME);
 }
 
-static gboolean
+gboolean
 ooze_icons_theme_name_usable (const char *theme_name)
 {
   g_autofree char *local = NULL;

@@ -3,6 +3,118 @@
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 
+typedef struct
+{
+  char *icon_theme;
+  char *cursor_theme;
+  int cursor_size;
+} OozeIconSettings;
+
+static void ooze_icons_ensure_search_path (GtkIconTheme *theme);
+static void on_icon_theme_changed (GtkIconTheme *theme,
+                                   gpointer      user_data);
+
+static void
+ooze_icon_settings_free (OozeIconSettings *settings)
+{
+  if (!settings)
+    return;
+  g_free (settings->icon_theme);
+  g_free (settings->cursor_theme);
+  g_free (settings);
+}
+
+static void
+ooze_icons_read_settings_thread (GTask        *task,
+                                 gpointer      source_object G_GNUC_UNUSED,
+                                 gpointer      task_data G_GNUC_UNUSED,
+                                 GCancellable *cancellable G_GNUC_UNUSED)
+{
+  g_autoptr (GSettings) settings =
+    g_settings_new ("org.gnome.desktop.interface");
+  OozeIconSettings *result = g_new0 (OozeIconSettings, 1);
+
+  result->icon_theme = g_settings_get_string (settings, "icon-theme");
+  result->cursor_theme = g_settings_get_string (settings, "cursor-theme");
+  result->cursor_size = g_settings_get_int (settings, "cursor-size");
+  g_task_return_pointer (task, result,
+                         (GDestroyNotify) ooze_icon_settings_free);
+}
+
+static void
+ooze_icons_configure_gtk_with_settings (OozeIconSettings *values)
+{
+  GdkDisplay *display;
+  GtkIconTheme *theme;
+  GtkSettings *settings;
+  g_autoptr (GSettings) interface_settings =
+    g_settings_new ("org.gnome.desktop.interface");
+  g_autofree char *name = NULL;
+  gboolean usable;
+
+  usable = ooze_icons_theme_name_usable (values->icon_theme);
+  if (!usable)
+    g_settings_set_string (interface_settings, "icon-theme", OOZE_ICON_THEME);
+  if (!values->cursor_theme || values->cursor_theme[0] == '\0')
+    g_settings_set_string (interface_settings, "cursor-theme",
+                           OOZE_CURSOR_THEME);
+  if (values->cursor_size <= 0)
+    g_settings_set_int (interface_settings, "cursor-size", OOZE_CURSOR_SIZE);
+
+  display = gdk_display_get_default ();
+  if (!display)
+    return;
+
+  name = g_strdup (usable ? values->icon_theme : OOZE_ICON_THEME);
+
+  settings = gtk_settings_get_for_display (display);
+  if (settings)
+    g_object_set (settings, "gtk-icon-theme-name", name, NULL);
+
+  theme = gtk_icon_theme_get_for_display (display);
+  ooze_icons_ensure_search_path (theme);
+
+  if (!g_signal_handler_find (theme, G_SIGNAL_MATCH_FUNC, 0, 0, NULL,
+                              on_icon_theme_changed, NULL))
+    g_signal_connect (theme, "changed", G_CALLBACK (on_icon_theme_changed),
+                      NULL);
+}
+
+static void
+ooze_icons_configure_gtk_async_done (GObject      *source_object,
+                                     GAsyncResult *result,
+                                     gpointer      user_data G_GNUC_UNUSED)
+{
+  g_autoptr (GError) error = NULL;
+  OozeIconSettings *values;
+
+  values = g_task_propagate_pointer (G_TASK (result), &error);
+  if (!values)
+    {
+      if (error)
+        g_warning ("Ooze: could not read icon settings: %s", error->message);
+      return;
+    }
+
+  ooze_icons_configure_gtk_with_settings (values);
+  ooze_icon_settings_free (values);
+  (void) source_object;
+}
+
+void
+ooze_icons_configure_gtk_async (void)
+{
+  GTask *task;
+
+  ooze_icons_setup_environment ();
+  if (!ooze_icons_theme_is_available ())
+    g_warning ("Ooze: elementary icon theme not found; run ninja -C build to fetch icons");
+
+  task = g_task_new (NULL, NULL, ooze_icons_configure_gtk_async_done, NULL);
+  g_task_run_in_thread (task, ooze_icons_read_settings_thread);
+  g_object_unref (task);
+}
+
 /*
  * GTK4-specific icon theme integration.
  *

@@ -1,6 +1,7 @@
 #include "ooze-scroll.h"
 
 #include "ooze-palette.h"
+#include "ooze-theme.h"
 
 #include <adwaita.h>
 
@@ -237,8 +238,9 @@ ooze_scroll_ensure_css (void)
     GTK_STYLE_PROVIDER (scroll_provider),
     GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 20);
 
-  g_signal_connect (adw_style_manager_get_default (), "notify::dark",
-                    G_CALLBACK (on_dark_changed), NULL);
+  ooze_theme_connect_dark_notify_full (NULL,
+                                       G_CALLBACK (on_dark_changed),
+                                       FALSE);
 }
 
 GtkWidget *

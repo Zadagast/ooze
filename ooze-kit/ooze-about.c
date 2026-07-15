@@ -4,6 +4,7 @@
 #include "ooze-header-bar.h"
 #include "ooze-icons.h"
 #include "ooze-surface.h"
+#include "ooze-theme.h"
 
 #include <adwaita.h>
 
@@ -145,9 +146,8 @@ ooze_about_present (GtkWindow  *parent,
   g_signal_connect (ok, "clicked", G_CALLBACK (on_about_ok), win);
   gtk_box_append (GTK_BOX (box), ok);
 
-  g_signal_connect_object (adw_style_manager_get_default (), "notify::dark",
-                           G_CALLBACK (gtk_widget_queue_draw), win,
-                           G_CONNECT_SWAPPED);
+  ooze_theme_connect_dark_notify (G_OBJECT (win),
+                                  G_CALLBACK (gtk_widget_queue_draw));
 
   gtk_window_present (GTK_WINDOW (win));
 }

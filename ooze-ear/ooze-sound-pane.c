@@ -3,6 +3,7 @@
 
 #include "ooze-scroll.h"
 #include "ooze-surface.h"
+#include "ooze-theme.h"
 
 #include <adwaita.h>
 #include <math.h>
@@ -878,9 +879,8 @@ ooze_sound_pane_init (OozeSoundPane *self)
   else
     sound_rebuild (self);
 
-  g_signal_connect_object (adw_style_manager_get_default (), "notify::dark",
-                           G_CALLBACK (gtk_widget_queue_draw), self,
-                           G_CONNECT_SWAPPED);
+  ooze_theme_connect_dark_notify (G_OBJECT (self),
+                                  G_CALLBACK (gtk_widget_queue_draw));
 }
 
 GtkWidget *

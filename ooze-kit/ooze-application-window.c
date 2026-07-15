@@ -1,6 +1,7 @@
 #include "ooze-application-window.h"
 
 #include "ooze-window-actions.h"
+#include "ooze-theme.h"
 
 #include <adwaita.h>
 
@@ -175,12 +176,13 @@ ooze_application_window_class_init (OozeApplicationWindowClass *klass)
                           TRUE,
                           G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY |
                           G_PARAM_STATIC_STRINGS);
-  g_object_class_install_properties (object_class, N_PROPERTIES, properties);
 
   object_class->get_property = ooze_application_window_get_property;
   object_class->set_property = ooze_application_window_set_property;
   object_class->constructed = ooze_application_window_constructed;
   object_class->dispose = ooze_application_window_dispose;
+
+  g_object_class_install_properties (object_class, N_PROPERTIES, properties);
 }
 
 static void
@@ -192,11 +194,8 @@ ooze_application_window_init (OozeApplicationWindow *self)
   priv->standard_edit_actions = TRUE;
   priv->standard_menus = TRUE;
 
-  g_signal_connect_object (adw_style_manager_get_default (),
-                           "notify::dark",
-                           G_CALLBACK (gtk_widget_queue_draw),
-                           self,
-                           G_CONNECT_SWAPPED);
+  ooze_theme_connect_dark_notify (G_OBJECT (self),
+                                  G_CALLBACK (gtk_widget_queue_draw));
 }
 
 OozeApplicationWindow *

@@ -4,7 +4,65 @@
 #include "ooze-popover.h"
 #include "ooze-scroll.h"
 
+#include <adwaita.h>
 #include <gtk/gtk.h>
+
+typedef struct
+{
+  GObject *target;
+  GCallback callback;
+  gboolean swapped;
+} OozeThemeNotify;
+
+static AdwStyleManager *style_manager;
+static gboolean style_manager_ready;
+
+static void
+ooze_theme_notify_free (OozeThemeNotify *notify)
+{
+  if (!notify)
+    return;
+  g_clear_object (&notify->target);
+  g_free (notify);
+}
+
+static gboolean
+ooze_theme_style_manager_init_idle (gpointer user_data G_GNUC_UNUSED)
+{
+  style_manager = g_object_ref (adw_style_manager_get_default ());
+  style_manager_ready = TRUE;
+  return G_SOURCE_REMOVE;
+}
+
+static gboolean
+ooze_theme_connect_dark_notify_idle (gpointer user_data)
+{
+  OozeThemeNotify *notify = user_data;
+
+  if (style_manager_ready)
+    {
+      if (notify->target)
+        g_signal_connect_object (style_manager,
+                                 "notify::dark",
+                                 notify->callback,
+                                 notify->target,
+                                 notify->swapped ? G_CONNECT_SWAPPED : 0);
+      else
+        g_signal_connect (style_manager, "notify::dark",
+                          notify->callback, NULL);
+
+      if (notify->swapped)
+        ((void (*) (gpointer)) notify->callback) (notify->target);
+      else if (notify->target)
+        ((void (*) (gpointer, GParamSpec *, gpointer)) notify->callback)
+          (style_manager, NULL, notify->target);
+      else
+        ((void (*) (gpointer, GParamSpec *)) notify->callback)
+          (style_manager, NULL);
+    }
+  ooze_theme_notify_free (notify);
+  return G_SOURCE_REMOVE;
+}
 
 static gboolean
 ooze_theme_popover_map_hook (GSignalInvocationHint *ihint G_GNUC_UNUSED,
@@ -102,5 +160,42 @@ ooze_theme_ensure (void)
     g_signal_add_emission_hook (map_signal, 0,
                                 ooze_theme_popover_map_hook, NULL, NULL);
 
+  g_idle_add_full (G_PRIORITY_LOW,
+                   ooze_theme_style_manager_init_idle,
+                   NULL,
+                   NULL);
   loaded = TRUE;
+}
+
+gboolean
+ooze_theme_is_dark (void)
+{
+  return style_manager_ready && adw_style_manager_get_dark (style_manager);
+}
+
+void
+ooze_theme_connect_dark_notify (GObject    *target,
+                                GCallback   callback)
+{
+  ooze_theme_connect_dark_notify_full (target, callback, TRUE);
+}
+
+void
+ooze_theme_connect_dark_notify_full (GObject    *target,
+                                     GCallback   callback,
+                                     gboolean    swapped)
+{
+  OozeThemeNotify *notify;
+
+  g_return_if_fail (target == NULL || G_IS_OBJECT (target));
+  g_return_if_fail (callback != NULL);
+
+  notify = g_new0 (OozeThemeNotify, 1);
+  notify->target = target ? g_object_ref (target) : NULL;
+  notify->callback = callback;
+  notify->swapped = swapped;
+  g_idle_add_full (G_PRIORITY_LOW,
+                   ooze_theme_connect_dark_notify_idle,
+                   notify,
+                   NULL);
 }

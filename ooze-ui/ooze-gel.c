@@ -1,4 +1,5 @@
 #include "ooze-gel.h"
+#include "ooze-theme.h"
 
 #include <adwaita.h>
 #include <cairo/cairo.h>
@@ -74,7 +75,7 @@ ooze_shadow_bin_snapshot (GtkWidget   *widget,
   if (width <= 0 || height <= 0)
     return;
 
-  dark = adw_style_manager_get_dark (adw_style_manager_get_default ());
+  dark = ooze_theme_is_dark ();
 
   radius = 7.0;
 
@@ -191,11 +192,10 @@ ooze_shadow_bin_init (OozeShadowBin *self)
 
   /* Repaint the frame when the session light/dark changes. Tied to the
    * widget lifetime so it disconnects automatically on finalize. */
-  g_signal_connect_object (adw_style_manager_get_default (),
-                           "notify::dark",
-                           G_CALLBACK (ooze_shadow_bin_on_dark_changed),
-                           self,
-                           0);
+  ooze_theme_connect_dark_notify_full (
+    G_OBJECT (self),
+    G_CALLBACK (ooze_shadow_bin_on_dark_changed),
+    FALSE);
 }
 
 static GtkWidget *

@@ -126,9 +126,8 @@ ooze_header_bar_init (OozeHeaderBar *self)
   gtk_widget_set_size_request (GTK_WIDGET (self), -1, AQUA_TITLEBAR_HEIGHT);
 
   /* Redraw when the system theme flips. */
-  g_signal_connect_object (adw_style_manager_get_default (), "notify::dark",
-                           G_CALLBACK (gtk_widget_queue_draw), self,
-                           G_CONNECT_SWAPPED);
+  ooze_theme_connect_dark_notify (G_OBJECT (self),
+                                  G_CALLBACK (gtk_widget_queue_draw));
 
   /* Full-bar overlay so the title centers on the window, not in the
    * leftover space after the traffic lights (classic Aqua). */
