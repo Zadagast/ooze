@@ -134,13 +134,33 @@ ooze_xsettings_prefer_dark (void)
   return ooze_color_scheme_is_dark (iface);
 }
 
+static const char *
+ooze_xsettings_current_icon_theme (void)
+{
+  static char *icon_theme;
+  g_autoptr (GSettings) iface =
+    g_settings_new ("org.gnome.desktop.interface");
+
+  g_free (icon_theme);
+  icon_theme = g_settings_get_string (iface, "icon-theme");
+  if (!icon_theme || icon_theme[0] == '\0')
+    {
+      g_clear_pointer (&icon_theme, g_free);
+      icon_theme = g_strdup ("elementary");
+    }
+
+  return icon_theme;
+}
+
 static GByteArray *
 ooze_xsettings_build_blob (guint32 serial)
 {
   GByteArray *buf = g_byte_array_new ();
+  const char *icon_theme;
   const char *theme_name;
   int prefer_dark;
 
+  icon_theme = ooze_xsettings_current_icon_theme ();
   theme_name = ooze_xsettings_current_gtk_theme ();
   prefer_dark = ooze_xsettings_prefer_dark () ? 1 : 0;
 
@@ -150,7 +170,7 @@ ooze_xsettings_build_blob (guint32 serial)
   ooze_xsettings_append_u8 (buf, 0);
   ooze_xsettings_append_u8 (buf, 0);
   ooze_xsettings_append_u32 (buf, serial);
-  ooze_xsettings_append_u32 (buf, 6);
+  ooze_xsettings_append_u32 (buf, 7);
 
   /* Foreign AppMenu off by default — keep in-window GTK3 menus.
    * OOZE_FOREIGN_GLOBAL_MENU=1 restores ShellShowsMenubar for dbusmenu. */
@@ -169,6 +189,9 @@ ooze_xsettings_build_blob (guint32 serial)
   /* GTK2 / some GTK3 paths still read Net/ThemeName. */
   ooze_xsettings_append_string (buf, "Net/ThemeName",
                                 theme_name ? theme_name : "Adwaita",
+                                serial);
+  ooze_xsettings_append_string (buf, "Net/IconThemeName",
+                                icon_theme,
                                 serial);
   ooze_xsettings_append_int (buf, "Gtk/ApplicationPreferDarkTheme",
                              prefer_dark, serial);

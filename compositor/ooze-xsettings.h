@@ -6,8 +6,8 @@
 G_BEGIN_DECLS
 
 /*
- * Nest XSETTINGS manager: Gtk/ShellShowsMenubar, Gtk/ShellShowsAppmenu,
- * and Gtk/DecorationLayout (left-side window controls).
+ * Nest XSETTINGS manager: GTK theme, icon theme, dark preference,
+ * Gtk/ShellShowsMenubar, Gtk/ShellShowsAppmenu, and Gtk/DecorationLayout.
  *
  * Prefer ooze_xsettings_ensure_with_xdisplay() on Mutter's MetaX11Display
  * connection — a second XOpenDisplay to nest Xwayland can deadlock.
