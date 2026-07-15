@@ -4,6 +4,7 @@
 #include "ooze-dock-shell.h"
 #include "ooze-theme.h"
 #include "ooze-lock.h"
+#include "ooze-session-dialog.h"
 
 #include <meta/display.h>
 #include <meta/meta-plugin.h>
@@ -24,91 +25,47 @@ const char *const ooze_shell_menu_bar_items[] = {
 };
 const gsize ooze_shell_menu_bar_n_items = G_N_ELEMENTS (ooze_shell_menu_bar_items);
 
-/* ── logind (async — never block the compositor main thread forever) ───── */
+/* ── Session end ─────────────────────────────────────────────────────────── */
 
-#define OOZE_LOGIND_TIMEOUT_MS 8000
-
+/*
+ * Close the Ooze menu and present the end-session dialog on the next idle.
+ * Deferring past the menu button event lets its implicit input grab unwind
+ * before the dialog installs its own grab (see the logout-crash fix, #57).
+ */
 typedef struct
 {
-  char *method;
-} OozeLogindCall;
-
-static void
-ooze_plugin_menu_logind_call_done (GObject      *source,
-                                   GAsyncResult *res,
-                                   gpointer      user_data)
-{
-  OozeLogindCall *call = user_data;
-  g_autoptr (GError) error = NULL;
-  g_autoptr (GVariant) reply = NULL;
-
-  reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), res, &error);
-  if (error)
-    g_warning ("Ooze menu: logind %s failed: %s",
-               call->method ? call->method : "?",
-               error->message);
-
-  g_free (call->method);
-  g_free (call);
-}
-
-static void
-ooze_plugin_menu_logind_bus_got (GObject      *source G_GNUC_UNUSED,
-                                 GAsyncResult *res,
-                                 gpointer      user_data)
-{
-  OozeLogindCall *call = user_data;
-  g_autoptr (GError) error = NULL;
-  g_autoptr (GDBusConnection) conn = NULL;
-
-  conn = g_bus_get_finish (res, &error);
-  if (!conn)
-    {
-      g_warning ("Ooze menu: logind unavailable: %s", error->message);
-      g_free (call->method);
-      g_free (call);
-      return;
-    }
-
-  g_dbus_connection_call (conn,
-                          "org.freedesktop.login1",
-                          "/org/freedesktop/login1",
-                          "org.freedesktop.login1.Manager",
-                          call->method,
-                          g_variant_new ("(b)", TRUE),
-                          NULL,
-                          G_DBUS_CALL_FLAGS_NONE,
-                          OOZE_LOGIND_TIMEOUT_MS,
-                          NULL,
-                          ooze_plugin_menu_logind_call_done,
-                          call);
-}
-
-static void
-ooze_plugin_menu_logind_call (const char *method)
-{
-  OozeLogindCall *call;
-
-  call = g_new0 (OozeLogindCall, 1);
-  call->method = g_strdup (method);
-  g_bus_get (G_BUS_TYPE_SYSTEM, NULL, ooze_plugin_menu_logind_bus_got, call);
-}
+  OozePlugin       *plugin;
+  OozeSessionAction action;
+} OozeSessionRequest;
 
 static gboolean
-ooze_shell_logout_idle (gpointer user_data)
+ooze_shell_session_dialog_idle (gpointer user_data)
 {
-  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+  OozeSessionRequest *req = user_data;
 
-  plugin->logout_idle = 0;
-  if (plugin->shutting_down)
-    return G_SOURCE_REMOVE;
+  if (!req->plugin->shutting_down)
+    {
+      ooze_aqua_menu_close (req->plugin->menu_popup);
+      ooze_session_dialog_present (req->plugin, req->action);
+    }
 
-  ooze_aqua_menu_close (plugin->menu_popup);
-  ooze_plugin_begin_shutdown (plugin);
-  if (plugin->context)
-    meta_context_terminate (plugin->context);
-
+  g_free (req);
   return G_SOURCE_REMOVE;
+}
+
+static void
+ooze_shell_request_session_action (OozePlugin        *plugin,
+                                   OozeSessionAction  action)
+{
+  OozeSessionRequest *req;
+
+  if (plugin->shutting_down)
+    return;
+
+  req = g_new0 (OozeSessionRequest, 1);
+  req->plugin = plugin;
+  req->action = action;
+  g_idle_add_full (G_PRIORITY_LOW, ooze_shell_session_dialog_idle, req, NULL);
 }
 
 /* ── Action dispatch ─────────────────────────────────────────────────────── */
@@ -240,18 +197,19 @@ ooze_shell_menu_action (gpointer user_data, int action_id)
       break;
 
     case OOZE_MENU_OOZE_RESTART:
-      ooze_plugin_menu_logind_call ("Reboot");
+      ooze_shell_request_session_action (plugin, OOZE_SESSION_ACTION_RESTART);
       break;
 
     case OOZE_MENU_OOZE_SHUTDOWN:
-      ooze_plugin_menu_logind_call ("PowerOff");
+      ooze_shell_request_session_action (plugin, OOZE_SESSION_ACTION_SHUTDOWN);
+      break;
+
+    case OOZE_MENU_OOZE_SUSPEND:
+      ooze_shell_request_session_action (plugin, OOZE_SESSION_ACTION_SUSPEND);
       break;
 
     case OOZE_MENU_OOZE_LOGOUT:
-      g_print ("Ooze: ending session\n");
-      if (!plugin->shutting_down && !plugin->logout_idle)
-        plugin->logout_idle =
-          g_idle_add_full (G_PRIORITY_LOW, ooze_shell_logout_idle, plugin, NULL);
+      ooze_shell_request_session_action (plugin, OOZE_SESSION_ACTION_LOGOUT);
       break;
 
     case OOZE_MENU_OOZE_LOCK:
