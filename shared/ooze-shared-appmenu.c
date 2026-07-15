@@ -17,6 +17,121 @@ void ooze_xsettings_republish (void) __attribute__ ((weak));
 #define APPMENU_REGISTRAR_NAME "com.canonical.AppMenu.Registrar"
 #define APPMENU_REGISTRAR_PATH "/com/canonical/AppMenu/Registrar"
 
+typedef struct
+{
+  GDBusConnection *session;
+} OozeAppmenuRegistrarActivation;
+
+static void
+ooze_appmenu_registrar_activation_free (
+  OozeAppmenuRegistrarActivation *activation)
+{
+  if (!activation)
+    return;
+  g_clear_object (&activation->session);
+  g_free (activation);
+}
+
+static void
+ooze_appmenu_registrar_start_cb (GObject      *source,
+                                 GAsyncResult *res,
+                                 gpointer      user_data)
+{
+  OozeAppmenuRegistrarActivation *activation = user_data;
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GVariant) reply = NULL;
+  guint32 result = 0;
+  gboolean active = FALSE;
+
+  reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), res,
+                                         &error);
+  if (reply)
+    {
+      g_variant_get (reply, "(u)", &result);
+      if (result == 1 || result == 2)
+        {
+          g_print ("Ooze appmenu: AppMenu registrar active (D-Bus)\n");
+          active = TRUE;
+        }
+      else
+        {
+          error = g_error_new (G_IO_ERROR, G_IO_ERROR_FAILED,
+                               "StartServiceByName returned %u", result);
+        }
+    }
+
+  if (!active)
+    g_warning ("Ooze appmenu: could not activate %s: %s "
+               "(install appmenu-registrar / run scripts/install-appmenu.sh)",
+               APPMENU_REGISTRAR_NAME,
+               error ? error->message : "unknown");
+
+  ooze_appmenu_registrar_activation_free (activation);
+}
+
+static void
+ooze_appmenu_registrar_owner_cb (GObject      *source,
+                                 GAsyncResult *res,
+                                 gpointer      user_data)
+{
+  OozeAppmenuRegistrarActivation *activation = user_data;
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GVariant) owner = NULL;
+
+  owner = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), res,
+                                         &error);
+  if (owner)
+    {
+      ooze_appmenu_registrar_activation_free (activation);
+      return;
+    }
+
+  g_dbus_connection_call (activation->session,
+                          "org.freedesktop.DBus",
+                          "/org/freedesktop/DBus",
+                          "org.freedesktop.DBus",
+                          "StartServiceByName",
+                          g_variant_new ("(su)", APPMENU_REGISTRAR_NAME, 0u),
+                          G_VARIANT_TYPE ("(u)"),
+                          G_DBUS_CALL_FLAGS_NONE,
+                          3000,
+                          NULL,
+                          ooze_appmenu_registrar_start_cb,
+                          activation);
+}
+
+static void
+ooze_appmenu_registrar_bus_ready_cb (GObject      *source,
+                                     GAsyncResult *res,
+                                     gpointer      user_data)
+{
+  OozeAppmenuRegistrarActivation *activation = user_data;
+  g_autoptr (GError) error = NULL;
+
+  activation->session = g_bus_get_finish (res, &error);
+  if (!activation->session)
+    {
+      g_warning ("Ooze appmenu: session bus unavailable: %s",
+                 error ? error->message : "unknown");
+      ooze_appmenu_registrar_activation_free (activation);
+      return;
+    }
+
+  g_dbus_connection_call (activation->session,
+                          "org.freedesktop.DBus",
+                          "/org/freedesktop/DBus",
+                          "org.freedesktop.DBus",
+                          "GetNameOwner",
+                          g_variant_new ("(s)", APPMENU_REGISTRAR_NAME),
+                          G_VARIANT_TYPE ("(s)"),
+                          G_DBUS_CALL_FLAGS_NONE,
+                          500,
+                          NULL,
+                          ooze_appmenu_registrar_owner_cb,
+                          activation);
+  (void) source;
+}
+
 static gboolean
 ooze_appmenu_module_is_managed (const char *module)
 {
@@ -292,65 +407,14 @@ ooze_appmenu_environ_for_foreign (char **envp)
 void
 ooze_appmenu_ensure_registrar (void)
 {
-  g_autoptr (GDBusConnection) session = NULL;
-  g_autoptr (GError) error = NULL;
-  g_autoptr (GVariant) owner = NULL;
-  g_autoptr (GVariant) started = NULL;
-  guint32 result = 0;
+  OozeAppmenuRegistrarActivation *activation;
 
   if (!ooze_appmenu_foreign_enabled ())
     return;
 
-  session = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, &error);
-  if (!session)
-    {
-      g_warning ("Ooze appmenu: session bus unavailable: %s",
-                 error ? error->message : "unknown");
-      return;
-    }
-
-  owner = g_dbus_connection_call_sync (session,
-                                       "org.freedesktop.DBus",
-                                       "/org/freedesktop/DBus",
-                                       "org.freedesktop.DBus",
-                                       "GetNameOwner",
-                                       g_variant_new ("(s)", APPMENU_REGISTRAR_NAME),
-                                       G_VARIANT_TYPE ("(s)"),
-                                       G_DBUS_CALL_FLAGS_NONE,
-                                       500,
-                                       NULL,
-                                       NULL);
-  if (owner)
-    return;
-
-  error = NULL;
-  started = g_dbus_connection_call_sync (session,
-                                         "org.freedesktop.DBus",
-                                         "/org/freedesktop/DBus",
-                                         "org.freedesktop.DBus",
-                                         "StartServiceByName",
-                                         g_variant_new ("(su)",
-                                                        APPMENU_REGISTRAR_NAME,
-                                                        0u),
-                                         G_VARIANT_TYPE ("(u)"),
-                                         G_DBUS_CALL_FLAGS_NONE,
-                                         3000,
-                                         NULL,
-                                         &error);
-  if (started)
-    {
-      g_variant_get (started, "(u)", &result);
-      if (result == 1 || result == 2)
-        {
-          g_print ("Ooze appmenu: AppMenu registrar active (D-Bus)\n");
-          return;
-        }
-    }
-
-  g_warning ("Ooze appmenu: could not activate %s: %s "
-             "(install appmenu-registrar / run scripts/install-appmenu.sh)",
-             APPMENU_REGISTRAR_NAME,
-             error ? error->message : "unknown");
+  activation = g_new0 (OozeAppmenuRegistrarActivation, 1);
+  g_bus_get (G_BUS_TYPE_SESSION, NULL,
+             ooze_appmenu_registrar_bus_ready_cb, activation);
 }
 
 static guint xsettingsd_retry_id = 0;

@@ -10,8 +10,8 @@ G_BEGIN_DECLS
  * Ooze GTK4 apps use Wayland gtk_shell1 GLOBAL_APP_MENU (always on).
  *
  * Foreign / classic GTK3 AppMenu (Xwayland + appmenu-gtk-module + dbusmenu)
- * is OFF by default — sync registrar/GetLayout on the compositor main thread
- * freezes the session (Inkscape focus). Re-enable only for debugging:
+ * is OFF by default — registrar activation is asynchronous and dbusmenu work
+ * is deferred until focus. Re-enable only for debugging:
  *   OOZE_FOREIGN_GLOBAL_MENU=1
  */
 
