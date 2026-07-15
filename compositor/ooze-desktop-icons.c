@@ -77,6 +77,7 @@ typedef struct
   ClutterActor *drop_hint;
   ClutterActor *drop_hint_icon; /* non-owning; icon under folder highlight */
   ClutterGrab *grab;
+  gboolean shutting_down;
   GHashTable *layout; /* path -> graphene_point_t* */
   gulong dnd_enter_handler;
   guint rebuild_idle;
@@ -466,6 +467,8 @@ ooze_desktop_spring_fire (gpointer user_data)
   g_autofree char *path = NULL;
 
   data->spring_id = 0;
+  if (data->shutting_down)
+    return G_SOURCE_REMOVE;
   path = g_steal_pointer (&data->spring_path);
   if (!path || !data->context)
     return G_SOURCE_REMOVE;
@@ -498,6 +501,7 @@ ooze_desktop_icon_data_free (gpointer user_data)
 {
   OozeDesktopIconData *data = user_data;
 
+  data->shutting_down = TRUE;
   if (data->rebuild_idle)
     {
       g_source_remove (data->rebuild_idle);
@@ -532,6 +536,42 @@ ooze_desktop_icon_data_free (gpointer user_data)
   g_free (data->last_dnd_folder);
   g_free (data->drag_path);
   g_free (data);
+}
+
+void
+ooze_desktop_icons_begin_shutdown (ClutterActor *container)
+{
+  OozeDesktopIconData *data;
+
+  if (!container)
+    return;
+
+  data = g_object_get_data (G_OBJECT (container), "desktop-icon-data");
+  if (!data || data->shutting_down)
+    return;
+
+  data->shutting_down = TRUE;
+  if (data->rebuild_idle)
+    {
+      g_source_remove (data->rebuild_idle);
+      data->rebuild_idle = 0;
+    }
+  if (data->enumeration_cancellable)
+    g_cancellable_cancel (data->enumeration_cancellable);
+  ooze_desktop_spring_cancel (data);
+  ooze_desktop_dismiss_grab (data);
+  ooze_desktop_destroy_ghost (data);
+  ooze_desktop_drop_hint_hide (data);
+  if (data->dnd)
+    {
+      if (data->dnd_enter_handler)
+        g_clear_signal_handler (&data->dnd_enter_handler, data->dnd);
+      if (data->dnd_pos_handler)
+        g_clear_signal_handler (&data->dnd_pos_handler, data->dnd);
+      if (data->dnd_leave_handler)
+        g_clear_signal_handler (&data->dnd_leave_handler, data->dnd);
+      data->dnd = NULL;
+    }
 }
 
 static void
@@ -782,6 +822,8 @@ ooze_desktop_icon_pressed (ClutterActor *actor,
   ClutterActor *stage;
   gfloat local_x, local_y;
 
+  if (data->shutting_down)
+    return CLUTTER_EVENT_STOP;
   if (clutter_event_get_button (event) != CLUTTER_BUTTON_PRIMARY)
     return CLUTTER_EVENT_PROPAGATE;
   if (g_object_get_data (G_OBJECT (actor), "desktop-ghost"))
@@ -847,6 +889,8 @@ ooze_desktop_icon_motion (ClutterActor *actor,
   float dx, dy;
   ClutterActor *follow;
 
+  if (data->shutting_down)
+    return CLUTTER_EVENT_STOP;
   if (!data->drag_path)
     return CLUTTER_EVENT_PROPAGATE;
 
@@ -928,6 +972,8 @@ ooze_desktop_icon_released (ClutterActor *actor,
   gboolean did_drag;
   g_autofree char *drag_path = NULL;
 
+  if (data->shutting_down)
+    return CLUTTER_EVENT_STOP;
   if (clutter_event_get_button (event) != CLUTTER_BUTTON_PRIMARY)
     return CLUTTER_EVENT_PROPAGATE;
 
@@ -1125,7 +1171,7 @@ ooze_desktop_icons_apply (OozeDesktopIconData *data,
   ClutterActor *icon;
   guint i;
 
-  if (!data || !data->container || !entries)
+  if (!data || data->shutting_down || !data->container || !entries)
     return;
 
   stall = ooze_stall_begin ("desktop-rebuild");
@@ -1216,6 +1262,7 @@ ooze_desktop_enumeration_finish (OozeDesktopEnumeration *enumeration)
         {
           g_clear_object (&data->enumeration_cancellable);
           if (!g_cancellable_is_cancelled (enumeration->cancellable) &&
+              !data->shutting_down &&
               !data->dragging)
             ooze_desktop_icons_apply (data, enumeration->entries);
         }
@@ -1331,7 +1378,7 @@ ooze_desktop_icons_rebuild_async (OozeDesktopIconData *data)
   OozeDesktopEnumeration *enumeration;
   g_autofree char *view_path = NULL;
 
-  if (!data || !data->container || data->dragging)
+  if (!data || data->shutting_down || !data->container || data->dragging)
     return;
 
   if (data->enumeration_cancellable)
@@ -1369,7 +1416,7 @@ ooze_desktop_icons_rebuild_idle (gpointer user_data)
   OozeDesktopIconData *data = user_data;
 
   data->rebuild_idle = 0;
-  if (data->dragging)
+  if (data->shutting_down || data->dragging)
     return G_SOURCE_REMOVE;
   ooze_desktop_icons_rebuild_async (data);
   return G_SOURCE_REMOVE;
@@ -1378,7 +1425,7 @@ ooze_desktop_icons_rebuild_idle (gpointer user_data)
 static void
 ooze_desktop_icons_schedule_rebuild (OozeDesktopIconData *data)
 {
-  if (!data)
+  if (!data || data->shutting_down)
     return;
   if (data->dragging)
     return;
@@ -1414,6 +1461,8 @@ ooze_desktop_icon_at_point (OozeDesktopIconData *data, int x, int y)
 static void
 on_dnd_enter (MetaDnd *dnd G_GNUC_UNUSED, OozeDesktopIconData *data)
 {
+  if (data->shutting_down)
+    return;
   data->last_dnd_over_desktop = TRUE;
   ooze_desktop_drop_hint_show_desktop (data);
 }
@@ -1424,6 +1473,8 @@ on_dnd_position_change (MetaDnd *dnd G_GNUC_UNUSED,
                         int y,
                         OozeDesktopIconData *data)
 {
+  if (data->shutting_down)
+    return;
   ClutterActor *icon = ooze_desktop_icon_at_point (data, x, y);
   const char *path;
   gboolean is_dir;
@@ -1467,6 +1518,8 @@ on_dnd_position_change (MetaDnd *dnd G_GNUC_UNUSED,
 static void
 on_dnd_leave (MetaDnd *dnd G_GNUC_UNUSED, OozeDesktopIconData *data)
 {
+  if (data->shutting_down)
+    return;
   data->last_dnd_over_desktop = FALSE;
   g_clear_pointer (&data->last_dnd_folder, g_free);
   ooze_desktop_spring_cancel (data);

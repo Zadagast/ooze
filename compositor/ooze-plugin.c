@@ -78,6 +78,26 @@ ooze_plugin_cancel_window_idle_ops (MetaWindowActor *actor)
   ooze_window_cancel_scheduled_sync (actor);
 }
 
+static void
+ooze_plugin_cancel_desktop_interactions (OozePlugin *plugin)
+{
+  ClutterActor *background;
+  ClutterActor *child;
+
+  if (!plugin->background_group)
+    return;
+
+  for (background = clutter_actor_get_first_child (plugin->background_group);
+       background != NULL;
+       background = clutter_actor_get_next_sibling (background))
+    {
+      for (child = clutter_actor_get_first_child (background);
+           child != NULL;
+           child = clutter_actor_get_next_sibling (child))
+        ooze_desktop_icons_begin_shutdown (child);
+    }
+}
+
 /* ── Dock reflections ────────────────────────────────────────────────────── */
 
 static gsize
@@ -1667,6 +1687,11 @@ ooze_plugin_begin_shutdown (OozePlugin *plugin)
   if (!plugin || plugin->shutting_down)
     return;
 
+  if (plugin->logout_idle)
+    {
+      g_source_remove (plugin->logout_idle);
+      plugin->logout_idle = 0;
+    }
   plugin->shutting_down = TRUE;
 
   /*
@@ -1681,6 +1706,7 @@ ooze_plugin_begin_shutdown (OozePlugin *plugin)
   plugin->notifications = NULL;
   ooze_tray_dispose (plugin);
   ooze_panel_dispose (plugin);
+  ooze_plugin_cancel_desktop_interactions (plugin);
   ooze_dock_cancel_interactions (plugin->aqua_dock_icons);
   ooze_plugin_clear_aux_panels (plugin);
 
@@ -1807,6 +1833,7 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->monitor_manager = NULL;
   plugin->context = NULL;
   plugin->menu_popup = NULL;
+  plugin->logout_idle = 0;
   plugin->monitors_changed_handler = 0;
   plugin->workspace_added_handler = 0;
   plugin->x11_display_opened_handler = 0;

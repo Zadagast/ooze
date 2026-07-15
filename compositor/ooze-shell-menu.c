@@ -94,6 +94,23 @@ ooze_plugin_menu_logind_call (const char *method)
   g_bus_get (G_BUS_TYPE_SYSTEM, NULL, ooze_plugin_menu_logind_bus_got, call);
 }
 
+static gboolean
+ooze_shell_logout_idle (gpointer user_data)
+{
+  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+
+  plugin->logout_idle = 0;
+  if (plugin->shutting_down)
+    return G_SOURCE_REMOVE;
+
+  ooze_aqua_menu_close (plugin->menu_popup);
+  ooze_plugin_begin_shutdown (plugin);
+  if (plugin->context)
+    meta_context_terminate (plugin->context);
+
+  return G_SOURCE_REMOVE;
+}
+
 /* ── Action dispatch ─────────────────────────────────────────────────────── */
 
 void
@@ -231,10 +248,10 @@ ooze_shell_menu_action (gpointer user_data, int action_id)
       break;
 
     case OOZE_MENU_OOZE_LOGOUT:
-      /* Local terminate — no sync logind EndSession on this path. */
       g_print ("Ooze: ending session\n");
-      ooze_plugin_begin_shutdown (plugin);
-      meta_context_terminate (plugin->context);
+      if (!plugin->shutting_down && !plugin->logout_idle)
+        plugin->logout_idle =
+          g_idle_add_full (G_PRIORITY_LOW, ooze_shell_logout_idle, plugin, NULL);
       break;
 
     case OOZE_MENU_OOZE_LOCK:
