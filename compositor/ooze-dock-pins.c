@@ -17,6 +17,21 @@ static const char * const ooze_dock_default_pins[] = {
   NULL,
 };
 
+static gboolean
+ooze_dock_pins_contains (GPtrArray   *pins,
+                         const char  *needle)
+{
+  gsize i;
+
+  for (i = 0; pins && i < pins->len; i++)
+    {
+      if (g_strcmp0 (pins->pdata[i], needle) == 0)
+        return TRUE;
+    }
+
+  return FALSE;
+}
+
 const char * const *
 ooze_dock_pins_defaults (void)
 {
@@ -61,6 +76,9 @@ ooze_dock_pins_load (void)
         continue;
       g_ptr_array_add (out, g_strdup (lines[i]));
     }
+
+  if (!ooze_dock_pins_contains (out, "org.ooze.Shot"))
+    g_ptr_array_add (out, g_strdup ("org.ooze.Shot"));
   g_ptr_array_add (out, NULL);
   return (char **) g_ptr_array_free (out, FALSE);
 }
