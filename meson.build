@@ -530,6 +530,28 @@ if gtk4_dep.found() and adw_dep.found()
     install_dir: get_option('datadir') / 'applications',
   )
 
+  executable('ooze-shot',
+    'ooze-shot/main.c',
+    'ooze-shot/ooze-shot-window.c',
+    ooze_shared_sources,
+    include_directories: ooze_app_inc + [include_directories('ooze-shot')],
+    dependencies: [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      gdk_pixbuf_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.Shot.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
   # Ooze Torrent — optional; needs ./scripts/fetch-libtransmission.sh once.
   fs = import('fs')
   tr_prefix_rel = 'third-party/libtransmission'

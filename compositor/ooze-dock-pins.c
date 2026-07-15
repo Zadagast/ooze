@@ -7,6 +7,7 @@ static const char * const ooze_dock_default_pins[] = {
   "org.ooze.Spot",
   "org.ooze.Command",
   "org.ooze.Eye",
+  "org.ooze.Shot",
   "org.ooze.Torrent",
   "org.ooze.Ear",
   "org.ooze.Monitor",

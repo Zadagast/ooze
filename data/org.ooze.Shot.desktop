@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Ooze Shot
+GenericName=Screenshot
+Comment=Capture screenshots on Ooze Desktop
+Exec=ooze-shot
+Icon=camera-photo
+Terminal=false
+Type=Application
+Categories=Graphics;Utility;
+StartupWMClass=org.ooze.Shot
