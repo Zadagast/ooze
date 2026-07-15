@@ -12,9 +12,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#define OOZE_SHOT_BUS_NAME "org.ooze.Shot"
-#define OOZE_SHOT_OBJECT_PATH "/org/ooze/Shot"
-#define OOZE_SHOT_INTERFACE "org.ooze.Shot"
+#define OOZE_SHOT_BUS_NAME "org.ooze.Shell.Screenshot"
+#define OOZE_SHOT_OBJECT_PATH "/org/ooze/Shell/Screenshot"
+#define OOZE_SHOT_INTERFACE "org.ooze.Shell.Screenshot"
 
 struct _OozeShot
 {
@@ -27,7 +27,7 @@ struct _OozeShot
 
 static const char shot_introspection_xml[] =
   "<node>"
-  "  <interface name='org.ooze.Shot'>"
+  "  <interface name='org.ooze.Shell.Screenshot'>"
   "    <method name='CaptureDesktop'>"
   "      <arg type='s' name='path' direction='out'/>"
   "    </method>"

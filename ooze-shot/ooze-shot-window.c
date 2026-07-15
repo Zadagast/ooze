@@ -7,9 +7,9 @@
 
 #include <gdk/gdk.h>
 
-#define SHOT_BUS_NAME "org.ooze.Shot"
-#define SHOT_OBJECT_PATH "/org/ooze/Shot"
-#define SHOT_INTERFACE "org.ooze.Shot"
+#define SHOT_BUS_NAME "org.ooze.Shell.Screenshot"
+#define SHOT_OBJECT_PATH "/org/ooze/Shell/Screenshot"
+#define SHOT_INTERFACE "org.ooze.Shell.Screenshot"
 
 struct _OozeShotWindow
 {
