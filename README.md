@@ -15,8 +15,11 @@ An Aqua-inspired Wayland desktop built on [Mutter](https://gitlab.gnome.org/GNOM
 - Global menu bar, floating dock, desktop icons, and StatusNotifier / AppIndicator tray
 - One-click light / dark mode for the whole desktop
 - Compositor session lock (PAM) for native Wayland sessions
-- First-party apps: files (Spot), terminal (Command), image viewer (Eye), settings (King), and more
+- First-party apps: files (Spot), terminal (Command), image viewer (Eye), and settings (King), including Default Applications
+- Native screen-share via the first-party Ooze ScreenCast portal; share a monitor from Flatpak Discord or browser `getDisplayMedia` (window share and screenshots to come)
+- Bundled WhiteSur themes and elementary icons; no hunting for files
 - Runs any Wayland or X11 app via Xwayland
+- Stable `.deb` is the desktop you log into; iterate with `./run-devkit.sh` in a nested window — see [DEVELOPING.md](DEVELOPING.md)
 
 | Light | Dark |
 | --- | --- |
