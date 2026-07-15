@@ -1,6 +1,7 @@
 #include "ooze-surface.h"
 #include "ooze-draw.h"
 #include "ooze-palette.h"
+#include "ooze-theme.h"
 
 #include <adwaita.h>
 
@@ -130,9 +131,8 @@ ooze_surface_init (OozeSurface *self)
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-surface");
 
   /* Redraw whenever the colour-scheme flips; auto-disconnects on destroy. */
-  g_signal_connect_object (adw_style_manager_get_default (), "notify::dark",
-                           G_CALLBACK (gtk_widget_queue_draw), self,
-                           G_CONNECT_SWAPPED);
+  ooze_theme_connect_dark_notify (G_OBJECT (self),
+                                  G_CALLBACK (gtk_widget_queue_draw));
 }
 
 /* ── Constructor ─────────────────────────────────────────────────────────── */

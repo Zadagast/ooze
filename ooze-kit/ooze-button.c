@@ -2,6 +2,7 @@
 #include "ooze-draw.h"
 #include "ooze-icons.h"
 #include "ooze-palette.h"
+#include "ooze-theme.h"
 
 #include <adwaita.h>
 #include <graphene.h>
@@ -289,9 +290,8 @@ ooze_button_init (OozeButton *self)
   /* Glass rim may overhang the tile into toolbar padding. */
   gtk_widget_set_overflow (GTK_WIDGET (self), GTK_OVERFLOW_VISIBLE);
 
-  g_signal_connect_object (adw_style_manager_get_default (), "notify::dark",
-                           G_CALLBACK (gtk_widget_queue_draw), self,
-                           G_CONNECT_SWAPPED);
+  ooze_theme_connect_dark_notify (G_OBJECT (self),
+                                  G_CALLBACK (gtk_widget_queue_draw));
 }
 
 /* ── Constructors ────────────────────────────────────────────────────────── */

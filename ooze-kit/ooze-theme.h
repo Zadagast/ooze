@@ -13,5 +13,11 @@ G_BEGIN_DECLS
  * windows that opt in with the "spot-finder" CSS class.
  */
 void ooze_theme_ensure (void);
+gboolean ooze_theme_is_dark (void);
+void ooze_theme_connect_dark_notify (GObject    *target,
+                                     GCallback   callback);
+void ooze_theme_connect_dark_notify_full (GObject    *target,
+                                          GCallback   callback,
+                                          gboolean    swapped);
 
 G_END_DECLS

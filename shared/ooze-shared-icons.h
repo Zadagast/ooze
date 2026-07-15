@@ -17,6 +17,8 @@ void ooze_icons_apply_to_launcher (GSubprocessLauncher *launcher);
 
 gboolean ooze_icons_theme_is_available (void);
 
+gboolean ooze_icons_theme_name_usable (const char *theme_name);
+
 char *ooze_icons_get_data_root (void);
 
 char *ooze_icons_get_icons_dir (void);
@@ -24,6 +26,8 @@ char *ooze_icons_get_icons_dir (void);
 char *ooze_icons_get_elementary_dir (void);
 
 void ooze_icons_configure_gtk (void);
+
+void ooze_icons_configure_gtk_async (void);
 
 gboolean ooze_icons_gtk_has_icon (const char *icon_name);
 

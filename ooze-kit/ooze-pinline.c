@@ -1,6 +1,7 @@
 #include "ooze-pinline.h"
 
 #include "ooze-palette.h"
+#include "ooze-theme.h"
 
 #include <adwaita.h>
 
@@ -61,8 +62,9 @@ ooze_pinline_new (OozeSide side)
                                   GINT_TO_POINTER (side),
                                   NULL);
 
-  g_signal_connect_object (adw_style_manager_get_default (), "notify::dark",
-                           G_CALLBACK (on_dark_changed), widget, 0);
+  ooze_theme_connect_dark_notify_full (G_OBJECT (widget),
+                                       G_CALLBACK (on_dark_changed),
+                                       FALSE);
 
   return widget;
 }

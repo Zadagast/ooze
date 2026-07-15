@@ -15,9 +15,8 @@ ooze_application_startup (GApplication *application)
 {
   G_APPLICATION_CLASS (ooze_application_parent_class)->startup (application);
 
-  ooze_icons_configure_gtk ();
   ooze_theme_ensure ();
-  ooze_icons_apply ();
+  ooze_icons_configure_gtk_async ();
 }
 
 static void

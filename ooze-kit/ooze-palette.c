@@ -1,6 +1,5 @@
 #include "ooze-palette.h"
-
-#include <adwaita.h>
+#include "ooze-theme.h"
 
 /* ── Light palette ──────────────────────────────────────────────────────────
  *
@@ -59,6 +58,5 @@ static const OozePalette DARK = {
 const OozePalette *
 ooze_palette_current (void)
 {
-  return adw_style_manager_get_dark (adw_style_manager_get_default ())
-         ? &DARK : &LIGHT;
+  return ooze_theme_is_dark () ? &DARK : &LIGHT;
 }
