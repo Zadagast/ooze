@@ -744,7 +744,6 @@ ooze_dock_launch_desktop_info (GDesktopAppInfo *app_info)
   else
     {
       ooze_appmenu_prepare_launch_context (ctx);
-      ooze_theme_apply_foreign_gtk_to_launch_context (ctx);
     }
 
   if (!g_app_info_launch (G_APP_INFO (app_info), NULL, ctx, &error))

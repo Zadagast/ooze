@@ -84,7 +84,7 @@ ooze_apply_wm_settings_early (void)
 
   /* Left-side controls for MetaFrames + GTK CSD that honor GNOME prefs.
    * Do NOT set gtk-theme to WhiteSur globally — that overrides Ooze Gel /
-   * OozeKit. Foreign apps get GTK_THEME only on their launch environ.
+   * OozeKit. Foreign X11 apps receive WhiteSur through XSETTINGS.
    * Recover any previous global WhiteSur bleed. */
   ooze_theme_recover_ooze_from_foreign_gtk ();
 
@@ -171,7 +171,7 @@ main (int argc, char **argv)
 
   /*
    * Never inherit session-wide GTK_THEME into the compositor. Foreign apps
-   * get WhiteSur only via launch helpers / XSETTINGS — not this process.
+   * get WhiteSur only via XSETTINGS — not this process.
    */
   g_unsetenv ("GTK_THEME");
   ooze_appmenu_strip_modules ();

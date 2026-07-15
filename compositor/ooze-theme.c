@@ -45,6 +45,7 @@ struct _OozeTheme
 {
   GSettings *settings;
   gulong color_scheme_handler;
+  gulong icon_theme_handler;
   GFileMonitor *foreign_gtk_monitor;
   gboolean dark;
   GSList *watchers;
@@ -93,7 +94,7 @@ ooze_theme_gtk4_config_is_ooze_managed (const char *config_path)
 /*
  * Global WhiteSur gtk-theme + ~/.config/gtk-4.0 override bleeds into every
  * GTK4/libadwaita process — including Ooze apps. Undo that session damage.
- * Foreign apps can still opt in via GTK_THEME on their launch environ.
+ * Foreign X11 apps receive WhiteSur through XSETTINGS.
  */
 void
 ooze_theme_recover_ooze_from_foreign_gtk (void)
@@ -127,24 +128,6 @@ char *
 ooze_theme_foreign_gtk_theme_for_session (void)
 {
   return ooze_foreign_gtk_theme_for_session ();
-}
-
-void
-ooze_theme_apply_foreign_gtk_to_launcher (GSubprocessLauncher *launcher)
-{
-  if (!launcher)
-    return;
-
-  ooze_foreign_gtk_apply_to_launcher (launcher);
-}
-
-void
-ooze_theme_apply_foreign_gtk_to_launch_context (GAppLaunchContext *ctx)
-{
-  if (!ctx)
-    return;
-
-  ooze_foreign_gtk_apply_to_launch_context (ctx);
 }
 
 /* Legacy entry used by older call sites — recovers session bleed only. */
@@ -215,6 +198,14 @@ ooze_theme_on_color_scheme_changed (GSettings *settings G_GNUC_UNUSED,
 }
 
 static void
+ooze_theme_on_icon_theme_changed (GSettings *settings G_GNUC_UNUSED,
+                                  const char *key G_GNUC_UNUSED,
+                                  OozeTheme *theme G_GNUC_UNUSED)
+{
+  ooze_theme_schedule_xsettings_republish ();
+}
+
+static void
 ooze_theme_on_foreign_gtk_changed (GFileMonitor      *monitor G_GNUC_UNUSED,
                                    GFile             *file G_GNUC_UNUSED,
                                    GFile             *other_file G_GNUC_UNUSED,
@@ -238,6 +229,11 @@ ooze_theme_new (void)
     g_signal_connect (theme->settings,
                       "changed::color-scheme",
                       G_CALLBACK (ooze_theme_on_color_scheme_changed),
+                      theme);
+  theme->icon_theme_handler =
+    g_signal_connect (theme->settings,
+                      "changed::icon-theme",
+                      G_CALLBACK (ooze_theme_on_icon_theme_changed),
                       theme);
   {
     g_autofree char *pref_path = ooze_foreign_gtk_pref_path ();
@@ -389,6 +385,8 @@ ooze_theme_free (OozeTheme *theme)
 
   if (theme->color_scheme_handler)
     g_signal_handler_disconnect (theme->settings, theme->color_scheme_handler);
+  if (theme->icon_theme_handler)
+    g_signal_handler_disconnect (theme->settings, theme->icon_theme_handler);
   g_clear_object (&theme->foreign_gtk_monitor);
   g_clear_object (&theme->settings);
   g_slist_free_full (theme->watchers, g_free);

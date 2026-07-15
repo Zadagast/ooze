@@ -26,7 +26,4 @@ char       *ooze_foreign_gtk_pref_path (void);
 /* Installed GTK themes under XDG themes dirs (name has index.theme). */
 char      **ooze_foreign_gtk_list_themes (void);
 
-void        ooze_foreign_gtk_apply_to_launcher (GSubprocessLauncher *launcher);
-void        ooze_foreign_gtk_apply_to_launch_context (GAppLaunchContext *ctx);
-
 G_END_DECLS

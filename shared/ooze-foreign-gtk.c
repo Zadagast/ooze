@@ -214,29 +214,3 @@ ooze_foreign_gtk_list_themes (void)
   g_ptr_array_add (names, NULL);
   return (char **) g_ptr_array_free (g_steal_pointer (&names), FALSE);
 }
-
-void
-ooze_foreign_gtk_apply_to_launcher (GSubprocessLauncher *launcher)
-{
-  g_autofree char *name = NULL;
-
-  if (!launcher)
-    return;
-
-  name = ooze_foreign_gtk_theme_for_session ();
-  if (name)
-    g_subprocess_launcher_setenv (launcher, "GTK_THEME", name, TRUE);
-}
-
-void
-ooze_foreign_gtk_apply_to_launch_context (GAppLaunchContext *ctx)
-{
-  g_autofree char *name = NULL;
-
-  if (!ctx)
-    return;
-
-  name = ooze_foreign_gtk_theme_for_session ();
-  if (name)
-    g_app_launch_context_setenv (ctx, "GTK_THEME", name);
-}

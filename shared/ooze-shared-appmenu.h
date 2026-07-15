@@ -40,7 +40,7 @@ void ooze_appmenu_force_x11_backend (GSubprocessLauncher *launcher);
 
 /*
  * Foreign launch via g_app_info_launch.
- * Default: WhiteSur + GDK_BACKEND=x11 (in-window menus; live XSETTINGS theme).
+ * Default: GDK_BACKEND=x11 (in-window menus; live XSETTINGS theme).
  * With OOZE_FOREIGN_GLOBAL_MENU=1: also modules + ShellShowsMenubar.
  */
 void ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx);
