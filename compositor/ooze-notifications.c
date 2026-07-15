@@ -725,6 +725,29 @@ ooze_notifications_handle_notify (OozeNotifications *server,
     invocation, g_variant_new ("(u)", notification->id));
 }
 
+void
+ooze_notifications_show (OozeNotifications *server,
+                         const char        *summary,
+                         const char        *body)
+{
+  OozeNotification *notification;
+
+  if (!server)
+    return;
+
+  notification = g_new0 (OozeNotification, 1);
+  notification->server = server;
+  notification->id = ooze_notifications_next_id (server);
+  notification->action_buttons =
+    g_ptr_array_new_with_free_func (ooze_notification_action_free);
+  g_hash_table_insert (server->notifications,
+                       GUINT_TO_POINTER (notification->id),
+                       notification);
+  g_ptr_array_insert (server->order, 0, notification);
+  ooze_notification_update (notification, "Ooze", "camera-photo",
+                            summary, body, NULL, FALSE, -1);
+}
+
 static void
 ooze_notifications_handle_close (OozeNotifications       *server,
                                   GDBusMethodInvocation   *invocation,

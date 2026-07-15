@@ -5,6 +5,7 @@
 #include "ooze-aqua-menu.h"
 #include "ooze-global-menu.h"
 #include "ooze-notifications.h"
+#include "ooze-shot.h"
 
 #include <meta/meta-context.h>
 #include <meta/meta-monitor-manager.h>
@@ -44,6 +45,7 @@ struct _OozePlugin
   OozeAquaMenu   *menu_popup;
   OozeGlobalMenu *global_menu;
   OozeNotifications *notifications;
+  OozeShot         *shot;
   gulong        monitors_changed_handler;
   gulong        workspace_added_handler;
   gulong        x11_display_opened_handler;
