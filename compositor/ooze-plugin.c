@@ -17,6 +17,7 @@
 #include "ooze-lock.h"
 #include "ooze-tray.h"
 #include "ooze-notifications.h"
+#include "ooze-shot.h"
 
 #include "../common/aqua-chrome.h"
 #include "../common/ooze-font.h"
@@ -1254,6 +1255,16 @@ on_stage_key_press (ClutterActor *stage G_GNUC_UNUSED,
       return CLUTTER_EVENT_STOP;
     }
 
+  if (clutter_event_get_key_symbol (event) == CLUTTER_KEY_Print)
+    {
+      g_autoptr (GError) error = NULL;
+
+      if (!ooze_shot_capture_desktop (plugin->shot, &error))
+        g_warning ("Ooze Shot: capture failed: %s",
+                   error ? error->message : "unknown");
+      return CLUTTER_EVENT_STOP;
+    }
+
   return CLUTTER_EVENT_PROPAGATE;
 }
 
@@ -1584,6 +1595,7 @@ ooze_plugin_start (MetaPlugin *plugin)
   ooze_lock_init (self);
   self->notifications = ooze_notifications_new (self);
   ooze_notifications_reflow (self->notifications);
+  self->shot = ooze_shot_new (self);
 
   clutter_actor_show (stage);
 }
@@ -1596,6 +1608,8 @@ ooze_plugin_dispose (GObject *object)
   OozePlugin *plugin = OOZE_PLUGIN (object);
 
   ooze_lock_dispose (plugin);
+  ooze_shot_free (plugin->shot);
+  plugin->shot = NULL;
   ooze_notifications_free (plugin->notifications);
   plugin->notifications = NULL;
   ooze_tray_dispose (plugin);
