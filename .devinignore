@@ -1,0 +1,21 @@
+# Generated / heavy dirs Devin should not scan (mirrors .gitignore).
+# Keeps indexing fast and avoids burning tokens on build output & binaries.
+
+# Meson / Ninja build tree
+build/
+
+# .deb / AppImage output + downloaded packaging tools
+dist/
+packaging/appimage/tools/
+
+# Expanded elementary icon theme (~38MB). Source archive is tracked.
+data/icons/elementary/
+.cache/
+build-elementary-icons/
+
+# Transmission source extract + project-local static lib
+third-party/transmission-src/
+third-party/libtransmission/
+
+# Nested-session config leftovers
+data/xdg-config/
