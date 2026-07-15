@@ -16,6 +16,7 @@
 #include "ooze-stall.h"
 #include "ooze-lock.h"
 #include "ooze-tray.h"
+#include "ooze-notifications.h"
 
 #include "../common/aqua-chrome.h"
 #include "../common/ooze-font.h"
@@ -989,6 +990,7 @@ ooze_plugin_on_monitors_changed (MetaMonitorManager *monitor_manager G_GNUC_UNUS
   ooze_tray_setup (plugin);
   ooze_plugin_setup_aqua_dock (plugin, display, compositor);
   ooze_plugin_update_layout (plugin, display);
+  ooze_notifications_reflow (plugin->notifications);
 }
 
 static void
@@ -1580,6 +1582,8 @@ ooze_plugin_start (MetaPlugin *plugin)
     }
 
   ooze_lock_init (self);
+  self->notifications = ooze_notifications_new (self);
+  ooze_notifications_reflow (self->notifications);
 
   clutter_actor_show (stage);
 }
@@ -1592,6 +1596,8 @@ ooze_plugin_dispose (GObject *object)
   OozePlugin *plugin = OOZE_PLUGIN (object);
 
   ooze_lock_dispose (plugin);
+  ooze_notifications_free (plugin->notifications);
+  plugin->notifications = NULL;
   ooze_tray_dispose (plugin);
   ooze_panel_dispose (plugin);
   ooze_plugin_clear_aux_panels (plugin);
