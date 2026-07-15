@@ -194,9 +194,10 @@ install_data('data/icons/Adwaita/symbolic/actions/view-column-symbolic.svg',
 
 vte_dep = dependency('vte-2.91-gtk4', required: false)
 
-# ── OozeKit static library ──────────────────────────────────────────────────
-# OozeKit + OozeUI compiled once into a static library; all GTK apps link it.
-ooze_kit_lib = static_library('ooze-kit',
+# ── OozeKit shared library ──────────────────────────────────────────────────
+# OozeKit + OozeUI and the icon helpers they use are compiled once into a
+# versioned shared library; all GTK apps link it.
+ooze_kit_lib = shared_library('ooze-kit',
   'ooze-kit/ooze-application.c',
   'ooze-kit/ooze-application-window.c',
   'ooze-kit/ooze-palette.c',
@@ -215,8 +216,20 @@ ooze_kit_lib = static_library('ooze-kit',
   'ooze-ui/ooze-header-bar.c',
   'ooze-ui/ooze-gel.c',
   'common/aqua-traffic.c',
+  'shared/ooze-shared-icons.c',
+  'shared/ooze-shared-icons-gtk.c',
   include_directories: [inc_common, inc_ooze_ui, inc_ooze_kit, inc_shared],
-  dependencies: [gtk4_dep, adw_dep, cairo_dep, cc.find_library('m')],
+  dependencies: [
+    gtk4_dep,
+    adw_dep,
+    gio_dep,
+    cairo_dep,
+    cc.find_library('m'),
+  ],
+  version: meson.project_version(),
+  soversion: '0',
+  install: true,
+  install_dir: get_option('libdir'),
   c_args: [
     '-DOOZE_DATA_DIR="@0@"'.format(ooze_data_dir),
     '-DOOZE_VERSION="@0@"'.format(meson.project_version()),
@@ -228,11 +241,10 @@ ooze_kit_dep = declare_dependency(
   include_directories: [inc_common, inc_ooze_ui, inc_ooze_kit],
 )
 
-# Core icon/appmenu helpers used by both the compositor and GTK apps.
-# ooze-shared-icons-gtk.c is GTK4-only and is NOT included in the compositor.
+# Shared helpers used by the compositor and GTK apps, excluding the icon
+# helpers now folded into OozeKit above. The GTK4 icon helper is not included
+# in the compositor.
 ooze_shared_sources = [
-  'shared/ooze-shared-icons.c',
-  'shared/ooze-shared-icons-gtk.c',
   'shared/ooze-shared-appmenu.c',
   'shared/ooze-dnd-bridge.c',
   'shared/ooze-icon-lookup.c',

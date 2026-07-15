@@ -59,6 +59,7 @@ echo "==> Assembling AppDir at $APPDIR"
 rm -rf "$APPDIR"
 mkdir -p \
   "$APPDIR/usr/bin" \
+  "$APPDIR/usr/lib" \
   "$APPDIR/usr/share/ooze" \
   "$APPDIR/usr/share/applications" \
   "$APPDIR/usr/share/icons/hicolor/scalable/apps" \
@@ -74,6 +75,10 @@ for bin in "${OPTIONAL_BINARIES[@]}"; do
     install -m755 "$BUILD_DIR/$bin" "$APPDIR/usr/bin/"
   fi
 done
+
+# OozeKit is a project-owned shared library. Bundle its complete soname set
+# alongside the AppImage binaries; host GTK/Mutter libraries remain external.
+cp -a "$BUILD_DIR"/libooze-kit.so* "$APPDIR/usr/lib/"
 
 # Runtime data (icons, logos, desktop files consumed via OOZE_DATA_DIR).
 cp -a "$ROOT/data/." "$APPDIR/usr/share/ooze/"
