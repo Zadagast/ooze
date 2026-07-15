@@ -23,6 +23,9 @@ void ooze_dock_populate_container (MetaContext    *context,
                                  ClutterActor   *stage,
                                  ClutterActor   *container);
 
+/* Release press-and-hold grabs and cancel dock callbacks before teardown. */
+void ooze_dock_cancel_interactions (ClutterActor *container);
+
 /* Called after pin/reorder changes so the shell can refresh plate + reflections. */
 typedef void (*OozeDockChangedFn) (gpointer user_data);
 

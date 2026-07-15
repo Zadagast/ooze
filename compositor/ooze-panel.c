@@ -282,6 +282,8 @@ panel_rebuild_idle (gpointer user_data)
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
 
   plugin->menubar_rebuild_idle = 0;
+  if (plugin->shutting_down)
+    return G_SOURCE_REMOVE;
 
   if (plugin->menu_popup && ooze_aqua_menu_is_open (plugin->menu_popup))
     {
@@ -521,6 +523,8 @@ panel_retry_pending_menu (gpointer user_data)
   gsize index;
 
   plugin->pending_menu_idle = 0;
+  if (plugin->shutting_down)
+    return G_SOURCE_REMOVE;
 
   if (!plugin->pending_menu_open)
     return G_SOURCE_REMOVE;
@@ -850,13 +854,21 @@ ooze_panel_update_clock (OozePlugin *plugin)
 static gboolean
 on_clock_tick (gpointer user_data)
 {
-  ooze_panel_update_clock (OOZE_PLUGIN (user_data));
+  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+
+  if (plugin->shutting_down)
+    return G_SOURCE_REMOVE;
+
+  ooze_panel_update_clock (plugin);
   return G_SOURCE_CONTINUE;
 }
 
 void
 ooze_panel_schedule_rebuild (OozePlugin *plugin)
 {
+  if (!plugin || plugin->shutting_down)
+    return;
+
   if (plugin->menubar_rebuild_idle != 0)
     g_source_remove (plugin->menubar_rebuild_idle);
 
@@ -870,6 +882,9 @@ ooze_panel_on_global_menu_changed (gpointer user_data)
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
   guint pending_top = 0;
   gboolean retry;
+
+  if (plugin->shutting_down)
+    return;
 
   retry = FALSE;
   if (plugin->global_menu &&

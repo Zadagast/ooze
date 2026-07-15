@@ -16,6 +16,7 @@ struct _OozePlugin
 {
   MetaPlugin parent_instance;
 
+  gboolean      shutting_down;
   ClutterActor *background_group;
   /* Interactive menu bar lives on the primary monitor. */
   ClutterActor *panel;
@@ -86,3 +87,5 @@ struct _OozePlugin
   OozeAquaMenu *tray_popup;
   guint         tray_appearance_idle;
 };
+
+void ooze_plugin_begin_shutdown (OozePlugin *plugin);

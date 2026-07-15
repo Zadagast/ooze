@@ -233,6 +233,7 @@ ooze_shell_menu_action (gpointer user_data, int action_id)
     case OOZE_MENU_OOZE_LOGOUT:
       /* Local terminate — no sync logind EndSession on this path. */
       g_print ("Ooze: ending session\n");
+      ooze_plugin_begin_shutdown (plugin);
       meta_context_terminate (plugin->context);
       break;
 

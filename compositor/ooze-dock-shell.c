@@ -1741,6 +1741,9 @@ ooze_dock_rebuild_icons (ClutterActor *container)
 
 typedef struct _OozeDockUnpinAnim OozeDockUnpinAnim;
 
+static void ooze_dock_unpin_anim_done (ClutterActor *actor,
+                                       gpointer      user_data);
+
 static void
 ooze_dock_unpin_anim_finish (OozeDockUnpinAnim *anim)
 {
@@ -1766,6 +1769,28 @@ ooze_dock_unpin_anim_finish (OozeDockUnpinAnim *anim)
   g_free (anim);
   if (CLUTTER_IS_ACTOR (container))
     ooze_dock_schedule_rebuild_icons (container);
+}
+
+static void
+ooze_dock_unpin_anim_cancel (OozeDockUnpinAnim *anim)
+{
+  if (!anim || anim->finished)
+    return;
+
+  anim->finished = TRUE;
+  if (anim->timeout_id)
+    {
+      g_source_remove (anim->timeout_id);
+      anim->timeout_id = 0;
+    }
+  if (anim->target && CLUTTER_IS_ACTOR (anim->target))
+    {
+      g_signal_handlers_disconnect_by_func (anim->target,
+                                            ooze_dock_unpin_anim_done,
+                                            anim);
+      g_object_set_data (G_OBJECT (anim->target), "unpin-anim", NULL);
+    }
+  g_free (anim);
 }
 
 static void
@@ -1898,11 +1923,15 @@ static void
 ooze_dock_cancel_hold (ClutterActor *actor)
 {
   guint hold_id = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (actor), "hold-id"));
+  OozeDockHoldData *hold = g_object_get_data (G_OBJECT (actor), "hold-data");
+
   if (hold_id)
     {
       g_source_remove (hold_id);
       g_object_set_data (G_OBJECT (actor), "hold-id", NULL);
     }
+  if (hold)
+    g_object_set_data (G_OBJECT (actor), "hold-data", NULL);
 }
 
 static gboolean
@@ -1915,6 +1944,7 @@ ooze_dock_hold_timeout (gpointer user_data)
   ClutterGrab *grab;
 
   g_object_set_data (G_OBJECT (actor), "hold-id", NULL);
+  g_object_steal_data (G_OBJECT (actor), "hold-data");
   g_object_set_data (G_OBJECT (actor), "dock-dragging", GINT_TO_POINTER (1));
   if (container)
     g_object_set_data (G_OBJECT (container), "dock-dragging-any", GINT_TO_POINTER (1));
@@ -2154,6 +2184,7 @@ on_app_launcher_pressed (ClutterActor *actor,
       hold->container = container;
       id = g_timeout_add (DOCK_HOLD_MS, ooze_dock_hold_timeout, hold);
       g_object_set_data (G_OBJECT (actor), "hold-id", GUINT_TO_POINTER (id));
+      g_object_set_data_full (G_OBJECT (actor), "hold-data", hold, g_free);
     }
 
   return CLUTTER_EVENT_STOP;
@@ -2501,6 +2532,29 @@ ooze_dock_spring_cancel (ClutterActor *container)
     {
       g_source_remove (id);
       g_object_set_data (G_OBJECT (container), "dock-spring-id", NULL);
+    }
+}
+
+void
+ooze_dock_cancel_interactions (ClutterActor *container)
+{
+  ClutterActor *child;
+
+  if (!container)
+    return;
+
+  ooze_dock_spring_cancel (container);
+  g_object_set_data (G_OBJECT (container), "dock-dragging-any", NULL);
+
+  for (child = clutter_actor_get_first_child (container);
+       child != NULL;
+       child = clutter_actor_get_next_sibling (child))
+    {
+      ooze_dock_cancel_hold (child);
+      ooze_dock_unpin_anim_cancel (
+        g_object_get_data (G_OBJECT (child), "unpin-anim"));
+      g_object_set_data (G_OBJECT (child), "dock-dragging", NULL);
+      g_object_set_data (G_OBJECT (child), "dock-grab", NULL);
     }
 }
 
