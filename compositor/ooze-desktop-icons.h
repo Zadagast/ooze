@@ -13,4 +13,6 @@ ClutterActor *ooze_desktop_icons_create (MetaContext  *context,
                                        int           width,
                                        int           height);
 
+void ooze_desktop_icons_begin_shutdown (ClutterActor *container);
+
 G_END_DECLS

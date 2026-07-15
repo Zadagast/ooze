@@ -28,6 +28,7 @@ struct _OozePlugin
   gboolean      pending_menu_open;
   guint         pending_menu_idle;
   guint         pending_menu_retries;
+  guint         logout_idle;
   guint         menubar_rebuild_idle;
   gboolean      menu_bar_needs_rebuild;
   gboolean      force_shell_menu;
