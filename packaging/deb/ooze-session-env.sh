@@ -115,13 +115,13 @@ ooze_kick_portals () {
   if ! command -v systemctl >/dev/null 2>&1; then
     return 0
   fi
-  systemctl --user reset-failed xdg-desktop-portal.service 2>/dev/null || true
+  systemctl --user --no-block reset-failed xdg-desktop-portal.service 2>/dev/null || true
   # Restart the GTK backend before the portal front-end so the frontend re-reads
   # the Ooze desktop identity and can resolve the gnome-free routing.
-  systemctl --user try-restart xdg-desktop-portal-gtk.service 2>/dev/null \
-    || systemctl --user start xdg-desktop-portal-gtk.service 2>/dev/null \
+  systemctl --user --no-block try-restart xdg-desktop-portal-gtk.service 2>/dev/null \
+    || systemctl --user --no-block start xdg-desktop-portal-gtk.service 2>/dev/null \
     || true
-  systemctl --user try-restart xdg-desktop-portal.service 2>/dev/null \
-    || systemctl --user start xdg-desktop-portal.service 2>/dev/null \
+  systemctl --user --no-block try-restart xdg-desktop-portal.service 2>/dev/null \
+    || systemctl --user --no-block start xdg-desktop-portal.service 2>/dev/null \
     || true
 }

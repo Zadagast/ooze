@@ -67,6 +67,27 @@ if [[ "${OOZE_NO_X11:-}" == "1" ]]; then
   desktop_args+=(--no-x11)
 fi
 
+ooze_cleanup_portal () {
+  local exit_status=$?
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user --no-block stop xdg-desktop-portal-ooze.service \
+      2>/dev/null || true
+    systemctl --user --no-block reset-failed xdg-desktop-portal-ooze.service \
+      2>/dev/null || true
+  fi
+
+  return "$exit_status"
+}
+
+trap ooze_cleanup_portal EXIT
+
 # GDM / systemd --user already provide a session bus; do not wrap in
 # dbus-run-session (that would nest a second bus over the login session).
-exec "$OOZE_BIN" "${desktop_args[@]}" "$@"
+if "$OOZE_BIN" "${desktop_args[@]}" "$@"; then
+  compositor_status=0
+else
+  compositor_status=$?
+fi
+
+exit "$compositor_status"
