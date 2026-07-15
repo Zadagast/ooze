@@ -1,9 +1,7 @@
 #include "ooze-torrent-window.h"
 
-#include "ooze-shared-icons.h"
-#include "ooze-theme.h"
+#include "ooze-application.h"
 
-#include <adwaita.h>
 #include <string.h>
 
 static OozeTorrentWindow *
@@ -19,14 +17,6 @@ ensure_window (GtkApplication *app)
   win = ooze_torrent_window_new (app);
   gtk_application_add_window (app, GTK_WINDOW (win));
   return OOZE_TORRENT_WINDOW (win);
-}
-
-static void
-on_startup (AdwApplication *app G_GNUC_UNUSED,
-            gpointer        user_data G_GNUC_UNUSED)
-{
-  ooze_icons_configure_gtk ();
-  ooze_theme_ensure ();
 }
 
 static void
@@ -65,12 +55,9 @@ on_open (GApplication  *app,
 int
 main (int argc, char **argv)
 {
-  g_autoptr (AdwApplication) app = NULL;
+  g_autoptr (OozeApplication) app = NULL;
 
-  ooze_icons_apply ();
-
-  app = adw_application_new ("org.ooze.Torrent", G_APPLICATION_HANDLES_OPEN);
-  g_signal_connect (app, "startup", G_CALLBACK (on_startup), NULL);
+  app = ooze_application_new ("org.ooze.Torrent", G_APPLICATION_HANDLES_OPEN);
   g_signal_connect (app, "activate", G_CALLBACK (on_activate), NULL);
   g_signal_connect (app, "open", G_CALLBACK (on_open), NULL);
 

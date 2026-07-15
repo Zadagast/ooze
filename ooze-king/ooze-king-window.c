@@ -2,25 +2,22 @@
 
 #include "ooze-about.h"
 #include "ooze-button.h"
-#include "ooze-header-bar.h"
 #include "ooze-icons.h"
 #include "ooze-shared-appmenu.h"
 #include "ooze-surface.h"
 #include "ooze-toolbar.h"
-#include "ooze-window-actions.h"
 
-#include <adwaita.h>
 #include <gio/gio.h>
 #include <string.h>
 
 struct _OozeKingWindow
 {
-  GtkApplicationWindow parent_instance;
-  GtkWidget *header;
+  OozeApplicationWindow parent_instance;
   GtkWidget *grid;
 };
 
-G_DEFINE_FINAL_TYPE (OozeKingWindow, ooze_king_window, GTK_TYPE_APPLICATION_WINDOW)
+G_DEFINE_FINAL_TYPE (OozeKingWindow, ooze_king_window,
+                     OOZE_TYPE_APPLICATION_WINDOW)
 
 typedef struct {
   const char * const *icons;
@@ -81,21 +78,13 @@ king_action_about (GSimpleAction *action G_GNUC_UNUSED,
 }
 
 static GMenuModel *
-king_build_menubar (void)
+king_build_help_menu (void)
 {
-  GMenu *bar, *help;
-  GMenuItem *item;
+  GMenu *help;
 
-  bar = g_menu_new ();
-  ooze_menubar_append_edit (bar);
-  ooze_menubar_append_window (bar);
   help = g_menu_new ();
   g_menu_append (help, "About Ooze King", "win.about");
-  item = g_menu_item_new_submenu ("Help", G_MENU_MODEL (help));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
-  g_object_unref (help);
-  return G_MENU_MODEL (bar);
+  return G_MENU_MODEL (help);
 }
 
 static gboolean
@@ -170,9 +159,14 @@ make_launcher_tile (const KingAppEntry *entry)
   return btn;
 }
 
+static void ooze_king_window_constructed (GObject *object);
+
 static void
-ooze_king_window_class_init (OozeKingWindowClass *klass G_GNUC_UNUSED)
+ooze_king_window_class_init (OozeKingWindowClass *klass)
 {
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+
+  object_class->constructed = ooze_king_window_constructed;
 }
 
 static void
@@ -181,28 +175,30 @@ ooze_king_window_init (OozeKingWindow *self)
   static const GActionEntry entries[] = {
     { "about", king_action_about, NULL, NULL, NULL },
   };
+  g_action_map_add_action_entries (G_ACTION_MAP (self),
+                                   entries, G_N_ELEMENTS (entries),
+                                   self);
+}
+
+static void
+ooze_king_window_constructed (GObject *object)
+{
+  OozeKingWindow *self = OOZE_KING_WINDOW (object);
+  GMenuModel *help;
   GtkWidget *shell;
   GtkWidget *surface;
   gsize i;
 
+  G_OBJECT_CLASS (ooze_king_window_parent_class)->constructed (object);
+
   ooze_toolbar_ensure_css ();
 
   gtk_window_set_default_size (GTK_WINDOW (self), 560, 420);
-  gtk_window_set_title (GTK_WINDOW (self), "System Settings");
   gtk_window_set_icon_name (GTK_WINDOW (self), "preferences-system");
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-king");
   gtk_widget_add_css_class (GTK_WIDGET (self), "spot-finder");
-
-  g_action_map_add_action_entries (G_ACTION_MAP (self),
-                                   entries, G_N_ELEMENTS (entries),
-                                   self);
-  ooze_window_actions_add_chrome (GTK_APPLICATION_WINDOW (self));
-  ooze_window_actions_add_edit (GTK_APPLICATION_WINDOW (self));
-
-  self->header = GTK_WIDGET (ooze_header_bar_new ());
-  ooze_header_bar_attach_window (OOZE_HEADER_BAR (self->header), GTK_WINDOW (self));
-  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->header), "System Settings");
-  gtk_window_set_titlebar (GTK_WINDOW (self), self->header);
+  ooze_application_window_set_title (
+    OOZE_APPLICATION_WINDOW (self), "System Settings");
 
   shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   surface = ooze_surface_new (OOZE_SURFACE_TOOLBAR, GTK_ORIENTATION_VERTICAL);
@@ -226,25 +222,19 @@ ooze_king_window_init (OozeKingWindow *self)
     gtk_flow_box_append (GTK_FLOW_BOX (self->grid),
                          make_launcher_tile (&king_apps[i]));
 
-  gtk_window_set_child (GTK_WINDOW (self), shell);
+  ooze_application_window_set_content (
+    OOZE_APPLICATION_WINDOW (self), shell);
 
-  g_signal_connect_object (adw_style_manager_get_default (), "notify::dark",
-                           G_CALLBACK (gtk_widget_queue_draw), self,
-                           G_CONNECT_SWAPPED);
+  help = king_build_help_menu ();
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "Help", help);
+  g_object_unref (help);
 }
 
 GtkWidget *
 ooze_king_window_new (GtkApplication *app)
 {
-  OozeKingWindow *win;
-  GMenuModel *menubar;
-
-  win = g_object_new (OOZE_KING_TYPE_WINDOW, "application", app, NULL);
-
-  menubar = king_build_menubar ();
-  gtk_application_set_menubar (app, menubar);
-  g_object_unref (menubar);
-  gtk_application_window_set_show_menubar (GTK_APPLICATION_WINDOW (win), FALSE);
-
-  return GTK_WIDGET (win);
+  return GTK_WIDGET (g_object_new (OOZE_KING_TYPE_WINDOW,
+                                   "application", app,
+                                   NULL));
 }

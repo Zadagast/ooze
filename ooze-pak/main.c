@@ -1,23 +1,13 @@
 #include "ooze-pak-window.h"
 
-#include "ooze-shared-icons.h"
-#include "ooze-theme.h"
+#include "ooze-application.h"
 
-#include <adwaita.h>
 #include <stdlib.h>
 
 static char *opt_uninstall = NULL;
 
-static void
-on_startup (AdwApplication *app G_GNUC_UNUSED,
-            gpointer        user_data G_GNUC_UNUSED)
-{
-  ooze_icons_configure_gtk ();
-  ooze_theme_ensure ();
-}
-
 static OozePakWindow *
-ensure_window (AdwApplication *app)
+ensure_window (GtkApplication *app)
 {
   GtkWindow *existing;
   OozePakWindow *window;
@@ -35,7 +25,7 @@ static void
 on_activate (AdwApplication *app,
              gpointer        user_data G_GNUC_UNUSED)
 {
-  OozePakWindow *window = ensure_window (app);
+  OozePakWindow *window = ensure_window (GTK_APPLICATION (app));
 
   if (opt_uninstall && *opt_uninstall)
     {
@@ -52,7 +42,7 @@ on_open (AdwApplication *app,
          int              n_files,
          const char      *hint G_GNUC_UNUSED)
 {
-  OozePakWindow *window = ensure_window (app);
+  OozePakWindow *window = ensure_window (GTK_APPLICATION (app));
   ooze_pak_window_install_paths (window, files, n_files);
   gtk_window_present (GTK_WINDOW (window));
 }
@@ -60,7 +50,7 @@ on_open (AdwApplication *app,
 int
 main (int argc, char **argv)
 {
-  g_autoptr (AdwApplication) app = NULL;
+  g_autoptr (OozeApplication) app = NULL;
   g_autoptr (GOptionContext) context = NULL;
   g_autoptr (GError) error = NULL;
   const GOptionEntry options[] = {
@@ -68,8 +58,6 @@ main (int argc, char **argv)
       "Confirm uninstall of APP_ID", "APP_ID" },
     { NULL }
   };
-
-  ooze_icons_apply ();
 
   context = g_option_context_new ("[FILE…]");
   g_option_context_add_main_entries (context, options, NULL);
@@ -79,9 +67,9 @@ main (int argc, char **argv)
       return EXIT_FAILURE;
     }
 
-  app = adw_application_new ("org.ooze.Pak",
-                             G_APPLICATION_DEFAULT_FLAGS | G_APPLICATION_HANDLES_OPEN);
-  g_signal_connect (app, "startup", G_CALLBACK (on_startup), NULL);
+  app = ooze_application_new (
+    "org.ooze.Pak",
+    G_APPLICATION_DEFAULT_FLAGS | G_APPLICATION_HANDLES_OPEN);
   g_signal_connect (app, "activate", G_CALLBACK (on_activate), NULL);
   g_signal_connect (app, "open", G_CALLBACK (on_open), NULL);
 
