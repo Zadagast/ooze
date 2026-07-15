@@ -31,7 +31,7 @@ chmod +x Ooze-*.AppImage && ./Ooze-*.AppImage
 ```
 
 ```sh
-sudo apt install ./ooze_0.5.0_amd64.deb
+sudo apt install ./ooze_0.6.0_amd64.deb
 ```
 
 Or build from source (needs Mutter 18 dev packages — Ubuntu 26.04):
