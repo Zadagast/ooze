@@ -93,6 +93,8 @@ static const OozeDockIconAlias dock_icon_aliases[] = {
   { "org.ooze.Themes-symbolic", "preferences-desktop-theme" },
   { "org.ooze.Eye",             "image-x-generic" },
   { "org.ooze.Eye-symbolic",    "image-x-generic" },
+  { "org.ooze.Shot",            "camera-photo" },
+  { "org.ooze.Shot-symbolic",   "camera-photo" },
   { "org.ooze.Torrent",         "application-x-bittorrent" },
   { "org.ooze.Torrent-symbolic","application-x-bittorrent" },
   { NULL, NULL },
