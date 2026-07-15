@@ -33,4 +33,10 @@ void ooze_application_window_append_menu_section (OozeApplicationWindow *self,
                                                   const char            *label,
                                                   GMenuModel            *section);
 
+void ooze_application_window_append_standard_edit_menu
+  (OozeApplicationWindow *self);
+
+void ooze_application_window_append_standard_window_menu
+  (OozeApplicationWindow *self);
+
 G_END_DECLS

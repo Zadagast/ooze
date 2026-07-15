@@ -1,10 +1,7 @@
 #include "spot-window.h"
 
+#include "ooze-application.h"
 #include "ooze-shared-appmenu.h"
-#include "ooze-shared-icons.h"
-#include "ooze-theme.h"
-
-#include <adwaita.h>
 
 static SpotWindow *
 spot_pick_window (AdwApplication *app)
@@ -86,9 +83,6 @@ on_startup (AdwApplication *app,
     { "shell-drag-leave", spot_shell_drag_leave_activated, NULL, NULL, NULL },
   };
 
-  ooze_icons_configure_gtk ();
-  ooze_theme_ensure ();
-  spot_application_setup_menubar (GTK_APPLICATION (app));
   g_action_map_add_action_entries (G_ACTION_MAP (app), entries,
                                    G_N_ELEMENTS (entries), app);
 }
@@ -103,7 +97,7 @@ on_activate (AdwApplication *app,
   /* Always open a new window — dock middle-click and a second `spot`
    * launch should not merely raise the existing one. */
   start_path = g_object_get_data (G_OBJECT (app), "start-path");
-  window = spot_window_new_for_path (app, start_path);
+  window = spot_window_new_for_path (GTK_APPLICATION (app), start_path);
   gtk_application_add_window (GTK_APPLICATION (app), GTK_WINDOW (window));
   gtk_window_present (GTK_WINDOW (window));
 }
@@ -135,7 +129,7 @@ on_open (AdwApplication *app,
         {
           g_autofree char *path = g_file_get_path (files[i]);
 
-          window = spot_window_new_for_path (app, path);
+          window = spot_window_new_for_path (GTK_APPLICATION (app), path);
           gtk_application_add_window (GTK_APPLICATION (app), GTK_WINDOW (window));
           gtk_window_present (GTK_WINDOW (window));
         }
@@ -168,7 +162,7 @@ on_open (AdwApplication *app,
 int
 main (int argc, char **argv)
 {
-  g_autoptr (AdwApplication) app = NULL;
+  g_autoptr (OozeApplication) app = NULL;
   g_autoptr (GOptionContext) context = NULL;
   g_autoptr (GError) error = NULL;
   g_autofree char *start_path = NULL;
@@ -178,8 +172,6 @@ main (int argc, char **argv)
     { NULL }
   };
 
-  ooze_icons_apply ();
-
   context = g_option_context_new (NULL);
   g_option_context_add_main_entries (context, options, NULL);
   if (!g_option_context_parse (context, &argc, &argv, &error))
@@ -188,8 +180,9 @@ main (int argc, char **argv)
       return EXIT_FAILURE;
     }
 
-  app = adw_application_new ("org.ooze.Spot",
-                             G_APPLICATION_DEFAULT_FLAGS | G_APPLICATION_HANDLES_OPEN);
+  app = ooze_application_new (
+    "org.ooze.Spot",
+    G_APPLICATION_DEFAULT_FLAGS | G_APPLICATION_HANDLES_OPEN);
   g_signal_connect (app, "startup", G_CALLBACK (on_startup), NULL);
   g_signal_connect (app, "activate", G_CALLBACK (on_activate), NULL);
   g_signal_connect (app, "open", G_CALLBACK (on_open), NULL);

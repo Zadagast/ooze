@@ -1,14 +1,13 @@
 #pragma once
 
-#include <gtk/gtk.h>
+#include "ooze-application-window.h"
 
 G_BEGIN_DECLS
 
 #define OOZE_TYPE_COMMAND_WINDOW (ooze_command_window_get_type ())
 G_DECLARE_FINAL_TYPE (OozeCommandWindow, ooze_command_window,
-                      OOZE, COMMAND_WINDOW, GtkApplicationWindow)
+                      OOZE, COMMAND_WINDOW, OozeApplicationWindow)
 
 GtkWidget *ooze_command_window_new (GtkApplication *app);
-void       ooze_command_application_setup_menubar (GtkApplication *app);
 
 G_END_DECLS

@@ -2,14 +2,12 @@
 
 #include "ooze-shared-appmenu.h"
 #include "ooze-button.h"
-#include "ooze-header-bar.h"
 #include "ooze-icons.h"
 #include "ooze-scroll.h"
 #include "ooze-surface.h"
 #include "ooze-toolbar.h"
 #include "ooze-about.h"
 
-#include <adwaita.h>
 #include <vte/vte.h>
 #include <pango/pango.h>
 
@@ -58,9 +56,8 @@ struct _OozeCommandTab
 
 struct _OozeCommandWindow
 {
-  GtkApplicationWindow parent_instance;
+  OozeApplicationWindow parent_instance;
 
-  GtkWidget *header;
   GtkWidget *sidebar;
   GtkWidget *tab_list;
   GtkWidget *new_tab_button;
@@ -75,7 +72,7 @@ struct _OozeCommandWindow
 };
 
 G_DEFINE_FINAL_TYPE (OozeCommandWindow, ooze_command_window,
-                     GTK_TYPE_APPLICATION_WINDOW)
+                     OOZE_TYPE_APPLICATION_WINDOW)
 
 static const char * const oc_icon_new_tab[] = {
   "list-add", "tab-new-symbolic", "list-add-symbolic", NULL
@@ -98,6 +95,7 @@ static void oc_close_tab  (OozeCommandWindow *self, OozeCommandTab *tab);
 static OozeCommandTab *oc_add_tab (OozeCommandWindow *self, gboolean select);
 static void oc_apply_font_to_terminal (OozeCommandWindow *self, VteTerminal *vte);
 static void oc_update_window_title (OozeCommandWindow *self);
+static void ooze_command_window_constructed (GObject *object);
 
 static void
 oc_apply_colors (VteTerminal *vte)
@@ -148,8 +146,8 @@ oc_update_window_title (OozeCommandWindow *self)
         title = gtk_label_get_text (GTK_LABEL (self->active_tab->title_label));
     }
 
-  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->header), title);
-  gtk_window_set_title (GTK_WINDOW (self), title);
+  ooze_application_window_set_title (
+    OOZE_APPLICATION_WINDOW (self), title);
 }
 
 static void
@@ -639,21 +637,17 @@ oc_add_shortcuts (OozeCommandWindow *self)
     }
 }
 
-static GMenuModel *
-oc_build_menubar (void)
+static void
+oc_append_menus (OozeCommandWindow *self)
 {
-  GMenu *bar, *file, *edit, *view, *window, *help;
-  GMenuItem *item;
-
-  bar = g_menu_new ();
+  GMenu *file, *edit, *view, *window, *help;
 
   file = g_menu_new ();
   g_menu_append (file, "New Tab",     "win.new-tab");
   g_menu_append (file, "New Window",  "win.new-window");
   g_menu_append (file, "Close Tab",   "win.close");
-  item = g_menu_item_new_submenu ("File", G_MENU_MODEL (file));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "File", G_MENU_MODEL (file));
   g_object_unref (file);
 
   edit = g_menu_new ();
@@ -661,37 +655,31 @@ oc_build_menubar (void)
   g_menu_append (edit, "Paste",       "win.paste");
   g_menu_append (edit, "Select All",  "win.select-all");
   g_menu_append (edit, "Clear Scrollback", "win.clear");
-  item = g_menu_item_new_submenu ("Edit", G_MENU_MODEL (edit));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "Edit", G_MENU_MODEL (edit));
   g_object_unref (edit);
 
   view = g_menu_new ();
   g_menu_append (view, "Zoom In",     "win.zoom-in");
   g_menu_append (view, "Zoom Out",    "win.zoom-out");
   g_menu_append (view, "Normal Size", "win.zoom-reset");
-  item = g_menu_item_new_submenu ("View", G_MENU_MODEL (view));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "View", G_MENU_MODEL (view));
   g_object_unref (view);
 
   window = g_menu_new ();
   g_menu_append (window, "Minimize",     "win.minimize");
   g_menu_append (window, "Maximize",     "win.maximize");
   g_menu_append (window, "Close Window", "win.close-window");
-  item = g_menu_item_new_submenu ("Window", G_MENU_MODEL (window));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "Window", G_MENU_MODEL (window));
   g_object_unref (window);
 
   help = g_menu_new ();
   g_menu_append (help, "About Ooze Command", "win.about");
-  item = g_menu_item_new_submenu ("Help", G_MENU_MODEL (help));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "Help", G_MENU_MODEL (help));
   g_object_unref (help);
-
-  return G_MENU_MODEL (bar);
 }
 
 static void
@@ -781,35 +769,40 @@ ooze_command_window_dispose (GObject *object)
 static void
 ooze_command_window_class_init (OozeCommandWindowClass *klass)
 {
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+
+  object_class->constructed = ooze_command_window_constructed;
   G_OBJECT_CLASS (klass)->dispose = ooze_command_window_dispose;
 }
 
 static void
 ooze_command_window_init (OozeCommandWindow *self)
 {
+  self->font_scale = 1.0;
+  self->next_tab_id = 1;
+}
+
+static void
+ooze_command_window_constructed (GObject *object)
+{
+  OozeCommandWindow *self = OOZE_COMMAND_WINDOW (object);
   GtkWidget *paned;
   GtkWidget *scrolled;
 
-  self->font_scale = 1.0;
-  self->next_tab_id = 1;
+  G_OBJECT_CLASS (ooze_command_window_parent_class)->constructed (object);
 
   oc_ensure_css ();
   ooze_toolbar_ensure_css ();
 
-  gtk_window_set_title (GTK_WINDOW (self), "Terminal");
   gtk_window_set_icon_name (GTK_WINDOW (self), "utilities-terminal");
   gtk_window_set_default_size (GTK_WINDOW (self), 900, 560);
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-command");
+  ooze_application_window_set_title (
+    OOZE_APPLICATION_WINDOW (self), "Terminal");
 
   g_action_map_add_action_entries (G_ACTION_MAP (self),
                                    win_actions, G_N_ELEMENTS (win_actions),
                                    self);
-
-  self->header = GTK_WIDGET (ooze_header_bar_new ());
-  ooze_header_bar_attach_window (OOZE_HEADER_BAR (self->header),
-                                 GTK_WINDOW (self));
-  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->header), "Terminal");
-  gtk_window_set_titlebar (GTK_WINDOW (self), self->header);
 
   paned = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
   gtk_paned_set_wide_handle (GTK_PANED (paned), FALSE);
@@ -877,12 +870,11 @@ ooze_command_window_init (OozeCommandWindow *self)
 
   gtk_paned_set_start_child (GTK_PANED (paned), self->sidebar);
   gtk_paned_set_end_child (GTK_PANED (paned), self->stack);
-  gtk_window_set_child (GTK_WINDOW (self), paned);
-
-  g_signal_connect_swapped (adw_style_manager_get_default (), "notify::dark",
-                            G_CALLBACK (gtk_widget_queue_draw), self);
+  ooze_application_window_set_content (
+    OOZE_APPLICATION_WINDOW (self), paned);
 
   oc_add_tab (self, TRUE);
+  oc_append_menus (self);
 }
 
 GtkWidget *
@@ -892,27 +884,10 @@ ooze_command_window_new (GtkApplication *app)
 
   win = g_object_new (OOZE_TYPE_COMMAND_WINDOW,
                       "application", app,
+                      "standard-edit-actions", FALSE,
+                      "standard-menus", FALSE,
                       NULL);
-
-  /* Menubar is owned by the application (set once in startup). */
-  if (!gtk_application_get_menubar (app))
-    ooze_command_application_setup_menubar (app);
-  gtk_application_window_set_show_menubar (GTK_APPLICATION_WINDOW (win), FALSE);
 
   oc_add_shortcuts (win);
   return GTK_WIDGET (win);
-}
-
-void
-ooze_command_application_setup_menubar (GtkApplication *app)
-{
-  GMenuModel *menubar;
-
-  g_return_if_fail (GTK_IS_APPLICATION (app));
-  if (gtk_application_get_menubar (app))
-    return;
-
-  menubar = oc_build_menubar ();
-  gtk_application_set_menubar (app, menubar);
-  g_object_unref (menubar);
 }
