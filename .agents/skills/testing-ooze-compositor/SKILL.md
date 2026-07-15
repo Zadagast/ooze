@@ -31,6 +31,7 @@ docker run -d --name oozebuild \
 docker exec oozebuild bash -c "apt-get update -qq && DEBIAN_FRONTEND=noninteractive \
   apt-get install -y -qq meson ninja-build libmutter-18-dev mutter-dev-bin \
   libgtk-4-dev libvte-2.91-gtk4-dev libadwaita-1-dev dbus-x11 x11-utils \
+  libpolkit-agent-1-dev libpolkit-gobject-1-dev \
   xwayland pipewire pipewire-pulse wireplumber gsettings-desktop-schemas \
   mutter-common adwaita-icon-theme fonts-dejavu-core imagemagick"
 ```
