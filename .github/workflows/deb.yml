@@ -62,6 +62,8 @@ jobs:
             libvte-2.91-gtk4-dev \
             libgdk-pixbuf-2.0-dev \
             libpng-dev \
+            libpolkit-agent-1-dev \
+            libpolkit-gobject-1-dev \
             libpipewire-0.3-dev \
             librsvg2-bin \
             x11-apps \
