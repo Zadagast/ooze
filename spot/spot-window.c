@@ -2,10 +2,6 @@
 
 #include "ooze-dnd-bridge.h"
 #include "ooze-shared-appmenu.h"
-#include "ooze-shared-icons.h"
-
-#include "ooze-header-bar.h"
-#include "ooze-gel.h"
 
 /* OozeKit — shared surface + button widgets */
 #include "ooze-surface.h"
@@ -17,8 +13,8 @@
 #include "ooze-pinline.h"
 #include "ooze-scroll.h"
 #include "ooze-popover.h"
-#include "ooze-window-actions.h"
 
+#include <adwaita.h>
 #include <string.h>
 
 #define SPOT_COLUMN_WIDTH     180
@@ -36,9 +32,7 @@ typedef enum {
 
 struct _SpotWindow
 {
-  GtkApplicationWindow parent_instance;
-
-  GtkWidget *title_header;
+  OozeApplicationWindow parent_instance;
   GtkWidget *toolbar;
   GtkWidget *search_entry;
 
@@ -77,7 +71,8 @@ struct _SpotWindow
   gboolean shell_drag_active;
 };
 
-G_DEFINE_FINAL_TYPE (SpotWindow, spot_window, GTK_TYPE_APPLICATION_WINDOW)
+G_DEFINE_FINAL_TYPE (SpotWindow, spot_window,
+                     OOZE_TYPE_APPLICATION_WINDOW)
 
 typedef struct
 {
@@ -143,9 +138,6 @@ spot_ensure_css (void)
   display = gdk_display_get_default ();
   if (!display)
     return;
-
-  ooze_icons_configure_gtk ();
-  ooze_theme_ensure ();
 
   provider = gtk_css_provider_new ();
   gtk_css_provider_load_from_string (provider,
@@ -333,7 +325,7 @@ static void spot_set_view_mode (SpotWindow *self, SpotViewMode mode);
 static void spot_pop_history (SpotWindow *self,
                               GList     **stack,
                               GList     **other_stack);
-static GMenuModel *spot_build_menubar (void);
+static void spot_append_menus (SpotWindow *self);
 
 static void
 spot_set_context_target (SpotWindow *self,
@@ -1425,7 +1417,7 @@ spot_action_new_window (GSimpleAction *action G_GNUC_UNUSED,
   if (self->current_dir)
     path = g_file_get_path (self->current_dir);
 
-  win = spot_window_new_for_path (ADW_APPLICATION (app), path);
+  win = spot_window_new_for_path (GTK_APPLICATION (app), path);
   gtk_window_present (GTK_WINDOW (win));
 }
 
@@ -1441,22 +1433,18 @@ spot_action_about (GSimpleAction *action G_GNUC_UNUSED,
                       OOZE_VERSION);
 }
 
-static GMenuModel *
-spot_build_menubar (void)
+static void
+spot_append_menus (SpotWindow *self)
 {
-  GMenu *bar, *file, *edit, *view, *go, *window, *help;
-  GMenuItem *item;
-
-  bar = g_menu_new ();
+  GMenu *file, *edit, *view, *go, *window, *help;
 
   file = g_menu_new ();
   g_menu_append (file, "New Window", "win.new-window");
   g_menu_append (file, "New Folder", "win.new-folder");
   g_menu_append (file, "Open", "win.open");
   g_menu_append (file, "Close Window", "win.close-window");
-  item = g_menu_item_new_submenu ("File", G_MENU_MODEL (file));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "File", G_MENU_MODEL (file));
   g_object_unref (file);
 
   edit = g_menu_new ();
@@ -1464,18 +1452,16 @@ spot_build_menubar (void)
   g_menu_append (edit, "Copy", "win.copy");
   g_menu_append (edit, "Paste", "win.paste");
   g_menu_append (edit, "Move to Trash", "win.trash");
-  item = g_menu_item_new_submenu ("Edit", G_MENU_MODEL (edit));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "Edit", G_MENU_MODEL (edit));
   g_object_unref (edit);
 
   view = g_menu_new ();
   g_menu_append (view, "as Icons", "win.view-grid");
   g_menu_append (view, "as Columns", "win.view-columns");
   g_menu_append (view, "Refresh", "win.refresh");
-  item = g_menu_item_new_submenu ("View", G_MENU_MODEL (view));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "View", G_MENU_MODEL (view));
   g_object_unref (view);
 
   go = g_menu_new ();
@@ -1487,9 +1473,8 @@ spot_build_menubar (void)
   g_menu_append (go, "Documents", "win.go-documents");
   g_menu_append (go, "Downloads", "win.go-downloads");
   g_menu_append (go, "Applications", "win.go-applications");
-  item = g_menu_item_new_submenu ("Go", G_MENU_MODEL (go));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "Go", G_MENU_MODEL (go));
   g_object_unref (go);
 
   window = g_menu_new ();
@@ -1497,19 +1482,15 @@ spot_build_menubar (void)
   g_menu_append (window, "Maximize", "win.maximize");
   g_menu_append (window, "New Window", "win.new-window");
   g_menu_append (window, "Close Window", "win.close-window");
-  item = g_menu_item_new_submenu ("Window", G_MENU_MODEL (window));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "Window", G_MENU_MODEL (window));
   g_object_unref (window);
 
   help = g_menu_new ();
   g_menu_append (help, "About Spot", "win.about");
-  item = g_menu_item_new_submenu ("Help", G_MENU_MODEL (help));
-  g_menu_append_item (bar, item);
-  g_object_unref (item);
+  ooze_application_window_append_menu_section (
+    OOZE_APPLICATION_WINDOW (self), "Help", G_MENU_MODEL (help));
   g_object_unref (help);
-
-  return G_MENU_MODEL (bar);
 }
 
 static void
@@ -1733,7 +1714,6 @@ spot_install_actions (SpotWindow *self)
   g_action_map_add_action_entries (G_ACTION_MAP (self),
                                    entries, G_N_ELEMENTS (entries),
                                    self);
-  ooze_window_actions_add_chrome (GTK_APPLICATION_WINDOW (self));
 
   app = gtk_window_get_application (GTK_WINDOW (self));
   if (app)
@@ -2500,7 +2480,8 @@ spot_update_title (SpotWindow *self)
 {
   if (!self->current_dir)
     {
-      ooze_header_bar_set_title (OOZE_HEADER_BAR (self->title_header), "Spot");
+      ooze_application_window_set_title (
+        OOZE_APPLICATION_WINDOW (self), "Spot");
       return;
     }
 
@@ -2511,8 +2492,8 @@ spot_update_title (SpotWindow *self)
     if (!title || title[0] == '\0')
       title = "/";
 
-    ooze_header_bar_set_title (OOZE_HEADER_BAR (self->title_header), title);
-    gtk_window_set_title (GTK_WINDOW (self), title);
+    ooze_application_window_set_title (
+      OOZE_APPLICATION_WINDOW (self), title);
   }
 }
 
@@ -3106,7 +3087,6 @@ spot_window_constructed (GObject *object)
 
   spot_ensure_css ();
 
-  gtk_window_set_title (GTK_WINDOW (self), "Spot");
   gtk_window_set_icon_name (GTK_WINDOW (self), "system-file-manager");
   gtk_window_set_default_size (GTK_WINDOW (self), 960, 640);
   /*
@@ -3118,16 +3098,10 @@ spot_window_constructed (GObject *object)
    * automatically – no custom OozeShadowBin machinery needed.
    */
   gtk_widget_add_css_class (GTK_WIDGET (self), "spot-finder");
+  ooze_application_window_set_title (
+    OOZE_APPLICATION_WINDOW (self), "Spot");
 
   spot_install_actions (self);
-
-  /* OozeHeaderBar becomes the native CSD titlebar widget.
-   * GTK4 automatically enables drag-to-move and double-click-to-maximize
-   * on it, and marks it with the "titlebar" CSS class. */
-  self->title_header = GTK_WIDGET (ooze_header_bar_new ());
-  ooze_header_bar_attach_window (OOZE_HEADER_BAR (self->title_header), GTK_WINDOW (self));
-  ooze_header_bar_set_title (OOZE_HEADER_BAR (self->title_header), "Spot");
-  gtk_window_set_titlebar (GTK_WINDOW (self), self->title_header);
 
   shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
@@ -3222,8 +3196,7 @@ spot_window_constructed (GObject *object)
   gtk_label_set_xalign (GTK_LABEL (self->status_label), 0.0);
   gtk_box_append (GTK_BOX (statusbar), self->status_label);
 
-  /* title_header is the CSD titlebar (set above), NOT a shell child.
-   * Keep the toolbar in a horizontal scroller so its natural width
+  /* Keep the toolbar in a horizontal scroller so its natural width
    * (Back…Applications + Search) cannot raise the window min-size above
    * half the monitor — Mutter refuses side-tile when min_width is too big.
    */
@@ -3248,7 +3221,8 @@ spot_window_constructed (GObject *object)
   gtk_box_append (GTK_BOX (shell), statusbar);
 
   /* Set content directly – no OozeShadowBin grid wrapper needed. */
-  gtk_window_set_child (GTK_WINDOW (self), shell);
+  ooze_application_window_set_content (
+    OOZE_APPLICATION_WINDOW (self), shell);
 
   {
     GtkEventController *keys;
@@ -3259,6 +3233,7 @@ spot_window_constructed (GObject *object)
   }
 
   spot_update_action_states (self);
+  spot_append_menus (self);
 }
 
 static void
@@ -3300,20 +3275,17 @@ spot_window_init (SpotWindow *self G_GNUC_UNUSED)
 }
 
 SpotWindow *
-spot_window_new_for_path (AdwApplication *app,
-                          const char    *path)
+spot_window_new_for_path (GtkApplication *app,
+                          const char     *path)
 {
   SpotWindow *window;
   const char *start_path = path;
 
   window = g_object_new (SPOT_TYPE_WINDOW,
-                           "application", app,
-                           NULL);
-
-  /* Menubar may already be set in startup; ensure it is present. */
-  if (!gtk_application_get_menubar (GTK_APPLICATION (app)))
-    spot_application_setup_menubar (GTK_APPLICATION (app));
-  gtk_application_window_set_show_menubar (GTK_APPLICATION_WINDOW (window), FALSE);
+                         "application", app,
+                         "standard-edit-actions", FALSE,
+                         "standard-menus", FALSE,
+                         NULL);
 
   if (!start_path)
     start_path = g_object_get_data (G_OBJECT (app), "start-path");
@@ -3325,20 +3297,8 @@ spot_window_new_for_path (AdwApplication *app,
   return window;
 }
 
-void
-spot_application_setup_menubar (GtkApplication *app)
-{
-  GMenuModel *menubar;
-
-  g_return_if_fail (GTK_IS_APPLICATION (app));
-
-  menubar = spot_build_menubar ();
-  gtk_application_set_menubar (app, menubar);
-  g_object_unref (menubar);
-}
-
 SpotWindow *
-spot_window_new (AdwApplication *app)
+spot_window_new (GtkApplication *app)
 {
   return spot_window_new_for_path (app, NULL);
 }
