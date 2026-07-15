@@ -12,13 +12,10 @@ BUILD_DIR="${BUILD_DIR:-$ROOT/build}"
 DIST_DIR="${DIST_DIR:-$ROOT/dist}"
 STAGE="${STAGE_DIR:-$DIST_DIR/ooze-deb-root}"
 ARCH="${ARCH:-amd64}"
-# Prefer the configured build dir's version, but never let a missing/failed
-# introspect (e.g. no build dir yet) abort under `set -e`+`pipefail` — fall
-# through to the meson.build value below.
-VERSION="${VERSION:-$( { meson introspect --projectinfo "$BUILD_DIR" 2>/dev/null | sed -n 's/.*"version": "\([^"]*\)".*/\1/p' | head -1; } || true)}"
-if [[ -z "$VERSION" ]]; then
-  VERSION="$(sed -n "s/.*version: '\\([^']*\\)'.*/\\1/p" meson.build | head -1)"
-fi
+# Read the version straight from meson.build (the source of truth). A
+# configured build dir can hold a stale project version until ninja
+# reconfigures it, so introspecting it here would mislabel the package.
+VERSION="${VERSION:-$(sed -n "s/.*version: '\\([^']*\\)'.*/\\1/p" meson.build | head -1)}"
 VERSION="${VERSION:-0.1.0}"
 DEB_NAME="ooze_${VERSION}_${ARCH}.deb"
 OUTPUT="${OUTPUT:-$DIST_DIR/$DEB_NAME}"
