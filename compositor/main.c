@@ -184,11 +184,15 @@ main (int argc, char **argv)
    * real outputs. Prefer ≥1600 wide so side-tile works for Inkscape.
    * run-devkit.sh / ooze-session may already set OOZE_DISPLAY_MODES.
    */
-  if (ooze_argv_has_devkit (argc, argv) &&
-      !g_getenv ("MUTTER_DEBUG_DUMMY_MODE_SPECS"))
-    g_setenv ("MUTTER_DEBUG_DUMMY_MODE_SPECS",
-               "1600x900:1920x1080:2560x1440:1280x720",
-               TRUE);
+  if (ooze_argv_has_devkit (argc, argv))
+    {
+      /* Marks the nested session so it never touches the host's portals. */
+      g_setenv ("OOZE_DEVKIT", "1", TRUE);
+      if (!g_getenv ("MUTTER_DEBUG_DUMMY_MODE_SPECS"))
+        g_setenv ("MUTTER_DEBUG_DUMMY_MODE_SPECS",
+                   "1600x900:1920x1080:2560x1440:1280x720",
+                   TRUE);
+    }
 
   ooze_icons_apply ();
   ooze_appmenu_setup_environment ();

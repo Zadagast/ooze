@@ -18,6 +18,7 @@
 #include "ooze-tray.h"
 #include "ooze-notifications.h"
 #include "ooze-shot.h"
+#include "ooze-portal-env.h"
 
 #include "../common/aqua-chrome.h"
 #include "../common/ooze-font.h"
@@ -1593,6 +1594,9 @@ ooze_plugin_on_x11_display_opened (MetaDisplay *display G_GNUC_UNUSED,
   if (self->shutting_down)
     return;
 
+  /* DISPLAY exists now; refresh the activation environments. */
+  ooze_portal_env_publish ();
+
   if (ooze_plugin_try_setup_xsettings (self))
     {
       ooze_plugin_cancel_xsettings_retry (self);
@@ -1648,6 +1652,9 @@ ooze_plugin_start (MetaPlugin *plugin)
 
   ooze_appmenu_setup_environment ();
   /* Registrar activation happens asynchronously in OozeGlobalMenu. */
+
+  /* WAYLAND_DISPLAY is live: publish it and kick the portal services. */
+  ooze_portal_env_publish ();
 
   /* Xwayland / MetaX11Display often arrives after plugin start. */
   ooze_plugin_schedule_xsettings (self);
