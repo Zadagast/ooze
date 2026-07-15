@@ -7,6 +7,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 APPDIR="${APPDIR:-$HERE}"
 
 export PATH="${APPDIR}/usr/bin:${PATH}"
+export LD_LIBRARY_PATH="${APPDIR}/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export OOZE_DATA_DIR="${APPDIR}/usr/share/ooze"
 export XDG_DATA_DIRS="${OOZE_DATA_DIR}:${APPDIR}/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 
