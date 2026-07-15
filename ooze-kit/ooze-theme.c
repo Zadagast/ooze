@@ -50,6 +50,15 @@ ooze_theme_connect_dark_notify_idle (gpointer user_data)
       else
         g_signal_connect (style_manager, "notify::dark",
                           notify->callback, NULL);
+
+      if (notify->swapped)
+        ((void (*) (gpointer)) notify->callback) (notify->target);
+      else if (notify->target)
+        ((void (*) (gpointer, GParamSpec *, gpointer)) notify->callback)
+          (style_manager, NULL, notify->target);
+      else
+        ((void (*) (gpointer, GParamSpec *)) notify->callback)
+          (style_manager, NULL);
     }
   ooze_theme_notify_free (notify);
   return G_SOURCE_REMOVE;
