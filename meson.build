@@ -18,6 +18,7 @@ mtk_pc = 'mutter-mtk-' + mutter_api_version
 cc = meson.get_compiler('c')
 fs = import('fs')
 gnome = import('gnome')
+pkgconfig = import('pkgconfig')
 
 mutter_dep = dependency(libmutter_pc)
 clutter_dep = dependency(clutter_pc)
@@ -240,6 +241,43 @@ ooze_kit_dep = declare_dependency(
   link_with: ooze_kit_lib,
   include_directories: [inc_common, inc_ooze_ui, inc_ooze_kit],
 )
+
+meson.override_dependency('oozekit', ooze_kit_dep)
+
+oozekit_public_headers = [
+  'ooze-kit/ooze-application.h',
+  'ooze-kit/ooze-application-window.h',
+  'ooze-kit/ooze-about.h',
+  'ooze-kit/ooze-button.h',
+  'ooze-kit/ooze-draw.h',
+  'ooze-kit/ooze-icons.h',
+  'ooze-kit/ooze-palette.h',
+  'ooze-kit/ooze-pinline.h',
+  'ooze-kit/ooze-popover.h',
+  'ooze-kit/ooze-scroll.h',
+  'ooze-kit/ooze-surface.h',
+  'ooze-kit/ooze-theme.h',
+  'ooze-kit/ooze-toolbar.h',
+  'ooze-kit/ooze-window-actions.h',
+  'ooze-ui/ooze-gel.h',
+  'ooze-ui/ooze-header-bar.h',
+  'ooze-ui/ooze-traffic-lights.h',
+]
+
+install_headers('ooze-kit/oozekit.h')
+install_headers(oozekit_public_headers, subdir: 'oozekit')
+
+pkgconfig.generate(
+  ooze_kit_lib,
+  name: 'libooze-kit',
+  filebase: 'oozekit',
+  description: 'OozeKit SDK',
+  version: meson.project_version(),
+  subdirs: ['.', 'oozekit'],
+  requires: [gtk4_dep, adw_dep],
+)
+
+subdir('examples')
 
 # Shared helpers used by the compositor and GTK apps, excluding the icon
 # helpers now folded into OozeKit above. The GTK4 icon helper is not included
