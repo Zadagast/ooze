@@ -197,6 +197,8 @@ vte_dep = dependency('vte-2.91-gtk4', required: false)
 # ── OozeKit static library ──────────────────────────────────────────────────
 # OozeKit + OozeUI compiled once into a static library; all GTK apps link it.
 ooze_kit_lib = static_library('ooze-kit',
+  'ooze-kit/ooze-application.c',
+  'ooze-kit/ooze-application-window.c',
   'ooze-kit/ooze-palette.c',
   'ooze-kit/ooze-draw.c',
   'ooze-kit/ooze-surface.c',
@@ -213,7 +215,7 @@ ooze_kit_lib = static_library('ooze-kit',
   'ooze-ui/ooze-header-bar.c',
   'ooze-ui/ooze-gel.c',
   'common/aqua-traffic.c',
-  include_directories: [inc_common, inc_ooze_ui, inc_ooze_kit],
+  include_directories: [inc_common, inc_ooze_ui, inc_ooze_kit, inc_shared],
   dependencies: [gtk4_dep, adw_dep, cairo_dep, cc.find_library('m')],
   c_args: [
     '-DOOZE_DATA_DIR="@0@"'.format(ooze_data_dir),
