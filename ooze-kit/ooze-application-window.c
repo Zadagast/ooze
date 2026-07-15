@@ -8,6 +8,8 @@ typedef struct
 {
   OozeHeaderBar *header;
   GMenu *menubar;
+  gulong application_notify_id;
+  gboolean menubar_set;
   gboolean standard_edit_actions;
   gboolean standard_menus;
 } OozeApplicationWindowPrivate;
@@ -82,21 +84,47 @@ ooze_application_window_dispose (GObject *object)
 
   priv = ooze_application_window_get_instance_private (
     OOZE_APPLICATION_WINDOW (object));
+  if (priv->application_notify_id != 0)
+    {
+      g_signal_handler_disconnect (object, priv->application_notify_id);
+      priv->application_notify_id = 0;
+    }
   g_clear_object (&priv->menubar);
 
   G_OBJECT_CLASS (ooze_application_window_parent_class)->dispose (object);
 }
 
 static void
-ooze_application_window_setup (OozeApplicationWindow *self)
+ooze_application_window_maybe_set_menubar (OozeApplicationWindow *self)
 {
   OozeApplicationWindowPrivate *priv;
   GtkApplication *application;
 
   priv = ooze_application_window_get_instance_private (self);
   application = gtk_window_get_application (GTK_WINDOW (self));
-  g_return_if_fail (application != NULL);
+  if (!application || priv->menubar_set || !priv->menubar)
+    return;
 
+  gtk_application_set_menubar (application, G_MENU_MODEL (priv->menubar));
+  gtk_application_window_set_show_menubar (
+    GTK_APPLICATION_WINDOW (self), FALSE);
+  priv->menubar_set = TRUE;
+}
+
+static void
+ooze_application_window_application_notify (GObject    *object,
+                                            GParamSpec *pspec G_GNUC_UNUSED,
+                                            gpointer    user_data G_GNUC_UNUSED)
+{
+  ooze_application_window_maybe_set_menubar (OOZE_APPLICATION_WINDOW (object));
+}
+
+static void
+ooze_application_window_setup (OozeApplicationWindow *self)
+{
+  OozeApplicationWindowPrivate *priv;
+
+  priv = ooze_application_window_get_instance_private (self);
   ooze_window_actions_add_chrome (GTK_APPLICATION_WINDOW (self));
   if (priv->standard_edit_actions)
     ooze_window_actions_add_edit (GTK_APPLICATION_WINDOW (self));
@@ -111,9 +139,13 @@ ooze_application_window_setup (OozeApplicationWindow *self)
       ooze_menubar_append_edit (priv->menubar);
       ooze_menubar_append_window (priv->menubar);
     }
-  gtk_application_set_menubar (application, G_MENU_MODEL (priv->menubar));
-  gtk_application_window_set_show_menubar (
-    GTK_APPLICATION_WINDOW (self), FALSE);
+  ooze_application_window_maybe_set_menubar (self);
+
+  if (priv->application_notify_id == 0)
+    priv->application_notify_id =
+      g_signal_connect (self, "notify::application",
+                        G_CALLBACK (ooze_application_window_application_notify),
+                        NULL);
 }
 
 static void
