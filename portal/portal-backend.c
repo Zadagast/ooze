@@ -26,6 +26,7 @@ typedef struct _PortalState PortalState;
 typedef struct _PortalSession PortalSession;
 typedef struct _PortalRequest PortalRequest;
 typedef struct _Picker Picker;
+typedef struct _CaptureOperation CaptureOperation;
 typedef void (*RequestCompleteFunc) (PortalRequest *, guint, GVariant *);
 
 typedef struct
@@ -69,7 +70,9 @@ struct _PortalSession
   gboolean closed;
   gboolean in_state;
   gboolean stop_sent;
+  gboolean mutter_started;
   Picker *picker;
+  CaptureOperation *capture;
 };
 
 struct _PortalState
@@ -91,6 +94,15 @@ struct _Picker
   GPtrArray *monitors;
   GPtrArray *selected;
   GtkWidget *list;
+  gboolean finished;
+};
+
+struct _CaptureOperation
+{
+  grefcount refs;
+  PortalSession *session;
+  PortalRequest *request;
+  guint monitor_index;
   gboolean finished;
 };
 
@@ -123,6 +135,11 @@ static void picker_cancel (Picker *picker,
                            guint response);
 static void session_clear_start_request (PortalSession *session,
                                          guint response);
+static void capture_abort (CaptureOperation *capture);
+static CaptureOperation *capture_ref (CaptureOperation *capture);
+static void capture_unref (CaptureOperation *capture);
+static void capture_fail (CaptureOperation *capture,
+                          char             *message);
 static void on_stream_signal (GDBusProxy *proxy,
                               const char  *sender_name,
                               const char  *signal_name,
@@ -217,21 +234,107 @@ session_disconnect_streams (PortalSession *session)
 }
 
 static void
+stop_mutter_cb (GObject      *source,
+                GAsyncResult *res,
+                gpointer      user_data)
+{
+  GDBusProxy *proxy = user_data;
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GVariant) reply = NULL;
+
+  reply = g_dbus_proxy_call_finish (G_DBUS_PROXY (source), res, &error);
+  if (!reply && error &&
+      !g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    g_warning ("SC Mutter Stop error=%s", error->message);
+  g_clear_object (&proxy);
+}
+
+static void
 session_stop_mutter (PortalSession *session)
 {
+  GDBusProxy *mutter_session;
+
   if (!session || session->stop_sent)
     return;
 
   session->stop_sent = TRUE;
+  session->mutter_started = FALSE;
   session_disconnect_streams (session);
-  if (session->mutter_session)
-    {
-      g_autoptr (GError) error = NULL;
+  mutter_session = g_steal_pointer (&session->mutter_session);
+  if (!mutter_session)
+    return;
 
-      g_dbus_proxy_call_sync (session->mutter_session, "Stop", NULL,
-                              G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
-      g_clear_object (&session->mutter_session);
-    }
+  g_dbus_proxy_call (mutter_session, "Stop", NULL,
+                     G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+                     stop_mutter_cb, g_object_ref (mutter_session));
+  g_clear_object (&mutter_session);
+}
+
+static void
+capture_free (CaptureOperation *capture)
+{
+  if (!capture)
+    return;
+  if (capture->session && capture->session->capture == capture)
+    capture->session->capture = NULL;
+  request_unref (capture->request);
+  session_unref (capture->session);
+  g_free (capture);
+}
+
+static CaptureOperation *
+capture_ref (CaptureOperation *capture)
+{
+  if (capture)
+    g_ref_count_inc (&capture->refs);
+  return capture;
+}
+
+static void
+capture_unref (CaptureOperation *capture)
+{
+  if (capture && g_ref_count_dec (&capture->refs))
+    capture_free (capture);
+}
+
+static void
+capture_abort (CaptureOperation *capture)
+{
+  if (!capture || capture->finished)
+    return;
+
+  capture->finished = TRUE;
+  if (capture->session && capture->session->capture == capture)
+    capture->session->capture = NULL;
+  capture_unref (capture);
+}
+
+static gboolean
+capture_is_live (CaptureOperation *capture)
+{
+  return capture &&
+         !capture->finished &&
+         capture->session &&
+         !capture->session->closed &&
+         capture->session->start_request == capture->request;
+}
+
+static void
+capture_fail (CaptureOperation *capture,
+              char             *message)
+{
+  if (!capture || capture->finished)
+    return;
+
+  if (message)
+    g_warning ("%s", message);
+  g_free (message);
+  capture->finished = TRUE;
+  if (capture->session->start_request == capture->request)
+    session_clear_start_request (capture->session, RESPONSE_FAILED);
+  if (capture->session->capture == capture)
+    capture->session->capture = NULL;
+  capture_unref (capture);
 }
 
 static void
@@ -382,7 +485,10 @@ on_request_close (OozePortalRequest *object,
           if (session->picker)
             picker_cancel (session->picker, RESPONSE_CANCELLED);
           else
-            session_clear_start_request (session, RESPONSE_CANCELLED);
+            {
+              capture_abort (session->capture);
+              session_clear_start_request (session, RESPONSE_CANCELLED);
+            }
           break;
         }
     }
@@ -453,6 +559,7 @@ session_close (PortalSession *session,
     return;
 
   session->closed = TRUE;
+  capture_abort (session->capture);
   if (session->picker)
     picker_cancel (session->picker, pending_response);
   session_clear_start_request (session, pending_response);
@@ -809,6 +916,7 @@ stream_ready (PortalSession *session,
 
   if (!session || session->closed ||
       !session->start_request ||
+      !session->mutter_started ||
       session->streams_ready >= session->monitors->len)
     return;
 
@@ -834,6 +942,7 @@ stream_ready (PortalSession *session,
       complete_request_method (request, RESPONSE_SUCCESS,
                                g_variant_builder_end (&results));
       request_unref (request);
+      capture_abort (session->capture);
     }
   (void) stream;
 }
@@ -856,106 +965,270 @@ on_stream_signal (GDBusProxy *proxy,
   (void) sender_name;
 }
 
+static void capture_create_cb (GObject      *source,
+                               GAsyncResult *res,
+                               gpointer      user_data);
+static void capture_session_proxy_cb (GObject      *source,
+                                      GAsyncResult *res,
+                                      gpointer      user_data);
+static void capture_record_cb (GObject      *source,
+                               GAsyncResult *res,
+                               gpointer      user_data);
+static void capture_stream_proxy_cb (GObject      *source,
+                                     GAsyncResult *res,
+                                     gpointer      user_data);
+static void capture_start_cb (GObject      *source,
+                              GAsyncResult *res,
+                              gpointer      user_data);
+
 static void
-start_mutter (PortalRequest *request,
-              PortalSession *session)
+capture_start_next_record (CaptureOperation *capture)
 {
+  PortalSession *session = capture->session;
+  PickerMonitor *monitor;
+  GVariantBuilder record_props;
+
+  if (!capture_is_live (capture))
+    {
+      capture_abort (capture);
+      return;
+    }
+
+  if (capture->monitor_index >= session->monitors->len)
+    {
+      capture_ref (capture);
+      g_dbus_proxy_call (session->mutter_session, "Start", NULL,
+                         G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+                         capture_start_cb, capture);
+      return;
+    }
+
+  monitor = session->monitors->pdata[capture->monitor_index];
+  g_variant_builder_init (&record_props, G_VARIANT_TYPE ("a{sv}"));
+  g_variant_builder_add (&record_props, "{sv}", "cursor-mode",
+                         g_variant_new_uint32 (session->cursor_mode == 2 ? 1 :
+                                               session->cursor_mode == 4 ? 2 : 0));
+  capture_ref (capture);
+  g_dbus_proxy_call (session->mutter_session, "RecordMonitor",
+                     g_variant_new ("(s@a{sv})",
+                                    monitor->connector,
+                                    g_variant_builder_end (&record_props)),
+                     G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+                     capture_record_cb, capture);
+}
+
+static void
+capture_create_cb (GObject      *source,
+                   GAsyncResult *res,
+                   gpointer      user_data)
+{
+  CaptureOperation *capture = user_data;
+  PortalSession *session = capture->session;
   g_autoptr (GError) error = NULL;
   g_autoptr (GVariant) reply = NULL;
-  GVariantBuilder props;
   const char *path;
-  guint i;
 
-  if (session->closed || session->start_request != request)
-    return;
-  session->streams_ready = 0;
-  g_variant_builder_init (&session->stream_builder, G_VARIANT_TYPE ("a(ua{sv})"));
-  g_message ("SC Mutter CreateSession begin monitors=%u",
-             session->monitors->len);
-  g_variant_builder_init (&props, G_VARIANT_TYPE ("a{sv}"));
-  reply = g_dbus_connection_call_sync (session->state->connection,
-                                       MUTTER_BUS, MUTTER_PATH, MUTTER_IFACE,
-                                       "CreateSession",
-                                       g_variant_new ("(@a{sv})",
-                                                      g_variant_builder_end (&props)),
-                                       G_VARIANT_TYPE ("(o)"),
-                                       G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
+  if (!capture_is_live (capture))
+    {
+      g_autoptr (GVariant) discard =
+        g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), res, NULL);
+      capture_abort (capture);
+      capture_unref (capture);
+      return;
+    }
+  reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), res, &error);
   if (!reply)
     {
-      g_warning ("SC Mutter CreateSession error=%s",
-                 error ? error->message : "unknown");
-      session_clear_start_request (session, RESPONSE_FAILED);
+      capture_fail (capture, g_strdup_printf ("SC Mutter CreateSession error=%s",
+                                               error ? error->message : "unknown"));
+      capture_unref (capture);
       return;
     }
   g_variant_get (reply, "(&o)", &path);
   g_message ("SC Mutter CreateSession path=%s", path);
-  session->mutter_session = g_dbus_proxy_new_sync (session->state->connection,
-                                                    G_DBUS_PROXY_FLAGS_NONE,
-                                                    NULL, MUTTER_BUS, path,
-                                                    "org.gnome.Mutter.ScreenCast.Session",
-                                                    NULL, &error);
-  if (!session->mutter_session)
+  capture_ref (capture);
+  g_dbus_proxy_new (session->state->connection, G_DBUS_PROXY_FLAGS_NONE, NULL,
+                    MUTTER_BUS, path,
+                    "org.gnome.Mutter.ScreenCast.Session",
+                    NULL, capture_session_proxy_cb, capture);
+  capture_unref (capture);
+}
+
+static void
+capture_session_proxy_cb (GObject      *source,
+                          GAsyncResult *res,
+                          gpointer      user_data)
+{
+  CaptureOperation *capture = user_data;
+  PortalSession *session = capture->session;
+  g_autoptr (GError) error = NULL;
+  GDBusProxy *proxy;
+
+  if (!capture_is_live (capture))
     {
-      g_warning ("SC Mutter session proxy error=%s",
-                 error ? error->message : "unknown");
-      session_clear_start_request (session, RESPONSE_FAILED);
+      g_autoptr (GDBusProxy) discard = g_dbus_proxy_new_finish (res, NULL);
+      capture_abort (capture);
+      capture_unref (capture);
       return;
     }
-  for (i = 0; i < session->monitors->len; i++)
+  proxy = g_dbus_proxy_new_finish (res, &error);
+  if (!proxy)
     {
-      PickerMonitor *monitor = session->monitors->pdata[i];
-      GVariantBuilder record_props;
-      GVariant *record_reply;
-      const char *stream_path;
-      GDBusProxy *stream;
-
-      g_variant_builder_init (&record_props, G_VARIANT_TYPE ("a{sv}"));
-      g_variant_builder_add (&record_props, "{sv}", "cursor-mode",
-                             g_variant_new_uint32 (session->cursor_mode == 2 ? 1 :
-                                                   session->cursor_mode == 4 ? 2 : 0));
-      record_reply = g_dbus_proxy_call_sync (session->mutter_session, "RecordMonitor",
-                                             g_variant_new ("(s@a{sv})",
-                                                            monitor->connector,
-                                                            g_variant_builder_end (&record_props)),
-                                             G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
-      if (!record_reply)
-        {
-          g_warning ("SC Mutter RecordMonitor connector=%s error=%s",
-                     monitor->connector,
-                     error ? error->message : "unknown");
-          session_clear_start_request (session, RESPONSE_FAILED);
-          return;
-        }
-      g_variant_get (record_reply, "(&o)", &stream_path);
-      g_message ("SC Mutter RecordMonitor connector=%s path=%s",
-                 monitor->connector, stream_path);
-      stream = g_dbus_proxy_new_sync (session->state->connection,
-                                      G_DBUS_PROXY_FLAGS_NONE, NULL, MUTTER_BUS,
-                                      stream_path,
-                                      "org.gnome.Mutter.ScreenCast.Stream",
-                                      NULL, &error);
-      if (!stream)
-        {
-          g_warning ("SC Mutter stream proxy connector=%s error=%s",
-                     monitor->connector,
-                     error ? error->message : "unknown");
-          session_clear_start_request (session, RESPONSE_FAILED);
-          return;
-        }
-      g_signal_connect (stream, "g-signal", G_CALLBACK (on_stream_signal), session);
-      g_ptr_array_add (session->streams, stream);
+      capture_fail (capture,
+                    g_strdup_printf ("SC Mutter session proxy error=%s",
+                                     error ? error->message : "unknown"));
+      capture_unref (capture);
+      return;
     }
-  reply = g_dbus_proxy_call_sync (session->mutter_session, "Start", NULL,
-                                  G_DBUS_CALL_FLAGS_NONE, 5000, NULL, &error);
+  session->mutter_session = proxy;
+  capture_start_next_record (capture);
+  capture_unref (capture);
+  (void) source;
+}
+
+static void
+capture_record_cb (GObject      *source,
+                   GAsyncResult *res,
+                   gpointer      user_data)
+{
+  CaptureOperation *capture = user_data;
+  PortalSession *session = capture->session;
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GVariant) reply = NULL;
+  const char *stream_path;
+
+  if (!capture_is_live (capture))
+    {
+      g_autoptr (GVariant) discard =
+        g_dbus_proxy_call_finish (G_DBUS_PROXY (source), res, NULL);
+      capture_abort (capture);
+      capture_unref (capture);
+      return;
+    }
+  reply = g_dbus_proxy_call_finish (G_DBUS_PROXY (source), res, &error);
   if (!reply)
     {
-      g_warning ("SC Mutter Start error=%s",
-                 error ? error->message : "unknown");
-      session_clear_start_request (session, RESPONSE_FAILED);
+      PickerMonitor *monitor = session->monitors->pdata[capture->monitor_index];
+      capture_fail (
+        capture,
+        g_strdup_printf ("SC Mutter RecordMonitor connector=%s error=%s",
+                         monitor->connector,
+                         error ? error->message : "unknown"));
+      capture_unref (capture);
       return;
     }
+  g_variant_get (reply, "(&o)", &stream_path);
+  g_message ("SC Mutter RecordMonitor connector=%s path=%s",
+             ((PickerMonitor *) session->monitors->pdata[capture->monitor_index])->connector,
+             stream_path);
+  capture_ref (capture);
+  g_dbus_proxy_new (session->state->connection, G_DBUS_PROXY_FLAGS_NONE, NULL,
+                    MUTTER_BUS, stream_path,
+                    "org.gnome.Mutter.ScreenCast.Stream",
+                    NULL, capture_stream_proxy_cb, capture);
+  capture_unref (capture);
+}
+
+static void
+capture_stream_proxy_cb (GObject      *source,
+                         GAsyncResult *res,
+                         gpointer      user_data)
+{
+  CaptureOperation *capture = user_data;
+  PortalSession *session = capture->session;
+  g_autoptr (GError) error = NULL;
+  GDBusProxy *stream;
+
+  if (!capture_is_live (capture))
+    {
+      g_autoptr (GDBusProxy) discard = g_dbus_proxy_new_finish (res, NULL);
+      capture_abort (capture);
+      capture_unref (capture);
+      return;
+    }
+  stream = g_dbus_proxy_new_finish (res, &error);
+  if (!stream)
+    {
+      PickerMonitor *monitor = session->monitors->pdata[capture->monitor_index];
+      capture_fail (
+        capture,
+        g_strdup_printf ("SC Mutter stream proxy connector=%s error=%s",
+                         monitor->connector,
+                         error ? error->message : "unknown"));
+      capture_unref (capture);
+      return;
+    }
+  g_signal_connect (stream, "g-signal", G_CALLBACK (on_stream_signal), session);
+  g_ptr_array_add (session->streams, stream);
+  capture->monitor_index++;
+  capture_start_next_record (capture);
+  capture_unref (capture);
+  (void) source;
+}
+
+static void
+capture_start_cb (GObject      *source,
+                  GAsyncResult *res,
+                  gpointer      user_data)
+{
+  CaptureOperation *capture = user_data;
+  PortalSession *session = capture->session;
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GVariant) reply = NULL;
+
+  if (!capture_is_live (capture))
+    {
+      g_dbus_proxy_call_finish (G_DBUS_PROXY (source), res, NULL);
+      capture_abort (capture);
+      capture_unref (capture);
+      return;
+    }
+  reply = g_dbus_proxy_call_finish (G_DBUS_PROXY (source), res, &error);
+  if (!reply)
+    {
+      capture_fail (capture,
+                    g_strdup_printf ("SC Mutter Start error=%s",
+                                     error ? error->message : "unknown"));
+      capture_unref (capture);
+      return;
+    }
+  session->mutter_started = TRUE;
   g_message ("SC Mutter Start success");
   /* PipeWireStreamAdded is asynchronous. */
+  capture_unref (capture);
+}
+
+static void
+start_mutter (PortalRequest *request,
+              PortalSession *session)
+{
+  CaptureOperation *capture;
+  GVariantBuilder props;
+
+  if (session->closed || session->start_request != request)
+    return;
+  session->streams_ready = 0;
+  session->mutter_started = FALSE;
+  session_disconnect_streams (session);
+  g_ptr_array_set_size (session->streams, 0);
+  g_variant_builder_init (&session->stream_builder, G_VARIANT_TYPE ("a(ua{sv})"));
+  capture = g_new0 (CaptureOperation, 1);
+  g_ref_count_init (&capture->refs);
+  capture->session = session_ref (session);
+  capture->request = request_ref (request);
+  session->capture = capture;
+  g_message ("SC Mutter CreateSession begin monitors=%u",
+             session->monitors->len);
+  g_variant_builder_init (&props, G_VARIANT_TYPE ("a{sv}"));
+  capture_ref (capture);
+  g_dbus_connection_call (session->state->connection,
+                          MUTTER_BUS, MUTTER_PATH, MUTTER_IFACE,
+                          "CreateSession",
+                          g_variant_new ("(@a{sv})",
+                                         g_variant_builder_end (&props)),
+                          G_VARIANT_TYPE ("(o)"),
+                          G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+                          capture_create_cb, capture);
 }
 
 static gboolean
