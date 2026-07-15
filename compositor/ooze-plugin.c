@@ -19,6 +19,7 @@
 #include "ooze-notifications.h"
 #include "ooze-shot.h"
 #include "ooze-portal-env.h"
+#include "ooze-autostart.h"
 
 #include "../common/aqua-chrome.h"
 #include "../common/ooze-font.h"
@@ -1655,6 +1656,8 @@ ooze_plugin_start (MetaPlugin *plugin)
 
   /* WAYLAND_DISPLAY is live: publish it and kick the portal services. */
   ooze_portal_env_publish ();
+
+  ooze_autostart_run ();
 
   /* Xwayland / MetaX11Display often arrives after plugin start. */
   ooze_plugin_schedule_xsettings (self);
