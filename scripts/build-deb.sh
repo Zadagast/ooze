@@ -97,6 +97,10 @@ if [[ -d "$ROOT/data" ]]; then
     rm -rf "$STAGE/usr/share/ooze/icons"
     mkdir -p "$STAGE/usr/share/ooze/icons"
     cp -a "$ROOT/data/icons/elementary" "$STAGE/usr/share/ooze/icons/"
+    # Expose the theme on the standard freedesktop icon path so foreign
+    # apps (nautilus, etc.) resolve it without Ooze's XDG_DATA_DIRS.
+    install -d "$STAGE/usr/share/icons"
+    ln -sfn ../ooze/icons/elementary "$STAGE/usr/share/icons/elementary"
   fi
 fi
 
