@@ -13,14 +13,67 @@
 #include <clutter/clutter.h>
 
 /*
- * Nominal foreign title-bar geometry. libadwaita's default AdwHeaderBar is
- * ~46px tall; the lights sit vertically centred in that band, inset from the
- * left by the standard Aqua margin. These are the tunables to nudge on a real
- * display if the overlay sits slightly off.
+ * Foreign title-bar geometry, measured against libadwaita's default
+ * AdwHeaderBar: 24px window-control buttons on a 37px pitch, first button
+ * centred 22px from the frame's top-left corner. The lights are drawn
+ * slightly larger than the client's own buttons so they fully cover them
+ * (the overlay is reactive, so the client never sees hover/press there).
+ *
+ * Tunable per run for alignment iteration:
+ *   OOZE_FOREIGN_GEL_SIZE  light diameter        (default 26)
+ *   OOZE_FOREIGN_GEL_PITCH centre-to-centre step (default 37)
+ *   OOZE_FOREIGN_GEL_X     first light centre x  (default 22)
+ *   OOZE_FOREIGN_GEL_Y     light centre y        (default 22)
  */
-#define OOZE_FOREIGN_BAR_HEIGHT 46.0f
-#define OOZE_FOREIGN_LIGHT_HITBOX \
-  (AQUA_TRAFFIC_LIGHT_SIZE + AQUA_TRAFFIC_LIGHT_GAP)
+#define OOZE_FOREIGN_LIGHT_SIZE  26.0f
+#define OOZE_FOREIGN_LIGHT_PITCH 37.0f
+#define OOZE_FOREIGN_LIGHT_X     22.0f
+#define OOZE_FOREIGN_LIGHT_Y     22.0f
+
+static gfloat
+ooze_foreign_gel_metric (const char *env, gfloat fallback)
+{
+  const char *v = g_getenv (env);
+  char *end = NULL;
+  double parsed;
+
+  if (!v || !*v)
+    return fallback;
+
+  parsed = g_ascii_strtod (v, &end);
+  if (end == v || parsed <= 0.0 || parsed > 500.0)
+    return fallback;
+
+  return (gfloat) parsed;
+}
+
+static gfloat
+ooze_foreign_gel_size (void)
+{
+  return ooze_foreign_gel_metric ("OOZE_FOREIGN_GEL_SIZE",
+                                  OOZE_FOREIGN_LIGHT_SIZE);
+}
+
+static gfloat
+ooze_foreign_gel_pitch (void)
+{
+  return ooze_foreign_gel_metric ("OOZE_FOREIGN_GEL_PITCH",
+                                  OOZE_FOREIGN_LIGHT_PITCH);
+}
+
+static gfloat
+ooze_foreign_gel_first_x (void)
+{
+  return ooze_foreign_gel_metric ("OOZE_FOREIGN_GEL_X",
+                                  OOZE_FOREIGN_LIGHT_X);
+}
+
+static gfloat
+ooze_foreign_gel_centre_y (void)
+{
+  return ooze_foreign_gel_metric ("OOZE_FOREIGN_GEL_Y",
+                                  OOZE_FOREIGN_LIGHT_Y);
+}
 
 typedef enum
 {
@@ -72,18 +125,16 @@ ooze_foreign_gel_add_light (ClutterActor *parent,
 {
   ClutterActor *light = clutter_actor_new ();
   ClutterContent *content;
-  gfloat step = AQUA_TRAFFIC_LIGHT_SIZE + AQUA_TRAFFIC_LIGHT_GAP;
-  gfloat y = (OOZE_FOREIGN_BAR_HEIGHT - AQUA_TRAFFIC_LIGHT_SIZE) / 2.0f;
+  gfloat size = ooze_foreign_gel_size ();
+  gfloat cx = ooze_foreign_gel_first_x () + index * ooze_foreign_gel_pitch ();
+  gfloat cy = ooze_foreign_gel_centre_y ();
 
-  clutter_actor_set_size (light, AQUA_TRAFFIC_LIGHT_SIZE,
-                          AQUA_TRAFFIC_LIGHT_SIZE);
-  clutter_actor_set_position (light,
-                              AQUA_TRAFFIC_LIGHT_MARGIN + index * step, y);
+  clutter_actor_set_size (light, size, size);
+  clutter_actor_set_position (light, cx - size / 2.0f, cy - size / 2.0f);
   clutter_actor_set_reactive (light, FALSE);
   clutter_actor_add_child (parent, light);
 
-  content = ooze_aqua_traffic_light_content (light, AQUA_TRAFFIC_LIGHT_SIZE,
-                                             r, g, b);
+  content = ooze_aqua_traffic_light_content (light, (int) size, r, g, b);
   if (content)
     clutter_actor_set_content (light, content);
   else
@@ -108,17 +159,17 @@ ooze_foreign_gel_build_lights (ClutterActor *parent)
 static OozeForeignHit
 ooze_foreign_gel_hit (gfloat x)
 {
-  gfloat step = AQUA_TRAFFIC_LIGHT_SIZE + AQUA_TRAFFIC_LIGHT_GAP;
-  gfloat local = x - AQUA_TRAFFIC_LIGHT_MARGIN;
+  gfloat pitch = ooze_foreign_gel_pitch ();
+  gfloat local = x - (ooze_foreign_gel_first_x () - pitch / 2.0f);
 
   if (local < 0.0f)
     return OOZE_FOREIGN_HIT_NONE;
 
-  if (local < step)
+  if (local < pitch)
     return OOZE_FOREIGN_HIT_CLOSE;
-  if (local < 2 * step)
+  if (local < 2 * pitch)
     return OOZE_FOREIGN_HIT_MINIMIZE;
-  if (local < 3 * step)
+  if (local < 3 * pitch)
     return OOZE_FOREIGN_HIT_ZOOM;
 
   return OOZE_FOREIGN_HIT_NONE;
@@ -278,15 +329,16 @@ ooze_foreign_gel_attach (OozeForeignGelState *state,
   if (!window_actor)
     return;
 
-  width = AQUA_TRAFFIC_LIGHT_MARGIN * 2 +
-          3 * AQUA_TRAFFIC_LIGHT_SIZE + 2 * AQUA_TRAFFIC_LIGHT_GAP;
+  /* Symmetric band around the three light centres. */
+  width = 2.0f * ooze_foreign_gel_first_x () + 2.0f * ooze_foreign_gel_pitch ();
 
   gel = g_new0 (OozeForeignGel, 1);
   gel->plugin = plugin;
   gel->window = window;
 
   gel->actor = clutter_actor_new ();
-  clutter_actor_set_size (gel->actor, width, OOZE_FOREIGN_BAR_HEIGHT);
+  clutter_actor_set_size (gel->actor, width,
+                          2.0f * ooze_foreign_gel_centre_y ());
   clutter_actor_set_reactive (gel->actor, TRUE);
 
   g_signal_connect (gel->actor, "button-press-event",
