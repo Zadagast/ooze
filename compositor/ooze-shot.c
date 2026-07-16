@@ -4,10 +4,12 @@
 #include "ooze-plugin-priv.h"
 
 #include <clutter/clutter.h>
+#include <cogl/cogl.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <meta/meta-backend.h>
 #include <meta/meta-context.h>
 #include <meta/display.h>
+#include <mtk/mtk-rectangle.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -106,8 +108,15 @@ ooze_shot_capture_area (OozeShot      *shot,
   g_autofree guchar *pixels = NULL;
   g_autoptr (GdkPixbuf) pixbuf = NULL;
   g_autofree char *filename = NULL;
+  MtkRectangle capture_rect;
   gint stage_width;
   gint stage_height;
+  gint pixel_width;
+  gint pixel_height;
+  gsize rowstride;
+  gsize pixel_bytes;
+  gfloat scale;
+  g_autoptr (GError) capture_error = NULL;
 
   g_return_val_if_fail (path != NULL, FALSE);
   *path = NULL;
@@ -130,11 +139,49 @@ ooze_shot_capture_area (OozeShot      *shot,
       return FALSE;
     }
 
-  pixels = clutter_stage_read_pixels (stage, x, y, width, height);
-  if (!pixels)
+  capture_rect = MTK_RECTANGLE_INIT (x, y, width, height);
+  if (!clutter_stage_get_capture_final_size (stage,
+                                             &capture_rect,
+                                             &pixel_width,
+                                             &pixel_height,
+                                             &scale) ||
+      pixel_width <= 0 || pixel_height <= 0 || scale <= 0.0f)
     {
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Could not read pixels from the Ooze stage");
+                   "Could not determine the Ooze capture size");
+      return FALSE;
+    }
+
+  rowstride = (gsize) pixel_width * 4;
+  if (pixel_width > 0 && rowstride / 4 != (gsize) pixel_width)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Ooze capture dimensions are too large");
+      return FALSE;
+    }
+  if (rowstride > G_MAXINT ||
+      (pixel_height > 0 && rowstride > G_MAXSIZE / (gsize) pixel_height))
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Ooze capture buffer is too large");
+      return FALSE;
+    }
+  pixel_bytes = rowstride * (gsize) pixel_height;
+
+  pixels = g_malloc0 (pixel_bytes);
+  if (!clutter_stage_paint_to_buffer (stage,
+                                       &capture_rect,
+                                       scale,
+                                       pixels,
+                                       (int) rowstride,
+                                       COGL_PIXEL_FORMAT_RGBA_8888,
+                                       NULL,
+                                       CLUTTER_PAINT_FLAG_NONE,
+                                       &capture_error))
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Could not capture the Ooze stage: %s",
+                   capture_error ? capture_error->message : "unknown error");
       return FALSE;
     }
 
@@ -142,9 +189,9 @@ ooze_shot_capture_area (OozeShot      *shot,
                                      GDK_COLORSPACE_RGB,
                                      TRUE,
                                      8,
-                                     width,
-                                     height,
-                                     width * 4,
+                                     pixel_width,
+                                     pixel_height,
+                                     (int) rowstride,
                                      ooze_shot_free_pixels,
                                      NULL);
   if (!pixbuf)
