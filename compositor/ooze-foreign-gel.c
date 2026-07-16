@@ -1,6 +1,7 @@
 #include "ooze-foreign-gel.h"
 
 #include "ooze-aqua-draw.h"
+#include "ooze-theme.h"
 
 #include "../common/aqua-chrome.h"
 
@@ -15,20 +16,24 @@
 /*
  * Foreign title-bar geometry, measured against libadwaita's default
  * AdwHeaderBar: 24px window-control buttons on a 37px pitch, first button
- * centred 22px from the frame's top-left corner. The lights are drawn
- * slightly larger than the client's own buttons so they fully cover them
- * (the overlay is reactive, so the client never sees hover/press there).
+ * centred 22px from the frame's top-left corner. A header-coloured pill is
+ * painted over the client's own buttons (the overlay is reactive, so the
+ * client never sees hover/press there), then the lights are drawn on top at
+ * the same size as first-party Ooze Gel controls.
  *
  * Tunable per run for alignment iteration:
- *   OOZE_FOREIGN_GEL_SIZE  light diameter        (default 26)
+ *   OOZE_FOREIGN_GEL_SIZE  light diameter        (default 14, Ooze size)
  *   OOZE_FOREIGN_GEL_PITCH centre-to-centre step (default 37)
  *   OOZE_FOREIGN_GEL_X     first light centre x  (default 22)
  *   OOZE_FOREIGN_GEL_Y     light centre y        (default 22)
  */
-#define OOZE_FOREIGN_LIGHT_SIZE  26.0f
+#define OOZE_FOREIGN_LIGHT_SIZE  ((gfloat) AQUA_TRAFFIC_LIGHT_SIZE)
 #define OOZE_FOREIGN_LIGHT_PITCH 37.0f
 #define OOZE_FOREIGN_LIGHT_X     22.0f
 #define OOZE_FOREIGN_LIGHT_Y     22.0f
+
+/* The covered client button diameter (24px) plus a little bleed. */
+#define OOZE_FOREIGN_COVER_EXTENT 16.0f
 
 static gfloat
 ooze_foreign_gel_metric (const char *env, gfloat fallback)
@@ -91,6 +96,7 @@ typedef struct
   gulong        position_id;
   gulong        size_id;
   gulong        unmanaged_id;
+  gboolean      theme_watched;
 } OozeForeignGel;
 
 struct _OozeForeignGelState
@@ -115,6 +121,68 @@ ooze_foreign_gel_enabled (void)
 }
 
 /* ── Drawing ─────────────────────────────────────────────────────────────── */
+
+static ClutterContent *
+ooze_foreign_gel_pill_content (ClutterActor *ref_actor,
+                               int           width,
+                               int           height)
+{
+  cairo_surface_t *surface;
+  cairo_t *cr;
+  ClutterContent *content;
+  gboolean dark = ooze_theme_is_dark (NULL);
+  double radius = height / 2.0;
+
+  surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
+  cr = cairo_create (surface);
+
+  /* Rounded pill matching the Adwaita header-bar background so it reads as
+   * part of the client's own title bar. */
+  cairo_new_path (cr);
+  cairo_arc (cr, radius, radius, radius, G_PI / 2.0, 3.0 * G_PI / 2.0);
+  cairo_arc (cr, width - radius, radius, radius,
+             3.0 * G_PI / 2.0, G_PI / 2.0);
+  cairo_close_path (cr);
+
+  if (dark)
+    cairo_set_source_rgb (cr, 0.157, 0.157, 0.173);
+  else
+    cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
+  cairo_fill (cr);
+
+  cairo_destroy (cr);
+  content = ooze_aqua_content_from_surface (ref_actor, surface);
+  cairo_surface_destroy (surface);
+
+  return content;
+}
+
+static void
+ooze_foreign_gel_add_pill (ClutterActor *parent)
+{
+  ClutterActor *pill = clutter_actor_new ();
+  ClutterContent *content;
+  gfloat cy = ooze_foreign_gel_centre_y ();
+  gfloat x0 = ooze_foreign_gel_first_x () - OOZE_FOREIGN_COVER_EXTENT;
+  gfloat x1 = ooze_foreign_gel_first_x () + 2.0f * ooze_foreign_gel_pitch () +
+              OOZE_FOREIGN_COVER_EXTENT;
+  gfloat height = 2.0f * OOZE_FOREIGN_COVER_EXTENT;
+
+  if (x0 < 0.0f)
+    x0 = 0.0f;
+
+  clutter_actor_set_size (pill, x1 - x0, height);
+  clutter_actor_set_position (pill, x0, cy - height / 2.0f);
+  clutter_actor_set_reactive (pill, FALSE);
+  clutter_actor_add_child (parent, pill);
+
+  content = ooze_foreign_gel_pill_content (pill, (int) (x1 - x0),
+                                           (int) height);
+  if (content)
+    clutter_actor_set_content (pill, content);
+  else
+    g_warning ("Ooze: foreign Gel pill has no content (no Cogl context)");
+}
 
 static void
 ooze_foreign_gel_add_light (ClutterActor *parent,
@@ -145,6 +213,8 @@ ooze_foreign_gel_add_light (ClutterActor *parent,
 static void
 ooze_foreign_gel_build_lights (ClutterActor *parent)
 {
+  ooze_foreign_gel_add_pill (parent);
+
   ooze_foreign_gel_add_light (parent, 0,
                               AQUA_TRAFFIC_CLOSE_R, AQUA_TRAFFIC_CLOSE_G,
                               AQUA_TRAFFIC_CLOSE_B);
@@ -279,6 +349,17 @@ ooze_foreign_gel_should_attach (MetaWindow *window)
 
 static void ooze_foreign_gel_remove (OozeForeignGelState *state,
                                      MetaWindow          *window);
+static void ooze_foreign_gel_build_lights (ClutterActor *parent);
+
+static void
+ooze_foreign_gel_on_theme_changed (gpointer user_data)
+{
+  OozeForeignGel *gel = user_data;
+
+  /* The pill colour follows the header background; rebuild on toggle. */
+  clutter_actor_destroy_all_children (gel->actor);
+  ooze_foreign_gel_build_lights (gel->actor);
+}
 
 static void
 ooze_foreign_gel_on_unmanaged (MetaWindow *window,
@@ -294,6 +375,9 @@ ooze_foreign_gel_free (gpointer data)
 {
   OozeForeignGel *gel = data;
 
+  if (gel->theme_watched)
+    ooze_theme_unwatch (ooze_theme_get_default (),
+                        ooze_foreign_gel_on_theme_changed, gel);
   g_clear_signal_handler (&gel->position_id, gel->window);
   g_clear_signal_handler (&gel->size_id, gel->window);
   g_clear_signal_handler (&gel->unmanaged_id, gel->window);
@@ -352,6 +436,10 @@ ooze_foreign_gel_attach (OozeForeignGelState *state,
    * resolves its CoglContext by walking the actor's parent chain, so content
    * created on an unparented actor comes back NULL (invisible lights). */
   ooze_foreign_gel_build_lights (gel->actor);
+
+  ooze_theme_watch (ooze_theme_get_default (),
+                    ooze_foreign_gel_on_theme_changed, gel);
+  gel->theme_watched = TRUE;
 
   gel->position_id =
     g_signal_connect (window, "position-changed",
