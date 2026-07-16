@@ -27,6 +27,7 @@ BINARIES=(
   spot
   ooze-command
   ooze-king
+  ooze-launch
   ooze-ear
   ooze-pak
   ooze-themes

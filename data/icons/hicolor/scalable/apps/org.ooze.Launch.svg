@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="body" x1="64" y1="10" x2="64" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fdfdfe"/>
+      <stop offset="1" stop-color="#c9d2dc"/>
+    </linearGradient>
+    <linearGradient id="nose" x1="64" y1="10" x2="64" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4fc3f7"/>
+      <stop offset="1" stop-color="#1f8fd6"/>
+    </linearGradient>
+    <linearGradient id="flame" x1="64" y1="96" x2="64" y2="124" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffd54f"/>
+      <stop offset="1" stop-color="#ff7043"/>
+    </linearGradient>
+    <radialGradient id="port" cx="64" cy="52" r="13" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#bfe9ff"/>
+      <stop offset="1" stop-color="#2b6ea8"/>
+    </radialGradient>
+  </defs>
+  <!-- flame -->
+  <path d="M64 92c7 6 11 14 11 21 0 5-4 9-11 9s-11-4-11-9c0-7 4-15 11-21z" fill="url(#flame)"/>
+  <!-- left fin -->
+  <path d="M46 74c-11 4-19 13-21 27 12-2 21-6 27-13z" fill="#1f8fd6"/>
+  <!-- right fin -->
+  <path d="M82 74c11 4 19 13 21 27-12-2-21-6-27-13z" fill="#1f8fd6"/>
+  <!-- body -->
+  <path d="M64 10c15 14 24 33 24 56 0 14-3 27-8 38H48c-5-11-8-24-8-38 0-23 9-42 24-56z" fill="url(#body)"/>
+  <!-- nose accent -->
+  <path d="M64 10c9 8 16 19 20 32H44c4-13 11-24 20-32z" fill="url(#nose)"/>
+  <!-- window -->
+  <circle cx="64" cy="52" r="13" fill="url(#port)"/>
+  <circle cx="64" cy="52" r="13" fill="none" stroke="#ffffff" stroke-width="3"/>
+  <circle cx="59" cy="47" r="4" fill="#ffffff" opacity="0.7"/>
+</svg>
