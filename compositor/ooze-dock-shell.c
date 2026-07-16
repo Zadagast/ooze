@@ -153,6 +153,7 @@ static void ooze_dock_launch_binary (MetaContext *context, const char *binary);
 static void ooze_dock_launch_eye (MetaContext *context);
 static void ooze_dock_launch_torrent (MetaContext *context);
 static void ooze_dock_launch_monitor (MetaContext *context);
+static void ooze_dock_activate_only (MetaContext *context);
 static ClutterActor *ooze_dock_create_app_launcher (ClutterActor *stage,
                                                     MetaDisplay  *display,
                                                     const OozeDockAppSpec *spec,
@@ -173,7 +174,16 @@ static void ooze_dock_fill_icons (ClutterActor *container,
 static char *ooze_dock_desktop_id_key (GDesktopAppInfo *app_info);
 static GDesktopAppInfo *ooze_dock_lookup_desktop_info (const char *app_id);
 static char *ooze_dock_resolve_app_id_from_window (MetaWindow *window);
+static char *ooze_dock_fallback_id_from_window (MetaWindow *window);
 static gboolean ooze_dock_window_skippable_for_temp (MetaWindow *window);
+static gboolean ooze_dock_container_has_window_item (ClutterActor *container,
+                                                     MetaWindow    *window,
+                                                     const char    *app_id);
+static ClutterActor *ooze_dock_create_synthetic_launcher (
+  ClutterActor *stage,
+  MetaDisplay  *display,
+  MetaWindow   *window,
+  const char   *app_id);
 static void ooze_dock_launch_desktop_info (GDesktopAppInfo *app_info);
 static void ooze_dock_handle_desktop_click (MetaDisplay     *display,
                                             GDesktopAppInfo *app_info);
@@ -554,6 +564,11 @@ ooze_dock_launch_monitor (MetaContext *context)
   ooze_dock_launch_binary (context, "ooze-monitor");
 }
 
+static void
+ooze_dock_activate_only (MetaContext *context G_GNUC_UNUSED)
+{
+}
+
 static const OozeDockAppSpec ooze_dock_app_catalog[] = {
   { "org.ooze.Spot",    "spot",          spot_dock_icon_names,     0.22f, 0.48f, 0.92f },
   { "org.ooze.Command", "ooze-command",  command_dock_icon_names,  0.10f, 0.18f, 0.35f },
@@ -725,6 +740,26 @@ ooze_dock_resolve_app_id_from_window (MetaWindow *window)
 
   wm_instance = meta_window_get_wm_class_instance (window);
   return ooze_dock_try_desktop_key (wm_instance);
+}
+
+static char *
+ooze_dock_fallback_id_from_window (MetaWindow *window)
+{
+  const char *wm_class;
+  const char *wm_instance;
+
+  if (ooze_dock_window_skippable_for_temp (window))
+    return NULL;
+
+  wm_class = meta_window_get_wm_class (window);
+  if (wm_class && *wm_class)
+    return g_strdup (wm_class);
+
+  wm_instance = meta_window_get_wm_class_instance (window);
+  if (wm_instance && *wm_instance)
+    return g_strdup (wm_instance);
+
+  return NULL;
 }
 
 static void
@@ -917,6 +952,70 @@ ooze_dock_create_desktop_launcher (ClutterActor    *stage,
   /* wire stored a non-owned pointer; replace with owned copy. */
   g_object_set_data_full (G_OBJECT (button), "app-id",
                           g_steal_pointer (&app_id), g_free);
+  return button;
+}
+
+static ClutterActor *
+ooze_dock_create_synthetic_launcher (ClutterActor *stage,
+                                     MetaDisplay  *display,
+                                     MetaWindow   *window,
+                                     const char   *app_id)
+{
+  const char *wm_class;
+  const char *wm_instance;
+  const char *title;
+  const char *icon_names[4] = { NULL, NULL, NULL, NULL };
+  g_autofree char *class_icon = NULL;
+  g_autofree char *instance_icon = NULL;
+  g_autofree char *label = NULL;
+  g_autoptr (ClutterContent) content = NULL;
+  ClutterActor *button;
+  int logical = 48;
+  int texture;
+  int n_names = 0;
+
+  if (!stage || !display || !window || !app_id)
+    return NULL;
+
+  wm_class = meta_window_get_wm_class (window);
+  wm_instance = meta_window_get_wm_class_instance (window);
+  title = meta_window_get_title (window);
+  texture = ooze_aqua_icon_texture_size (display, logical);
+
+  if (wm_class && *wm_class)
+    class_icon = g_utf8_strdown (wm_class, -1);
+  if (wm_instance && *wm_instance)
+    instance_icon = g_utf8_strdown (wm_instance, -1);
+  if (class_icon && *class_icon)
+    icon_names[n_names++] = class_icon;
+  if (instance_icon && *instance_icon && n_names < 3)
+    icon_names[n_names++] = instance_icon;
+  icon_names[n_names++] = "application-x-executable";
+  icon_names[n_names] = NULL;
+
+  button = clutter_actor_new ();
+  clutter_actor_set_size (button, (gfloat) logical, (gfloat) logical);
+  clutter_actor_set_reactive (button, TRUE);
+
+  content = ooze_dock_themed_icon_content (stage, display, icon_names, logical);
+  if (!content)
+    content = ooze_aqua_dock_icon_content (stage, texture, 0.40f, 0.45f, 0.55f);
+  if (content)
+    ooze_aqua_actor_set_scaled_content (button,
+                                        g_steal_pointer (&content),
+                                        logical, logical,
+                                        texture, texture);
+
+  label = g_strdup ((title && *title) ? title :
+                    ((wm_class && *wm_class) ? wm_class : app_id));
+  clutter_actor_set_name (button, label);
+  clutter_actor_set_accessible_name (button, label);
+  g_object_set_data_full (G_OBJECT (button), "dock-label",
+                          g_steal_pointer (&label), g_free);
+  ooze_dock_wire_app_launcher (button, display, app_id,
+                               ooze_dock_activate_only);
+  g_object_set_data_full (G_OBJECT (button), "app-id",
+                          g_strdup (app_id), g_free);
   return button;
 }
 
@@ -1259,10 +1358,12 @@ ooze_dock_refresh_running_state (MetaDisplay  *display,
 
             app_id = ooze_dock_resolve_app_id_from_window (l->data);
             if (!app_id)
+              app_id = ooze_dock_fallback_id_from_window (l->data);
+            if (!app_id)
               continue;
             if (ooze_dock_find_spec (app_id))
               continue;
-            if (!ooze_dock_find_by_app_id (container, app_id))
+            if (!ooze_dock_container_has_window_item (container, l->data, app_id))
               {
                 need_rebuild = TRUE;
                 break;
@@ -1330,6 +1431,34 @@ ooze_dock_window_matches_app_id (MetaWindow *window,
   if ((wm_class && g_strcmp0 (wm_class, app_id) == 0) ||
       (wm_instance && g_strcmp0 (wm_instance, app_id) == 0))
     return TRUE;
+
+  return FALSE;
+}
+
+static gboolean
+ooze_dock_container_has_window_item (ClutterActor *container,
+                                     MetaWindow    *window,
+                                     const char    *app_id)
+{
+  ClutterActor *child;
+
+  for (child = clutter_actor_get_first_child (container);
+       child != NULL;
+       child = clutter_actor_get_next_sibling (child))
+    {
+      const char *launcher_id;
+      GDesktopAppInfo *info;
+
+      launcher_id = g_object_get_data (G_OBJECT (child), "app-id");
+      if (launcher_id &&
+          (g_strcmp0 (launcher_id, app_id) == 0 ||
+           ooze_dock_window_matches_app_id (window, launcher_id)))
+        return TRUE;
+
+      info = g_object_get_data (G_OBJECT (child), "app-info");
+      if (info && ooze_dock_window_matches_app (window, info))
+        return TRUE;
+    }
 
   return FALSE;
 }
@@ -1687,21 +1816,32 @@ ooze_dock_fill_icons (ClutterActor *container,
     {
       MetaWindow *window = l->data;
       g_autofree char *app_id = NULL;
+      g_autofree char *fallback_id = NULL;
       g_autoptr (GDesktopAppInfo) info = NULL;
       ClutterActor *launcher;
 
       app_id = ooze_dock_resolve_app_id_from_window (window);
-      if (!app_id)
-        continue;
-      if (ooze_dock_find_by_app_id (container, app_id))
-        continue;
-      if (ooze_dock_find_spec (app_id))
-        continue; /* catalog miss above means not running / already handled */
+      if (app_id)
+        {
+          if (ooze_dock_find_by_app_id (container, app_id))
+            continue;
+          if (ooze_dock_find_spec (app_id))
+            continue; /* catalog miss above means not running / already handled */
 
-      info = ooze_dock_lookup_desktop_info (app_id);
-      if (!info)
-        continue;
-      launcher = ooze_dock_create_desktop_launcher (stage, display, info);
+          info = ooze_dock_lookup_desktop_info (app_id);
+          if (!info)
+            continue;
+          launcher = ooze_dock_create_desktop_launcher (stage, display, info);
+        }
+      else
+        {
+          fallback_id = ooze_dock_fallback_id_from_window (window);
+          if (!fallback_id ||
+              ooze_dock_container_has_window_item (container, window, fallback_id))
+            continue;
+          launcher = ooze_dock_create_synthetic_launcher (stage, display,
+                                                           window, fallback_id);
+        }
       if (!launcher)
         continue;
       g_object_set_data (G_OBJECT (launcher), "dock-pinned", GINT_TO_POINTER (0));
