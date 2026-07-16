@@ -6,6 +6,7 @@
 #include "ooze-aqua-draw.h"
 #include "ooze-aqua-menu.h"
 #include "ooze-global-menu.h"
+#include "ooze-appmenu-wayland.h"
 #include "ooze-desktop-icons.h"
 #include "ooze-dock-shell.h"
 #include "ooze-magic-lamp.h"
@@ -66,6 +67,16 @@ G_DEFINE_TYPE (OozePlugin, ooze_plugin, META_TYPE_PLUGIN)
 
 static void ooze_plugin_on_monitors_changed (MetaMonitorManager *monitor_manager,
                                            OozePlugin           *plugin);
+
+/* A Wayland client (un)announced its dbusmenu address — rebind focus. */
+static void
+ooze_plugin_on_wl_appmenu_changed (gpointer user_data)
+{
+  OozePlugin *plugin = user_data;
+
+  if (plugin->global_menu)
+    ooze_global_menu_sync_focus (plugin->global_menu);
+}
 
 static MetaWindow *
 ooze_plugin_get_focus_window (OozePlugin *plugin)
@@ -1096,6 +1107,21 @@ ooze_plugin_init_ui (OozePlugin *plugin)
                                            plugin);
       ooze_panel_schedule_rebuild (plugin);
     }
+
+  if (!plugin->wl_appmenu)
+    {
+      plugin->wl_appmenu = ooze_appmenu_wayland_new (
+        meta_plugin_get_display (META_PLUGIN (plugin)));
+      if (plugin->wl_appmenu)
+        {
+          ooze_global_menu_set_wayland_appmenu (plugin->global_menu,
+                                                plugin->wl_appmenu);
+          ooze_appmenu_wayland_set_changed_callback (
+            plugin->wl_appmenu,
+            ooze_plugin_on_wl_appmenu_changed,
+            plugin);
+        }
+    }
 }
 
 /* ── Magic lamp (minimize / unminimize) ──────────────────────────────────── */
@@ -1792,6 +1818,9 @@ ooze_plugin_begin_shutdown (OozePlugin *plugin)
     }
 
   g_clear_pointer (&plugin->menu_popup, ooze_aqua_menu_destroy);
+  ooze_global_menu_set_wayland_appmenu (plugin->global_menu, NULL);
+  ooze_appmenu_wayland_free (plugin->wl_appmenu);
+  plugin->wl_appmenu = NULL;
   ooze_global_menu_free (plugin->global_menu);
   plugin->global_menu = NULL;
 

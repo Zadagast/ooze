@@ -25,12 +25,11 @@ ooze_export_foreign_gtk_theme () {
   unset GTK_THEME
 }
 
-# Foreign X11 AppMenu is OFF by default (compositor freezes on sync dbusmenu).
-# Opt in only for debugging: OOZE_FOREIGN_GLOBAL_MENU=1
+# Foreign AppMenu is ON by default (dbusmenu path is fully async now).
+# Opt out with OOZE_FOREIGN_GLOBAL_MENU=0
 ooze_export_appmenu_modules () {
-  case "${OOZE_FOREIGN_GLOBAL_MENU:-}" in
-    1|true|TRUE|yes|YES|on|ON) ;;
-    *)
+  case "${OOZE_FOREIGN_GLOBAL_MENU:-1}" in
+    0|false|FALSE|no|NO|off|OFF)
       local _modules="${GTK_MODULES:-}"
       local _module
       local -a _kept=()

@@ -39,6 +39,22 @@ gtk4_dep = dependency('gtk4', required: false)
 adw_dep = dependency('libadwaita-1', required: false)
 cairo_dep = dependency('cairo')
 
+wayland_server_dep = dependency('wayland-server')
+wayland_scanner = find_program('wayland-scanner')
+
+# org_kde_kwin_appmenu (vendored from plasma-wayland-protocols).
+appmenu_protocol_xml = files('protocols/appmenu.xml')
+appmenu_server_header = custom_target('appmenu-server-header',
+  input: appmenu_protocol_xml,
+  output: 'appmenu-server-protocol.h',
+  command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
+)
+appmenu_protocol_code = custom_target('appmenu-protocol-code',
+  input: appmenu_protocol_xml,
+  output: 'appmenu-protocol.c',
+  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
+)
+
 inc_common      = include_directories('common')
 inc_ooze_ui     = include_directories('ooze-ui')
 inc_ooze_kit    = include_directories('ooze-kit')
@@ -91,6 +107,9 @@ executable('ooze',
   'compositor/ooze-desktop-icons.c',
   'compositor/ooze-aqua-menu.c',
   'compositor/ooze-global-menu.c',
+  'compositor/ooze-appmenu-wayland.c',
+  appmenu_server_header,
+  appmenu_protocol_code,
   'compositor/ooze-dbusmenu.c',
   'compositor/ooze-theme.c',
   'compositor/ooze-window.c',
@@ -126,6 +145,7 @@ executable('ooze',
     dependency('x11'),
     dependency('polkit-agent-1'),
     dependency('polkit-gobject-1'),
+    wayland_server_dep,
     cc.find_library('m', required: true),
   ],
   build_rpath: mutter_typelibdir,

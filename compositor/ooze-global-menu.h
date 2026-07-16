@@ -12,12 +12,17 @@ G_BEGIN_DECLS
 #define OOZE_MENU_APP_ACTION_BASE 5000
 
 typedef struct _OozeGlobalMenu OozeGlobalMenu;
+typedef struct _OozeAppmenuWayland OozeAppmenuWayland;
 
 typedef void (*OozeGlobalMenuChangedFunc) (gpointer user_data);
 
 OozeGlobalMenu *ooze_global_menu_new (MetaDisplay *display);
 
 void ooze_global_menu_free (OozeGlobalMenu *menu);
+
+/* Wayland org_kde_kwin_appmenu registry (non-owning; plugin owns). */
+void ooze_global_menu_set_wayland_appmenu (OozeGlobalMenu     *menu,
+                                           OozeAppmenuWayland *wl_appmenu);
 
 void ooze_global_menu_set_changed_callback (OozeGlobalMenu           *menu,
                                           OozeGlobalMenuChangedFunc callback,

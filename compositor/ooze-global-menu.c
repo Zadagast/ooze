@@ -1,4 +1,5 @@
 #include "ooze-global-menu.h"
+#include "ooze-appmenu-wayland.h"
 #include "ooze-shared-appmenu.h"
 #include "ooze-dbusmenu.h"
 #include "ooze-stall.h"
@@ -25,6 +26,7 @@ typedef struct
 struct _OozeGlobalMenu
 {
   MetaDisplay *display;
+  OozeAppmenuWayland *wl_appmenu; /* non-owning; plugin owns */
   MetaWindow  *bound_window; /* non-owning; cleared on rebind */
   MetaWindow  *watched_window; /* non-owning; GTK shell prop watch */
 
@@ -1038,6 +1040,23 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
 
   is_x11 = meta_window_get_client_type (window) == META_WINDOW_CLIENT_TYPE_X11;
 
+  /* Wayland org_kde_kwin_appmenu announcement (Qt/appmenu-gtk-module). */
+  if (!is_x11 && menu->wl_appmenu && menu->session)
+    {
+      const char *service = NULL;
+      const char *path = NULL;
+
+      if (ooze_appmenu_wayland_lookup (menu->wl_appmenu, window,
+                                       &service, &path))
+        {
+          ooze_global_menu_cancel_registrar_retry (menu);
+          ooze_global_menu_set_x11_launch_hint (menu, NULL);
+          ooze_global_menu_bind_window_with_registrar (menu, window,
+                                                       service, path);
+          return;
+        }
+    }
+
   /* Native Wayland classic GtkMenuBar (Inkscape): cannot use appmenu registrar. */
   if (ooze_global_menu_is_wayland_classic_menubar_app (window))
     {
@@ -1405,6 +1424,15 @@ ooze_global_menu_free (OozeGlobalMenu *menu)
   g_clear_pointer (&menu->x11_launch_hint, g_free);
   g_clear_object (&menu->session);
   g_free (menu);
+}
+
+void
+ooze_global_menu_set_wayland_appmenu (OozeGlobalMenu     *menu,
+                                      OozeAppmenuWayland *wl_appmenu)
+{
+  if (!menu)
+    return;
+  menu->wl_appmenu = wl_appmenu;
 }
 
 void

@@ -44,19 +44,19 @@ mkdir -p "$XDG_CONFIG_HOME"
 # shellcheck source=/dev/null
 source "$ROOT/packaging/deb/ooze-session-env.sh"
 ooze_export_foreign_gtk_theme
-# Foreign AppMenu/X11 modules are off unless OOZE_FOREIGN_GLOBAL_MENU=1
+# Foreign AppMenu modules are on by default; opt out with OOZE_FOREIGN_GLOBAL_MENU=0
 ooze_export_appmenu_modules
 
 # Nest compositor serves XSETTINGS (theme + ShellShowsMenubar when foreign menus on).
 
-if [[ "${OOZE_FOREIGN_GLOBAL_MENU:-}" == "1" ]] || \
-   [[ "${OOZE_FOREIGN_GLOBAL_MENU:-}" == "true" ]]; then
+case "${OOZE_FOREIGN_GLOBAL_MENU:-1}" in 0|false|FALSE|no|NO|off|OFF) ;; *)
   if ! [[ -f /usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libappmenu-gtk-module.so ]] && \
      ! [[ -f /usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libappmenu-gtk3-module.so ]]; then
     echo "NOTE: appmenu-gtk-module not installed. For Inkscape/GTK3 global menus run:"
     echo "  ./scripts/install-appmenu.sh"
   fi
-fi
+  ;;
+esac
 
 # Edge snap must be on before Mutter binds prefs (schema default is false).
 gsettings set org.gnome.mutter edge-tiling true 2>/dev/null || true
