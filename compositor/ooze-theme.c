@@ -235,6 +235,21 @@ ooze_theme_new (void)
                       "changed::icon-theme",
                       G_CALLBACK (ooze_theme_on_icon_theme_changed),
                       theme);
+  /* These only feed the XSETTINGS blob; the singleton settings object lives
+   * for the session, so the handlers need no explicit disconnect. */
+  {
+    static const char *xsettings_keys[] = {
+      "changed::cursor-theme",
+      "changed::cursor-size",
+      "changed::font-name",
+      "changed::text-scaling-factor",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS (xsettings_keys); i++)
+      g_signal_connect (theme->settings,
+                        xsettings_keys[i],
+                        G_CALLBACK (ooze_theme_on_icon_theme_changed),
+                        theme);
+  }
   {
     g_autofree char *pref_path = ooze_foreign_gtk_pref_path ();
     g_autoptr (GFile) pref_file = g_file_new_for_path (pref_path);

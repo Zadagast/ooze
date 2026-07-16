@@ -16,9 +16,24 @@ log() {
   [[ "$quiet" == 1 ]] || echo "$@"
 }
 
+# Upstream elementary dropped many freedesktop names/symlinks; inherit the
+# maintained elementary-xfce set (deb Recommends) so lookups fall through to
+# it instead of hicolor/symbolic.
+ensure_inherits() {
+  local index="$DEST/index.theme"
+
+  [[ -f "$index" ]] || return 0
+  if grep -q '^Inherits=' "$index"; then
+    sed -i 's/^Inherits=.*/Inherits=elementary-xfce,hicolor/' "$index"
+  else
+    sed -i '/^\[Icon Theme\]/a Inherits=elementary-xfce,hicolor' "$index"
+  fi
+}
+
 ensure_icons() {
   if [[ -f "$DEST/index.theme" && ! -L "$DEST" ]]; then
     log "elementary icons already present at $DEST"
+    ensure_inherits
     return
   fi
 
@@ -37,6 +52,7 @@ ensure_icons() {
       echo "error: archive did not produce $DEST/index.theme" >&2
       exit 1
     fi
+    ensure_inherits
     log "Installed elementary icons to $DEST"
     return
   fi
@@ -52,6 +68,7 @@ ensure_icons() {
     meson setup "$BUILD" "$CACHE" --prefix="$ROOT/data" --datadir="$ROOT/data" -Dscale_factors=1,2
     ninja -C "$BUILD"
     ninja -C "$BUILD" install
+    ensure_inherits
     log "Installed elementary icons to $DEST"
     return
   fi
@@ -65,6 +82,7 @@ ensure_icons() {
   dpkg-deb -x "$DEB" extracted
   rm -rf "$DEST"
   cp -a extracted/usr/share/icons/elementary "$DEST"
+  ensure_inherits
   log "Installed elementary icons to $DEST"
 }
 

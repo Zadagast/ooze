@@ -309,6 +309,55 @@ ooze_sni_pixbuf_tint_symbolic (GdkPixbuf *src)
   return work;
 }
 
+/* IconThemePath is a freedesktop theme root: the icon usually lives in a
+ * size/context subdirectory, so search the tree (bounded depth). */
+static GdkPixbuf *
+ooze_sni_load_from_theme_path (const char *dir,
+                               const char *icon_name,
+                               int         depth)
+{
+  static const char *exts[] = { "", ".png", ".svg", ".xpm" };
+  g_autoptr (GDir) gdir = NULL;
+  GdkPixbuf *pb = NULL;
+  const char *entry;
+
+  for (gsize i = 0; i < G_N_ELEMENTS (exts); i++)
+    {
+      g_autofree char *base = g_strconcat (icon_name, exts[i], NULL);
+      g_autofree char *file = g_build_filename (dir, base, NULL);
+
+      if (g_file_test (file, G_FILE_TEST_IS_REGULAR))
+        {
+          pb = gdk_pixbuf_new_from_file_at_size (file,
+                                                 OOZE_SNI_ICON_DISPLAY_PX,
+                                                 OOZE_SNI_ICON_DISPLAY_PX,
+                                                 NULL);
+          if (pb)
+            return pb;
+        }
+    }
+
+  if (depth <= 0)
+    return NULL;
+
+  gdir = g_dir_open (dir, 0, NULL);
+  if (!gdir)
+    return NULL;
+
+  while ((entry = g_dir_read_name (gdir)))
+    {
+      g_autofree char *sub = g_build_filename (dir, entry, NULL);
+
+      if (!g_file_test (sub, G_FILE_TEST_IS_DIR))
+        continue;
+      pb = ooze_sni_load_from_theme_path (sub, icon_name, depth - 1);
+      if (pb)
+        return pb;
+    }
+
+  return NULL;
+}
+
 static GdkPixbuf *
 ooze_sni_item_load_named_icon (OozeSniItem *item)
 {
@@ -318,22 +367,8 @@ ooze_sni_item_load_named_icon (OozeSniItem *item)
     return NULL;
 
   if (item->icon_theme_path && item->icon_theme_path[0])
-    {
-      g_autofree char *file =
-        g_build_filename (item->icon_theme_path, item->icon_name, NULL);
-      pb = gdk_pixbuf_new_from_file_at_size (file,
-                                             OOZE_SNI_ICON_DISPLAY_PX,
-                                             OOZE_SNI_ICON_DISPLAY_PX,
-                                             NULL);
-      if (!pb)
-        {
-          g_autofree char *png = g_strconcat (file, ".png", NULL);
-          pb = gdk_pixbuf_new_from_file_at_size (png,
-                                                 OOZE_SNI_ICON_DISPLAY_PX,
-                                                 OOZE_SNI_ICON_DISPLAY_PX,
-                                                 NULL);
-        }
-    }
+    pb = ooze_sni_load_from_theme_path (item->icon_theme_path,
+                                        item->icon_name, 4);
 
   if (!pb)
     pb = ooze_icon_lookup_load (item->icon_name, OOZE_SNI_ICON_DISPLAY_PX);

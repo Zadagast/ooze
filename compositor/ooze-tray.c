@@ -6,6 +6,7 @@
 #include "ooze-plugin-priv.h"
 #include "ooze-sni.h"
 #include "ooze-stall.h"
+#include "ooze-theme.h"
 
 #include <meta/display.h>
 #include <meta/meta-backend.h>
@@ -83,7 +84,16 @@ ooze_tray_update_icon_content (OozeTrayIcon *icon)
         }
     }
 
-  cogl_color_init_from_4f (&fallback, 0.55f, 0.58f, 0.62f, 0.90f);
+  /* No loadable icon: neutral placeholder in the panel text color. */
+  {
+    const OozeAquaPalette *palette = ooze_theme_get_palette (NULL);
+
+    cogl_color_init_from_4f (&fallback,
+                             (float) palette->menu_text_r,
+                             (float) palette->menu_text_g,
+                             (float) palette->menu_text_b,
+                             0.35f);
+  }
   clutter_actor_set_content (icon->actor, NULL);
   clutter_actor_set_background_color (icon->actor, &fallback);
 }
@@ -396,6 +406,8 @@ ooze_tray_appearance_idle (gpointer user_data)
         continue;
       /* Named icons re-resolve (symbolic tint tracks palette). Pixmap-only: leave. */
       ooze_sni_item_reresolve_icon (icon->item);
+      /* Placeholder actors repaint here — reresolve skips unloadable icons. */
+      ooze_tray_update_icon_content (icon);
     }
 
   return G_SOURCE_REMOVE;
