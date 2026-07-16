@@ -227,6 +227,13 @@ install_data('data/icons/Adwaita/symbolic/actions/view-column-symbolic.svg',
   install_dir: ooze_data_dir / 'icons/Adwaita/symbolic/actions',
 )
 
+install_data('data/icons/hicolor/scalable/apps/org.ooze.Launch.svg',
+  install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps',
+)
+install_data('data/icons/hicolor/scalable/apps/org.ooze.Launch.svg',
+  install_dir: ooze_data_dir / 'icons/hicolor/scalable/apps',
+)
+
 vte_dep = dependency('vte-2.91-gtk4', required: false)
 
 # ── OozeKit shared library ──────────────────────────────────────────────────
@@ -470,6 +477,28 @@ if gtk4_dep.found() and adw_dep.found()
   )
 
   install_data('data/org.ooze.King.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
+  executable('ooze-launch',
+    'ooze-launch/main.c',
+    'ooze-launch/ooze-launch-window.c',
+    ooze_shared_sources,
+    include_directories: ooze_app_inc,
+    dependencies: [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      gio_unix_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.Launch.desktop',
     install_dir: get_option('datadir') / 'applications',
   )
 

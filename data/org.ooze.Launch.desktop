@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Launch
+GenericName=Application Launcher
+Comment=Ooze Launch — find and open apps
+Exec=ooze-launch
+Icon=org.ooze.Launch
+Terminal=false
+Type=Application
+Categories=Utility;
+StartupWMClass=org.ooze.Launch

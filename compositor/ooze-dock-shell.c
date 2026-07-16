@@ -558,10 +558,22 @@ ooze_dock_launch_torrent (MetaContext *context)
   ooze_dock_launch_binary (context, "ooze-torrent");
 }
 
+static const char *launch_dock_icon_names[] = {
+  "org.ooze.Launch",
+  "application-x-executable",
+  NULL,
+};
+
 static void
 ooze_dock_launch_monitor (MetaContext *context)
 {
   ooze_dock_launch_binary (context, "ooze-monitor");
+}
+
+static void
+ooze_dock_launch_launch (MetaContext *context)
+{
+  ooze_dock_launch_binary (context, "ooze-launch");
 }
 
 static void
@@ -577,6 +589,7 @@ static const OozeDockAppSpec ooze_dock_app_catalog[] = {
   { "org.ooze.Ear",     "ooze-ear",      ear_dock_icon_names,      0.20f, 0.55f, 0.35f },
   { "org.ooze.Monitor", "ooze-monitor",  monitor_dock_icon_names,  0.30f, 0.45f, 0.70f },
   { "org.ooze.King",    "ooze-king",     king_dock_icon_names,     0.35f, 0.45f, 0.70f },
+  { "org.ooze.Launch",  "ooze-launch",   launch_dock_icon_names,   0.35f, 0.45f, 0.70f },
   { "org.ooze.Pak",     "ooze-pak",      pak_dock_icon_names,      0.25f, 0.55f, 0.85f },
   { "org.ooze.About",   "ooze-about",    about_dock_icon_names,    0.45f, 0.50f, 0.60f },
 };
@@ -611,6 +624,8 @@ ooze_dock_launch_fn_for_id (const char *app_id)
     return ooze_dock_launch_monitor;
   if (g_strcmp0 (app_id, "org.ooze.King") == 0)
     return ooze_dock_launch_king;
+  if (g_strcmp0 (app_id, "org.ooze.Launch") == 0)
+    return ooze_dock_launch_launch;
   if (g_strcmp0 (app_id, "org.ooze.Pak") == 0)
     return ooze_dock_launch_pak;
   if (g_strcmp0 (app_id, "org.ooze.About") == 0)
