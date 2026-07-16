@@ -13,6 +13,8 @@
 
 #include <clutter/clutter.h>
 
+#include <string.h>
+
 /*
  * Foreign title-bar geometry, measured against libadwaita's default
  * AdwHeaderBar: 24px window-control buttons on a 37px pitch, first button
@@ -332,6 +334,79 @@ ooze_foreign_gel_is_ooze_app (MetaWindow *window)
   return FALSE;
 }
 
+/* Apps that hard-code their own window buttons inside the client UI
+ * (Flutter/Electron custom chrome). Overlaying Gel on these just adds a
+ * second, mismatched set of controls. Matched case-insensitively against
+ * both the app-id and the WM_CLASS. */
+static const char *const ooze_foreign_gel_builtin_excludes[] = {
+  "rustdesk",
+  NULL
+};
+
+static GPtrArray *
+ooze_foreign_gel_get_excludes (void)
+{
+  static GPtrArray *excludes;
+
+  if (!excludes)
+    {
+      g_autofree char *path = NULL;
+      g_autofree char *data = NULL;
+      gsize i;
+
+      excludes = g_ptr_array_new_with_free_func (g_free);
+      for (i = 0; ooze_foreign_gel_builtin_excludes[i]; i++)
+        g_ptr_array_add (excludes,
+                         g_strdup (ooze_foreign_gel_builtin_excludes[i]));
+
+      /* User-extendable list: one app-id or WM_CLASS per line. */
+      path = g_build_filename (g_get_user_config_dir (), "ooze",
+                               "foreign-gel-exclude.conf", NULL);
+      if (g_file_get_contents (path, &data, NULL, NULL))
+        {
+          g_auto (GStrv) lines = g_strsplit (data, "\n", -1);
+
+          for (i = 0; lines[i]; i++)
+            {
+              char *line = g_strstrip (lines[i]);
+
+              if (*line == '\0' || *line == '#')
+                continue;
+              g_ptr_array_add (excludes, g_utf8_strdown (line, -1));
+            }
+        }
+    }
+
+  return excludes;
+}
+
+static gboolean
+ooze_foreign_gel_is_excluded (MetaWindow *window)
+{
+  const char *app_id = meta_window_get_gtk_application_id (window);
+  const char *wm_class = meta_window_get_wm_class (window);
+  g_autofree char *app_id_down = NULL;
+  g_autofree char *wm_class_down = NULL;
+  GPtrArray *excludes = ooze_foreign_gel_get_excludes ();
+  guint i;
+
+  if (app_id)
+    app_id_down = g_utf8_strdown (app_id, -1);
+  if (wm_class)
+    wm_class_down = g_utf8_strdown (wm_class, -1);
+
+  for (i = 0; i < excludes->len; i++)
+    {
+      const char *entry = excludes->pdata[i];
+
+      if ((app_id_down && strstr (app_id_down, entry)) ||
+          (wm_class_down && strstr (wm_class_down, entry)))
+        return TRUE;
+    }
+
+  return FALSE;
+}
+
 static gboolean
 ooze_foreign_gel_should_attach (MetaWindow *window)
 {
@@ -343,6 +418,9 @@ ooze_foreign_gel_should_attach (MetaWindow *window)
     return FALSE;
 
   if (ooze_foreign_gel_is_ooze_app (window))
+    return FALSE;
+
+  if (ooze_foreign_gel_is_excluded (window))
     return FALSE;
 
   return TRUE;
