@@ -17,6 +17,34 @@ struct OozeTrSession
   tr_session *session = nullptr;
 };
 
+struct SessionFreeAsyncContext
+{
+  OozeTrSession            *session;
+  OozeTrSessionFreeDoneFunc done;
+  gpointer                  user_data;
+};
+
+static gboolean
+session_free_async_complete (gpointer user_data)
+{
+  auto *context = static_cast<SessionFreeAsyncContext *> (user_data);
+
+  if (context->done)
+    context->done (context->user_data);
+  delete context;
+  return G_SOURCE_REMOVE;
+}
+
+static gpointer
+session_free_async_worker (gpointer user_data)
+{
+  auto *context = static_cast<SessionFreeAsyncContext *> (user_data);
+
+  ooze_tr_session_free (context->session);
+  g_idle_add (session_free_async_complete, context);
+  return nullptr;
+}
+
 static OozeTrState
 map_activity (tr_torrent_activity a)
 {
@@ -97,6 +125,26 @@ ooze_tr_session_free (OozeTrSession *self)
   if (self->session)
     tr_sessionClose (self->session);
   delete self;
+}
+
+extern "C" void
+ooze_tr_session_free_async (OozeTrSession             *self,
+                            OozeTrSessionFreeDoneFunc  done,
+                            gpointer                   user_data)
+{
+  if (!self)
+    {
+      if (done)
+        g_idle_add (session_free_async_complete,
+                    new SessionFreeAsyncContext { nullptr, done, user_data });
+      return;
+    }
+
+  auto *context = new SessionFreeAsyncContext { self, done, user_data };
+  GThread *thread = g_thread_new ("ooze-torrent-close",
+                                  session_free_async_worker,
+                                  context);
+  g_thread_unref (thread);
 }
 
 static int

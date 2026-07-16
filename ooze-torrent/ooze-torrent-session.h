@@ -6,6 +6,7 @@
 G_BEGIN_DECLS
 
 typedef struct OozeTrSession OozeTrSession;
+typedef void (*OozeTrSessionFreeDoneFunc) (gpointer user_data);
 
 typedef enum {
   OOZE_TR_STATE_STOPPED = 0,
@@ -29,6 +30,9 @@ typedef struct {
 
 OozeTrSession *ooze_tr_session_new  (GError **error);
 void           ooze_tr_session_free (OozeTrSession *self);
+void           ooze_tr_session_free_async (OozeTrSession             *self,
+                                           OozeTrSessionFreeDoneFunc   done,
+                                           gpointer                    user_data);
 
 /* Add from a .torrent path or magnet URI. Returns torrent id, or -1. */
 int  ooze_tr_session_add_file   (OozeTrSession *self,
