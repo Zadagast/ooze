@@ -1,6 +1,7 @@
 #include "ooze-launch-window.h"
 
 #include "ooze-button.h"
+#include "ooze-grid-menu.h"
 #include "ooze-icons.h"
 #include "ooze-scroll.h"
 #include "ooze-shared-appmenu.h"
@@ -49,6 +50,18 @@ static const char * const launch_generic_icons[] = {
   "application-x-executable",
   "application-x-generic",
   NULL,
+};
+
+static const char * const launch_add_icons[] = {
+  "list-add-symbolic", "list-add", NULL,
+};
+
+static const char * const launch_remove_icons[] = {
+  "list-remove-symbolic", "list-remove", NULL,
+};
+
+static const char * const launch_delete_icons[] = {
+  "edit-delete-symbolic", "edit-delete", "user-trash-symbolic", NULL,
 };
 
 static void launch_rebuild_groups_bar (OozeLaunchWindow *self);
@@ -527,15 +540,13 @@ typedef struct
 } LaunchAssignment;
 
 static void
-launch_assignment_free (gpointer data,
-                        GClosure *closure G_GNUC_UNUSED)
+launch_assignment_free (gpointer data)
 {
   g_free (data);
 }
 
 static void
-launch_assign_clicked (GtkButton *button G_GNUC_UNUSED,
-                       gpointer   user_data)
+launch_assign_clicked (gpointer user_data)
 {
   LaunchAssignment *assignment = user_data;
 
@@ -549,8 +560,7 @@ launch_assign_clicked (GtkButton *button G_GNUC_UNUSED,
 }
 
 static void
-launch_delete_group_clicked (GtkButton *button G_GNUC_UNUSED,
-                             gpointer   user_data)
+launch_delete_group_clicked (gpointer user_data)
 {
   OozeLaunchWindow *self = user_data;
   LaunchGroup *group = self->active_group;
@@ -571,36 +581,24 @@ launch_show_context_menu (OozeLaunchWindow *self,
                           double            x,
                           double            y)
 {
-  GtkWidget *box;
-  GtkWidget *label;
   GtkWidget *popover;
   GdkRectangle rectangle;
   gsize i;
+  gboolean have_items = FALSE;
 
   launch_close_context_popover (self);
-  popover = gtk_popover_new ();
+  popover = ooze_grid_menu_new ();
   self->context_popover = g_object_ref_sink (popover);
   gtk_widget_set_parent (popover, anchor);
-  gtk_popover_set_has_arrow (GTK_POPOVER (popover), TRUE);
   rectangle = (GdkRectangle) { (int) x, (int) y, 1, 1 };
   gtk_popover_set_pointing_to (GTK_POPOVER (popover), &rectangle);
-
-  box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-  gtk_widget_set_margin_start (box, 8);
-  gtk_widget_set_margin_end (box, 8);
-  gtk_widget_set_margin_top (box, 8);
-  gtk_widget_set_margin_bottom (box, 8);
-  gtk_popover_set_child (GTK_POPOVER (popover), box);
-  label = gtk_label_new (app->name);
-  gtk_widget_add_css_class (label, "heading");
-  gtk_box_append (GTK_BOX (box), label);
 
   for (i = 0; i < self->groups->len; i++)
     {
       LaunchGroup *group = g_ptr_array_index (self->groups, i);
-      GtkWidget *button;
       LaunchAssignment *assignment;
       g_autofree char *label = NULL;
+      OozeGridMenuItem item;
 
       if (!group->custom ||
           (group == self->active_group &&
@@ -610,44 +608,60 @@ launch_show_context_menu (OozeLaunchWindow *self,
         label = g_strdup ("Remove from group");
       else
         label = g_strdup_printf ("Add to %s", group->name);
-      button = gtk_button_new_with_label (label);
-      gtk_widget_add_css_class (button, "ooze-menu-item");
       assignment = g_new0 (LaunchAssignment, 1);
       assignment->window = self;
       assignment->app = app;
       assignment->group = group;
       assignment->remove = launch_group_contains (group, app->id);
-      g_signal_connect_data (button, "clicked",
-                             G_CALLBACK (launch_assign_clicked),
-                             assignment, launch_assignment_free, 0);
-      gtk_box_append (GTK_BOX (box), button);
+      item = (OozeGridMenuItem) {
+        .icon_names = assignment->remove ? launch_remove_icons : launch_add_icons,
+        .label = label,
+        .sensitive = TRUE,
+        .activate = launch_assign_clicked,
+        .user_data = assignment,
+        .user_data_destroy = launch_assignment_free,
+      };
+      ooze_grid_menu_append_item (popover, &item);
+      have_items = TRUE;
     }
 
   if (self->active_group && self->active_group->custom &&
       launch_group_contains (self->active_group, app->id))
     {
-      GtkWidget *button = gtk_button_new_with_label ("Remove from this group");
       LaunchAssignment *assignment = g_new0 (LaunchAssignment, 1);
+      OozeGridMenuItem item;
 
-      gtk_widget_add_css_class (button, "ooze-menu-item");
       assignment->window = self;
       assignment->app = app;
       assignment->group = self->active_group;
       assignment->remove = TRUE;
-      g_signal_connect_data (button, "clicked",
-                             G_CALLBACK (launch_assign_clicked),
-                             assignment, launch_assignment_free, 0);
-      gtk_box_append (GTK_BOX (box), button);
+      if (have_items)
+        ooze_grid_menu_append_separator (popover);
+      item = (OozeGridMenuItem) {
+        .icon_names = launch_remove_icons,
+        .label = "Remove from this group",
+        .sensitive = TRUE,
+        .activate = launch_assign_clicked,
+        .user_data = assignment,
+        .user_data_destroy = launch_assignment_free,
+      };
+      ooze_grid_menu_append_item (popover, &item);
+      have_items = TRUE;
     }
 
   if (self->active_group && self->active_group->custom)
     {
-      GtkWidget *button = gtk_button_new_with_label ("Delete group");
+      OozeGridMenuItem item = {
+        .icon_names = launch_delete_icons,
+        .label = "Delete group",
+        .sensitive = TRUE,
+        .activate = launch_delete_group_clicked,
+        .user_data = self,
+      };
 
-      gtk_widget_add_css_class (button, "ooze-destructive");
-      g_signal_connect (button, "clicked",
-                        G_CALLBACK (launch_delete_group_clicked), self);
-      gtk_box_append (GTK_BOX (box), button);
+      if (have_items)
+        ooze_grid_menu_append_separator (popover);
+      ooze_grid_menu_append_item (popover, &item);
     }
 
   gtk_popover_popup (GTK_POPOVER (popover));

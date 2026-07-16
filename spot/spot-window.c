@@ -6,6 +6,7 @@
 /* OozeKit — shared surface + button widgets */
 #include "ooze-surface.h"
 #include "ooze-button.h"
+#include "ooze-grid-menu.h"
 #include "ooze-icons.h"
 #include "ooze-theme.h"
 #include "ooze-toolbar.h"
@@ -24,6 +25,37 @@
 #define SPOT_GRID_CELL_WIDTH   84
 #define SPOT_TOOLBAR_ICON_SIZE OOZE_ICON_SIZE_TOOLBAR
 #define SPOT_SIDEBAR_ICON_SIZE OOZE_ICON_SIZE_SIDEBAR
+
+static const char * const spot_context_open_icons[] = {
+  "document-open-symbolic", "document-open", NULL,
+};
+static const char * const spot_context_cut_icons[] = {
+  "edit-cut-symbolic", "edit-cut", NULL,
+};
+static const char * const spot_context_copy_icons[] = {
+  "edit-copy-symbolic", "edit-copy", NULL,
+};
+static const char * const spot_context_paste_icons[] = {
+  "edit-paste-symbolic", "edit-paste", NULL,
+};
+static const char * const spot_context_trash_icons[] = {
+  "user-trash-symbolic", "user-trash", NULL,
+};
+static const char * const spot_context_folder_icons[] = {
+  "folder-new-symbolic", "folder-new", NULL,
+};
+static const char * const spot_context_refresh_icons[] = {
+  "view-refresh-symbolic", "view-refresh", NULL,
+};
+static const char * const spot_context_window_icons[] = {
+  "window-new-symbolic", "window-new", NULL,
+};
+static const char * const spot_context_grid_icons[] = {
+  "view-grid-symbolic", "view-grid", "view-app-grid-symbolic", NULL,
+};
+static const char * const spot_context_columns_icons[] = {
+  "view-column-symbolic", "view-column", "view-list-symbolic", NULL,
+};
 
 typedef enum {
   SPOT_VIEW_GRID    = 0,  /* default */
@@ -1540,43 +1572,53 @@ spot_update_action_states (SpotWindow *self)
                                  self->forward_stack != NULL);
 }
 
-static GMenuModel *
-spot_build_context_menu_model (gboolean on_item)
+typedef struct
 {
-  GMenu *menu = g_menu_new ();
-  GMenu *section;
+  SpotWindow *window;
+  const char *detailed_action;
+} SpotContextAction;
 
-  if (on_item)
-    {
-      section = g_menu_new ();
-      g_menu_append (section, "Open", "win.open");
-      g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
-      g_object_unref (section);
+static void
+spot_context_action_free (gpointer data)
+{
+  g_free (data);
+}
 
-      section = g_menu_new ();
-      g_menu_append (section, "Cut", "win.cut");
-      g_menu_append (section, "Copy", "win.copy");
-      g_menu_append (section, "Paste", "win.paste");
-      g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
-      g_object_unref (section);
+static void
+spot_context_action_activate (gpointer user_data)
+{
+  SpotContextAction *context_action = user_data;
 
-      section = g_menu_new ();
-      g_menu_append (section, "New Folder", "win.new-folder");
-      g_menu_append (section, "Move to Trash", "win.trash");
-      g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
-      g_object_unref (section);
-    }
-  else
-    {
-      section = g_menu_new ();
-      g_menu_append (section, "New Folder", "win.new-folder");
-      g_menu_append (section, "Paste", "win.paste");
-      g_menu_append (section, "Refresh", "win.refresh");
-      g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
-      g_object_unref (section);
-    }
+  gtk_widget_activate_action (GTK_WIDGET (context_action->window),
+                              context_action->detailed_action, NULL);
+}
 
-  return G_MENU_MODEL (menu);
+static void
+spot_context_append_action (GtkWidget                  *menu,
+                            SpotWindow                 *self,
+                            const char                 *label,
+                            const char                 *detailed_action,
+                            const char * const         *icon_names)
+{
+  SpotContextAction *context_action;
+  OozeGridMenuItem item;
+  const char *action = detailed_action;
+
+  context_action = g_new (SpotContextAction, 1);
+  context_action->window = self;
+  context_action->detailed_action = detailed_action;
+  if (g_str_has_prefix (action, "win."))
+    action += strlen ("win.");
+  item = (OozeGridMenuItem) {
+    .icon_names = icon_names,
+    .label = label,
+    .sensitive = g_action_group_get_action_enabled (
+      G_ACTION_GROUP (self), action),
+    .activate = spot_context_action_activate,
+    .user_data = context_action,
+    .user_data_destroy = spot_context_action_free,
+  };
+  ooze_grid_menu_append_item (menu, &item);
 }
 
 static void
@@ -1586,14 +1628,11 @@ spot_show_context_menu (SpotWindow *self,
                         double      y,
                         gboolean    on_item)
 {
-  g_autoptr (GMenuModel) model = NULL;
   GdkRectangle rect;
   graphene_point_t local;
   graphene_point_t in_window;
 
   spot_update_action_states (self);
-
-  model = spot_build_context_menu_model (on_item);
 
   if (self->context_menu)
     {
@@ -1603,10 +1642,51 @@ spot_show_context_menu (SpotWindow *self,
 
   /* Parent to the window — never to FlowBox/ListBox. Those containers are
    * cleared on refresh; a popover sibling would make remove() loop forever. */
-  self->context_menu = gtk_popover_menu_new_from_model (model);
+  self->context_menu = ooze_grid_menu_new ();
   gtk_widget_set_parent (self->context_menu, GTK_WIDGET (self));
-  gtk_popover_set_has_arrow (GTK_POPOVER (self->context_menu), FALSE);
   gtk_popover_set_position (GTK_POPOVER (self->context_menu), GTK_POS_BOTTOM);
+
+  if (on_item)
+    {
+      spot_context_append_action (self->context_menu, self,
+                                  "Open", "win.open", spot_context_open_icons);
+      ooze_grid_menu_append_separator (self->context_menu);
+      spot_context_append_action (self->context_menu, self,
+                                  "Cut", "win.cut", spot_context_cut_icons);
+      spot_context_append_action (self->context_menu, self,
+                                  "Copy", "win.copy", spot_context_copy_icons);
+      spot_context_append_action (self->context_menu, self,
+                                  "Paste", "win.paste", spot_context_paste_icons);
+      ooze_grid_menu_append_separator (self->context_menu);
+      spot_context_append_action (self->context_menu, self,
+                                  "New Folder", "win.new-folder",
+                                  spot_context_folder_icons);
+      spot_context_append_action (self->context_menu, self,
+                                  "Move to Trash", "win.trash",
+                                  spot_context_trash_icons);
+    }
+  else
+    {
+      spot_context_append_action (self->context_menu, self,
+                                  "New Folder", "win.new-folder",
+                                  spot_context_folder_icons);
+      spot_context_append_action (self->context_menu, self,
+                                  "Paste", "win.paste", spot_context_paste_icons);
+      spot_context_append_action (self->context_menu, self,
+                                  "Refresh", "win.refresh",
+                                  spot_context_refresh_icons);
+    }
+
+  ooze_grid_menu_append_separator (self->context_menu);
+  spot_context_append_action (self->context_menu, self,
+                              "as Icons", "win.view-grid",
+                              spot_context_grid_icons);
+  spot_context_append_action (self->context_menu, self,
+                              "as Columns", "win.view-columns",
+                              spot_context_columns_icons);
+  spot_context_append_action (self->context_menu, self,
+                              "New Window", "win.new-window",
+                              spot_context_window_icons);
   ooze_popover_fit_screen (GTK_POPOVER (self->context_menu));
 
   graphene_point_init (&local, (float) x, (float) y);
