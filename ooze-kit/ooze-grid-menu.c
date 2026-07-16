@@ -1,8 +1,8 @@
 #include "ooze-grid-menu.h"
 
 #include "ooze-button.h"
-#include "ooze-pinline.h"
 #include "ooze-popover.h"
+#include "ooze-surface.h"
 
 typedef struct
 {
@@ -49,23 +49,23 @@ ooze_grid_menu_ensure_css (void)
   gtk_css_provider_load_from_string (
     provider,
     ".ooze-grid-menu {"
-    "  padding: 4px;"
+    "  padding: 3px;"
     "}"
     ".ooze-grid-menu-grid {"
-    "  column-spacing: 2px;"
-    "  row-spacing: 2px;"
+    "  column-spacing: 1px;"
+    "  row-spacing: 1px;"
+    "}"
+    ".ooze-grid-menu-section {"
+    "  margin-top: 4px;"
     "}"
     ".ooze-grid-menu-tile {"
-    "  min-width: 62px;"
-    "  min-height: 54px;"
-    "  padding: 4px 2px;"
-    "  border-radius: 6px;"
+    "  min-width: 52px;"
+    "  min-height: 46px;"
+    "  padding: 2px 1px;"
+    "  border-radius: 5px;"
     "}"
     ".ooze-grid-menu-tile .ooze-button-label {"
     "  color: @window_fg_color;"
-    "}"
-    ".ooze-grid-menu-pinline {"
-    "  margin: 3px 2px;"
     "}");
   gtk_style_context_add_provider_for_display (
     display, GTK_STYLE_PROVIDER (provider),
@@ -96,7 +96,7 @@ ooze_grid_menu_new (void)
 {
   GtkWidget *popover;
   GtkWidget *scroll;
-  GtkWidget *box;
+  GtkWidget *surface;
   OozeGridMenuState *state;
 
   ooze_grid_menu_ensure_css ();
@@ -113,17 +113,18 @@ ooze_grid_menu_new (void)
   gtk_scrolled_window_set_propagate_natural_height (
     GTK_SCROLLED_WINDOW (scroll), TRUE);
 
-  box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  gtk_widget_add_css_class (box, "ooze-grid-menu");
-  gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), box);
+  surface = ooze_surface_new (OOZE_SURFACE_TOOLBAR,
+                              GTK_ORIENTATION_VERTICAL);
+  gtk_widget_add_css_class (surface, "ooze-grid-menu");
+  gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), surface);
   gtk_popover_set_child (GTK_POPOVER (popover), scroll);
 
   state = g_new0 (OozeGridMenuState, 1);
-  state->box = box;
+  state->box = surface;
   state->grid = gtk_grid_new ();
   gtk_widget_add_css_class (state->grid, "ooze-grid-menu-grid");
   gtk_grid_set_column_homogeneous (GTK_GRID (state->grid), TRUE);
-  gtk_box_append (GTK_BOX (box), state->grid);
+  gtk_box_append (GTK_BOX (surface), state->grid);
   g_object_set_data_full (G_OBJECT (popover), "ooze-grid-menu-state",
                           state, g_free);
 
@@ -153,7 +154,7 @@ ooze_grid_menu_append_item (GtkWidget              *menu,
 
   button = ooze_button_new_labeled (OOZE_BUTTON_TOOLBAR,
                                     item->icon_names,
-                                    32,
+                                    28,
                                     item->label,
                                     item->label);
   gtk_widget_add_css_class (button, "ooze-grid-menu-tile");
@@ -176,22 +177,19 @@ void
 ooze_grid_menu_append_separator (GtkWidget *menu)
 {
   OozeGridMenuState *state;
-  GtkWidget *separator;
+  GtkWidget *grid;
 
   g_return_if_fail (GTK_IS_POPOVER (menu));
 
   state = ooze_grid_menu_get_state (menu);
   g_return_if_fail (state != NULL);
 
-  separator = ooze_pinline_new (OOZE_SIDE_BOTTOM);
-  gtk_widget_add_css_class (separator, "ooze-grid-menu-pinline");
-  gtk_widget_set_hexpand (separator, TRUE);
-  gtk_box_append (GTK_BOX (state->box), separator);
-
-  state->grid = gtk_grid_new ();
-  gtk_widget_add_css_class (state->grid, "ooze-grid-menu-grid");
-  gtk_grid_set_column_homogeneous (GTK_GRID (state->grid), TRUE);
-  gtk_box_append (GTK_BOX (state->box), state->grid);
+  grid = gtk_grid_new ();
+  gtk_widget_add_css_class (grid, "ooze-grid-menu-grid");
+  gtk_widget_add_css_class (grid, "ooze-grid-menu-section");
+  gtk_grid_set_column_homogeneous (GTK_GRID (grid), TRUE);
+  gtk_box_append (GTK_BOX (state->box), grid);
+  state->grid = grid;
   state->column = 0;
   state->row = 0;
 }
