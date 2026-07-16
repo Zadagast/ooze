@@ -1771,9 +1771,25 @@ ooze_dock_fill_icons (ClutterActor *container,
                       ClutterActor *stage)
 {
   g_auto (GStrv) pins = NULL;
+  g_autoptr (GPtrArray) running_order =
+    g_ptr_array_new_with_free_func (g_free);
+  ClutterActor *child;
   gsize i;
   GList *all;
   GList *l;
+
+  for (child = clutter_actor_get_first_child (container);
+       child != NULL;
+       child = clutter_actor_get_next_sibling (child))
+    {
+      const char *app_id;
+
+      if (!GPOINTER_TO_INT (g_object_get_data (G_OBJECT (child), "dock-temp")))
+        continue;
+      app_id = g_object_get_data (G_OBJECT (child), "app-id");
+      if (app_id && *app_id)
+        g_ptr_array_add (running_order, g_strdup (app_id));
+    }
 
   ooze_dock_clear_icons (container);
 
@@ -1883,6 +1899,41 @@ ooze_dock_fill_icons (ClutterActor *container,
       ooze_dock_add_launcher (container, launcher);
     }
   g_list_free (all);
+
+  /* Keep the on-screen order of running icons across a rebuild. */
+  {
+    int first_temp = -1;
+    int insert_at;
+    int index = 0;
+
+    for (child = clutter_actor_get_first_child (container);
+         child != NULL;
+         child = clutter_actor_get_next_sibling (child), index++)
+      {
+        if (GPOINTER_TO_INT (g_object_get_data (G_OBJECT (child), "dock-temp")))
+          {
+            first_temp = index;
+            break;
+          }
+      }
+
+    if (first_temp >= 0)
+      {
+        insert_at = first_temp;
+        for (i = 0; i < running_order->len; i++)
+          {
+            const char *app_id = running_order->pdata[i];
+            ClutterActor *launcher;
+
+            launcher = ooze_dock_find_by_app_id (container, app_id);
+            if (!launcher ||
+                !GPOINTER_TO_INT (g_object_get_data (
+                                    G_OBJECT (launcher), "dock-temp")))
+              continue;
+            clutter_actor_set_child_at_index (container, launcher, insert_at++);
+          }
+      }
+  }
 
   ooze_dock_add_launcher (container,
                           ooze_dock_create_downloads_launcher (stage, display));
@@ -2349,7 +2400,7 @@ on_app_launcher_pressed (ClutterActor *actor,
   g_object_set_data (G_OBJECT (actor), "dock-dragging", NULL);
   ooze_dock_cancel_hold (actor);
 
-  if (ooze_dock_app_is_pinned (actor) && !ooze_dock_app_is_fixed (actor) && container)
+  if (!ooze_dock_app_is_fixed (actor) && container)
     {
       OozeDockHoldData *hold = g_new0 (OozeDockHoldData, 1);
       guint id;
