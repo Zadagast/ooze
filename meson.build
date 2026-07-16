@@ -286,6 +286,7 @@ pkgconfig.generate(
 )
 
 subdir('examples')
+subdir('tests')
 
 # Shared helpers used by the compositor and GTK apps, excluding the icon
 # helpers now folded into OozeKit above. The GTK4 icon helper is not included

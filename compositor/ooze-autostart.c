@@ -14,9 +14,30 @@
 #define OOZE_AUTOSTART_DELAY_MS 2000
 
 static gboolean
-ooze_autostart_entry_enabled (GKeyFile *keyfile)
+ooze_autostart_list_contains (char      **list,
+                              const char *desktop)
+{
+  gsize i;
+
+  if (!list || !desktop)
+    return FALSE;
+
+  for (i = 0; list[i]; i++)
+    {
+      if (g_strcmp0 (list[i], desktop) == 0)
+        return TRUE;
+    }
+
+  return FALSE;
+}
+
+gboolean
+ooze_autostart_entry_should_run (GKeyFile   *keyfile,
+                                 const char *desktop)
 {
   g_autofree char *try_exec = NULL;
+  g_auto (GStrv) only_show_in = NULL;
+  g_auto (GStrv) not_show_in = NULL;
 
   if (g_key_file_get_boolean (keyfile, G_KEY_FILE_DESKTOP_GROUP,
                               G_KEY_FILE_DESKTOP_KEY_HIDDEN, NULL))
@@ -39,6 +60,20 @@ ooze_autostart_entry_enabled (GKeyFile *keyfile)
         return FALSE;
     }
 
+  /* OnlyShowIn wins if present: run only when @desktop is listed. */
+  only_show_in = g_key_file_get_string_list (keyfile, G_KEY_FILE_DESKTOP_GROUP,
+                                             G_KEY_FILE_DESKTOP_KEY_ONLY_SHOW_IN,
+                                             NULL, NULL);
+  if (only_show_in)
+    return ooze_autostart_list_contains (only_show_in, desktop);
+
+  /* Otherwise NotShowIn excludes @desktop. */
+  not_show_in = g_key_file_get_string_list (keyfile, G_KEY_FILE_DESKTOP_GROUP,
+                                            G_KEY_FILE_DESKTOP_KEY_NOT_SHOW_IN,
+                                            NULL, NULL);
+  if (ooze_autostart_list_contains (not_show_in, desktop))
+    return FALSE;
+
   return TRUE;
 }
 
@@ -52,15 +87,11 @@ ooze_autostart_launch_file (const char *path)
   if (!g_key_file_load_from_file (keyfile, path, G_KEY_FILE_NONE, NULL))
     return;
 
-  if (!ooze_autostart_entry_enabled (keyfile))
+  if (!ooze_autostart_entry_should_run (keyfile, g_getenv ("XDG_CURRENT_DESKTOP")))
     return;
 
   info = g_desktop_app_info_new_from_keyfile (keyfile);
   if (!info)
-    return;
-
-  /* OnlyShowIn / NotShowIn against XDG_CURRENT_DESKTOP (Ooze). */
-  if (!g_desktop_app_info_get_show_in (info, NULL))
     return;
 
   if (!g_app_info_launch (G_APP_INFO (info), NULL, NULL, &error))
