@@ -112,12 +112,13 @@ ooze_foreign_gel_enabled (void)
 {
   const char *v = g_getenv ("OOZE_FOREIGN_GEL");
 
+  /* On by default; opt out with OOZE_FOREIGN_GEL=0/false/no/off. */
   if (!v || !*v)
-    return FALSE;
-  return g_ascii_strcasecmp (v, "1") == 0 ||
-         g_ascii_strcasecmp (v, "true") == 0 ||
-         g_ascii_strcasecmp (v, "yes") == 0 ||
-         g_ascii_strcasecmp (v, "on") == 0;
+    return TRUE;
+  return !(g_ascii_strcasecmp (v, "0") == 0 ||
+           g_ascii_strcasecmp (v, "false") == 0 ||
+           g_ascii_strcasecmp (v, "no") == 0 ||
+           g_ascii_strcasecmp (v, "off") == 0);
 }
 
 /* ── Drawing ─────────────────────────────────────────────────────────────── */

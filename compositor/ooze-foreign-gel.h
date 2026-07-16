@@ -12,7 +12,7 @@ G_BEGIN_DECLS
  * paints Aqua close/minimize/zoom lights there, wiring clicks to
  * delete/minimize/(un)maximize.
  *
- * Off by default; enable with OOZE_FOREIGN_GEL=1. No-op for X11 windows
+ * On by default; opt out with OOZE_FOREIGN_GEL=0. No-op for X11 windows
  * (they get real Mutter frames) and for Ooze's own apps (already Gel).
  */
 void ooze_foreign_gel_init (OozePlugin *plugin);

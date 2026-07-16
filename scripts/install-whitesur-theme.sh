@@ -189,5 +189,5 @@ fi
 
 log "Done."
 log "  Themes: $THEMES_DEST/WhiteSur-{Light,Dark}"
-log "  Foreign apps get GTK_THEME=WhiteSur-* when launched from Spot/Command."
+log "  Foreign apps get scoped GTK_THEME=WhiteSur-* plus XSETTINGS."
 log "  Ooze apps keep Adwaita + Ooze Gel (no ~/.config/gtk-4.0 override)."
