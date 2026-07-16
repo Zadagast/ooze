@@ -42,6 +42,19 @@ echo "==> Bundling WhiteSur foreign GTK themes"
 OOZE_THEMES_DEST="$STAGE/usr/share/ooze/themes" \
   "$ROOT/scripts/install-whitesur-theme.sh"
 
+# Expose WhiteSur on the standard freedesktop theme path so foreign apps
+# resolve it without Ooze's XDG_DATA_DIRS. Otherwise they fall back to light
+# Adwaita while still honouring the prefer-dark hint, painting symbolic icons
+# white on a light UI.
+if [[ -d "$STAGE/usr/share/ooze/themes" ]]; then
+  install -d "$STAGE/usr/share/themes"
+  for theme in "$STAGE/usr/share/ooze/themes"/WhiteSur*; do
+    [[ -d "$theme" ]] || continue
+    name="$(basename "$theme")"
+    ln -sfn "../ooze/themes/$name" "$STAGE/usr/share/themes/$name"
+  done
+fi
+
 # Nested launcher (Applications menu) + native GDM Wayland session
 install -d "$STAGE/usr/bin"
 install -m 0755 "$ROOT/packaging/deb/ooze-session" "$STAGE/usr/bin/ooze-session"
