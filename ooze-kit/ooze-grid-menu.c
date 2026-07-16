@@ -1,6 +1,7 @@
 #include "ooze-grid-menu.h"
 
 #include "ooze-button.h"
+#include "ooze-pinline.h"
 #include "ooze-popover.h"
 
 typedef struct
@@ -48,24 +49,23 @@ ooze_grid_menu_ensure_css (void)
   gtk_css_provider_load_from_string (
     provider,
     ".ooze-grid-menu {"
-    "  padding: 6px;"
+    "  padding: 4px;"
     "}"
     ".ooze-grid-menu-grid {"
-    "  column-spacing: 4px;"
-    "  row-spacing: 4px;"
+    "  column-spacing: 2px;"
+    "  row-spacing: 2px;"
     "}"
     ".ooze-grid-menu-tile {"
-    "  min-width: 78px;"
-    "  min-height: 70px;"
+    "  min-width: 62px;"
+    "  min-height: 54px;"
+    "  padding: 4px 2px;"
     "  border-radius: 6px;"
     "}"
     ".ooze-grid-menu-tile .ooze-button-label {"
     "  color: @window_fg_color;"
     "}"
-    ".ooze-grid-menu-separator {"
-    "  min-height: 1px;"
-    "  margin: 6px 4px;"
-    "  background: @borders;"
+    ".ooze-grid-menu-pinline {"
+    "  margin: 3px 2px;"
     "}");
   gtk_style_context_add_provider_for_display (
     display, GTK_STYLE_PROVIDER (provider),
@@ -145,7 +145,7 @@ ooze_grid_menu_append_item (GtkWidget              *menu,
   state = ooze_grid_menu_get_state (menu);
   g_return_if_fail (state != NULL);
 
-  if (state->column >= 4)
+  if (state->column >= 3)
     {
       state->column = 0;
       state->row++;
@@ -183,8 +183,9 @@ ooze_grid_menu_append_separator (GtkWidget *menu)
   state = ooze_grid_menu_get_state (menu);
   g_return_if_fail (state != NULL);
 
-  separator = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
-  gtk_widget_add_css_class (separator, "ooze-grid-menu-separator");
+  separator = ooze_pinline_new (OOZE_SIDE_BOTTOM);
+  gtk_widget_add_css_class (separator, "ooze-grid-menu-pinline");
+  gtk_widget_set_hexpand (separator, TRUE);
   gtk_box_append (GTK_BOX (state->box), separator);
 
   state->grid = gtk_grid_new ();
