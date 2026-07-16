@@ -30,10 +30,21 @@ ensure_inherits() {
   fi
 }
 
+# GTK >= 4.20 renders simple symbolic SVGs with its own path renderer, which
+# ignores elementary's sheet-export root translate and draws them blank.
+fix_symbolic() {
+  python3 "$ROOT/scripts/fix-symbolic-svgs.py" "$DEST"
+}
+
+normalize_theme() {
+  ensure_inherits
+  fix_symbolic
+}
+
 ensure_icons() {
   if [[ -f "$DEST/index.theme" && ! -L "$DEST" ]]; then
     log "elementary icons already present at $DEST"
-    ensure_inherits
+    normalize_theme
     return
   fi
 
@@ -52,7 +63,7 @@ ensure_icons() {
       echo "error: archive did not produce $DEST/index.theme" >&2
       exit 1
     fi
-    ensure_inherits
+    normalize_theme
     log "Installed elementary icons to $DEST"
     return
   fi
@@ -68,7 +79,7 @@ ensure_icons() {
     meson setup "$BUILD" "$CACHE" --prefix="$ROOT/data" --datadir="$ROOT/data" -Dscale_factors=1,2
     ninja -C "$BUILD"
     ninja -C "$BUILD" install
-    ensure_inherits
+    normalize_theme
     log "Installed elementary icons to $DEST"
     return
   fi
@@ -82,7 +93,7 @@ ensure_icons() {
   dpkg-deb -x "$DEB" extracted
   rm -rf "$DEST"
   cp -a extracted/usr/share/icons/elementary "$DEST"
-  ensure_inherits
+  normalize_theme
   log "Installed elementary icons to $DEST"
 }
 
