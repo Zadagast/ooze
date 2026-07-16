@@ -152,17 +152,55 @@ ooze_xsettings_current_icon_theme (void)
   return icon_theme;
 }
 
+static void
+ooze_xsettings_patch_count (GByteArray *buf,
+                            guint32     count)
+{
+  /* n_settings lives at offset 8 (byte order + pad + serial precede it). */
+  buf->data[8] = (guint8) (count & 0xff);
+  buf->data[9] = (guint8) ((count >> 8) & 0xff);
+  buf->data[10] = (guint8) ((count >> 16) & 0xff);
+  buf->data[11] = (guint8) ((count >> 24) & 0xff);
+}
+
 static GByteArray *
 ooze_xsettings_build_blob (guint32 serial)
 {
   GByteArray *buf = g_byte_array_new ();
+  g_autoptr (GSettings) iface = g_settings_new ("org.gnome.desktop.interface");
+  g_autofree char *cursor_theme = NULL;
+  g_autofree char *font_name = NULL;
   const char *icon_theme;
   const char *theme_name;
   int prefer_dark;
+  int cursor_size;
+  double text_scale;
+  guint32 n_settings = 0;
 
   icon_theme = ooze_xsettings_current_icon_theme ();
   theme_name = ooze_xsettings_current_gtk_theme ();
   prefer_dark = ooze_xsettings_prefer_dark () ? 1 : 0;
+
+  cursor_theme = g_settings_get_string (iface, "cursor-theme");
+  if (!cursor_theme || cursor_theme[0] == '\0')
+    {
+      g_clear_pointer (&cursor_theme, g_free);
+      cursor_theme = g_strdup ("elementary");
+    }
+  cursor_size = g_settings_get_int (iface, "cursor-size");
+  if (cursor_size <= 0)
+    cursor_size = 24;
+
+  font_name = g_settings_get_string (iface, "font-name");
+  if (!font_name || font_name[0] == '\0')
+    {
+      g_clear_pointer (&font_name, g_free);
+      font_name = g_strdup ("Sans 10");
+    }
+
+  text_scale = g_settings_get_double (iface, "text-scaling-factor");
+  if (text_scale <= 0.0)
+    text_scale = 1.0;
 
   /* GDK compares against Xlib LSBFirst/MSBFirst (0/1), not 'l'/'B'. */
   ooze_xsettings_append_u8 (buf, (guint8) LSBFirst);
@@ -170,7 +208,7 @@ ooze_xsettings_build_blob (guint32 serial)
   ooze_xsettings_append_u8 (buf, 0);
   ooze_xsettings_append_u8 (buf, 0);
   ooze_xsettings_append_u32 (buf, serial);
-  ooze_xsettings_append_u32 (buf, 7);
+  ooze_xsettings_append_u32 (buf, 0); /* n_settings patched below */
 
   /* Foreign AppMenu off by default — keep in-window GTK3 menus.
    * OOZE_FOREIGN_GLOBAL_MENU=1 restores ShellShowsMenubar for dbusmenu. */
@@ -178,23 +216,50 @@ ooze_xsettings_build_blob (guint32 serial)
     int shows = ooze_appmenu_foreign_enabled () ? 1 : 0;
 
     ooze_xsettings_append_int (buf, "Gtk/ShellShowsMenubar", shows, serial);
+    n_settings++;
     ooze_xsettings_append_int (buf, "Gtk/ShellShowsAppmenu", shows, serial);
+    n_settings++;
   }
   /* Match org.gnome.desktop.wm.preferences button-layout (controls on left). */
   ooze_xsettings_append_string (buf, "Gtk/DecorationLayout",
                                 "close,minimize,maximize:", serial);
+  n_settings++;
   ooze_xsettings_append_string (buf, "Gtk/ThemeName",
                                 theme_name ? theme_name : "Adwaita",
                                 serial);
+  n_settings++;
   /* GTK2 / some GTK3 paths still read Net/ThemeName. */
   ooze_xsettings_append_string (buf, "Net/ThemeName",
                                 theme_name ? theme_name : "Adwaita",
                                 serial);
+  n_settings++;
   ooze_xsettings_append_string (buf, "Net/IconThemeName",
                                 icon_theme,
                                 serial);
+  n_settings++;
   ooze_xsettings_append_int (buf, "Gtk/ApplicationPreferDarkTheme",
                              prefer_dark, serial);
+  n_settings++;
+  ooze_xsettings_append_string (buf, "Gtk/CursorThemeName",
+                                cursor_theme, serial);
+  n_settings++;
+  ooze_xsettings_append_int (buf, "Gtk/CursorThemeSize",
+                             cursor_size, serial);
+  n_settings++;
+  ooze_xsettings_append_string (buf, "Gtk/FontName", font_name, serial);
+  n_settings++;
+  /* Match gnome-settings-daemon: sane font rendering for X11 clients. */
+  ooze_xsettings_append_int (buf, "Xft/Antialias", 1, serial);
+  n_settings++;
+  ooze_xsettings_append_int (buf, "Xft/Hinting", 1, serial);
+  n_settings++;
+  ooze_xsettings_append_string (buf, "Xft/HintStyle", "hintslight", serial);
+  n_settings++;
+  ooze_xsettings_append_int (buf, "Xft/DPI",
+                             (gint32) (96.0 * 1024.0 * text_scale), serial);
+  n_settings++;
+
+  ooze_xsettings_patch_count (buf, n_settings);
   return buf;
 }
 
