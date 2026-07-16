@@ -20,6 +20,7 @@ struct _OozeTorrentWindow
   OozeTrSession *session;
   guint          refresh_id;
   int            selected_id;
+  gboolean       teardown_started;
 };
 
 G_DEFINE_FINAL_TYPE (OozeTorrentWindow, ooze_torrent_window,
@@ -27,6 +28,24 @@ G_DEFINE_FINAL_TYPE (OozeTorrentWindow, ooze_torrent_window,
 
 static void torrent_refresh (OozeTorrentWindow *self);
 static void ooze_torrent_window_constructed (GObject *object);
+static void ooze_torrent_window_begin_teardown (OozeTorrentWindow *self);
+
+static void
+ooze_torrent_window_teardown_done (gpointer user_data)
+{
+  GApplication *app = user_data;
+
+  g_application_release (app);
+  g_object_unref (app);
+}
+
+static gboolean
+on_close_request (GtkWindow *window,
+                  gpointer   user_data G_GNUC_UNUSED)
+{
+  ooze_torrent_window_begin_teardown (OOZE_TORRENT_WINDOW (window));
+  return FALSE;
+}
 
 static GtkWidget *
 toolbar_btn (const char * const *icons,
@@ -513,14 +532,44 @@ ooze_torrent_window_dispose (GObject *object)
 {
   OozeTorrentWindow *self = OOZE_TORRENT_WINDOW (object);
 
+  ooze_torrent_window_begin_teardown (self);
+
+  G_OBJECT_CLASS (ooze_torrent_window_parent_class)->dispose (object);
+}
+
+static void
+ooze_torrent_window_begin_teardown (OozeTorrentWindow *self)
+{
+  OozeTrSession *session;
+  GtkApplication *app;
+
+  if (self->teardown_started)
+    return;
+  self->teardown_started = TRUE;
+
   if (self->refresh_id)
     {
       g_source_remove (self->refresh_id);
       self->refresh_id = 0;
     }
-  g_clear_pointer (&self->session, ooze_tr_session_free);
 
-  G_OBJECT_CLASS (ooze_torrent_window_parent_class)->dispose (object);
+  session = g_steal_pointer (&self->session);
+  if (!session)
+    return;
+
+  app = gtk_window_get_application (GTK_WINDOW (self));
+  if (app)
+    {
+      g_application_hold (G_APPLICATION (app));
+      g_object_ref (app);
+      ooze_tr_session_free_async (session,
+                                  ooze_torrent_window_teardown_done,
+                                  app);
+    }
+  else
+    {
+      ooze_tr_session_free_async (session, NULL, NULL);
+    }
 }
 
 static void
@@ -563,6 +612,8 @@ ooze_torrent_window_constructed (GObject *object)
   g_autoptr (GError) error = NULL;
 
   G_OBJECT_CLASS (ooze_torrent_window_parent_class)->constructed (object);
+  g_signal_connect (self, "close-request",
+                    G_CALLBACK (on_close_request), NULL);
 
   gtk_window_set_default_size (GTK_WINDOW (self), 720, 480);
   gtk_window_set_icon_name (GTK_WINDOW (self), "application-x-bittorrent");
