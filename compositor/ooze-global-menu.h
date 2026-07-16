@@ -57,6 +57,13 @@ const char *ooze_global_menu_get_x11_launch_hint (OozeGlobalMenu *menu);
  */
 gboolean ooze_global_menu_wants_shell_stubs (OozeGlobalMenu *menu);
 
+/*
+ * Foreign window in focus (or last watched/bound) that exports no menu.
+ * Non-NULL means the panel should synthesize a baseline app/Window menu
+ * for it instead of showing an empty bar.
+ */
+MetaWindow *ooze_global_menu_get_fallback_window (OozeGlobalMenu *menu);
+
 guint ooze_global_menu_get_n_top (OozeGlobalMenu *menu);
 
 /* Borrowed label valid until next sync/items-changed. */

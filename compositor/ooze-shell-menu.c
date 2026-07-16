@@ -68,6 +68,63 @@ ooze_shell_request_session_action (OozePlugin        *plugin,
   g_idle_add_full (G_PRIORITY_LOW, ooze_shell_session_dialog_idle, req, NULL);
 }
 
+/* ── Same-app window iteration ───────────────────────────────────────────── */
+
+typedef void (*OozeWindowFunc) (MetaWindow *window);
+
+static gboolean
+ooze_shell_window_same_app (MetaWindow *a,
+                            MetaWindow *b)
+{
+  const char *bus = meta_window_get_gtk_unique_bus_name (a);
+  const char *app_id = meta_window_get_gtk_application_id (a);
+  const char *wm_class = meta_window_get_wm_class (a);
+
+  if (bus && g_strcmp0 (bus, meta_window_get_gtk_unique_bus_name (b)) == 0)
+    return TRUE;
+  if (app_id &&
+      g_strcmp0 (app_id, meta_window_get_gtk_application_id (b)) == 0)
+    return TRUE;
+  if (wm_class && g_strcmp0 (wm_class, meta_window_get_wm_class (b)) == 0)
+    return TRUE;
+  return FALSE;
+}
+
+static void
+ooze_shell_foreach_app_window (MetaDisplay    *display,
+                               MetaWindow     *ref,
+                               OozeWindowFunc  func)
+{
+  GList *windows;
+  GList *l;
+
+  windows = meta_display_list_all_windows (display);
+  for (l = windows; l != NULL; l = l->next)
+    {
+      MetaWindow *w = l->data;
+
+      if (meta_window_get_window_type (w) != META_WINDOW_NORMAL)
+        continue;
+      if (!ooze_shell_window_same_app (ref, w))
+        continue;
+
+      func (w);
+    }
+  g_list_free (windows);
+}
+
+static void
+ooze_shell_window_hide (MetaWindow *window)
+{
+  meta_window_minimize (window);
+}
+
+static void
+ooze_shell_window_quit (MetaWindow *window)
+{
+  meta_window_delete (window, clutter_get_current_event_time ());
+}
+
 /* ── Action dispatch ─────────────────────────────────────────────────────── */
 
 void
@@ -123,6 +180,23 @@ ooze_shell_menu_action (gpointer user_data, int action_id)
 
     case OOZE_MENU_GO_APPLICATIONS:
       ooze_dock_launch_pak (plugin->context);
+      break;
+
+    case OOZE_MENU_APP_HIDE:
+    case OOZE_MENU_APP_QUIT:
+      {
+        MetaWindow *ref = window;
+
+        if (!ref && plugin->global_menu)
+          ref = ooze_global_menu_get_fallback_window (plugin->global_menu);
+        if (!ref)
+          break;
+
+        ooze_shell_foreach_app_window (display, ref,
+                                       action_id == OOZE_MENU_APP_HIDE ?
+                                       ooze_shell_window_hide :
+                                       ooze_shell_window_quit);
+      }
       break;
 
     case OOZE_MENU_WINDOW_MINIMIZE:
