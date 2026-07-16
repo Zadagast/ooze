@@ -287,6 +287,7 @@ ooze_kit_lib = shared_library('ooze-kit',
 ooze_kit_dep = declare_dependency(
   link_with: ooze_kit_lib,
   include_directories: [inc_common, inc_ooze_ui, inc_ooze_kit],
+  compile_args: ['-DOOZEKIT_BUNDLED=1'],
 )
 
 meson.override_dependency('oozekit', ooze_kit_dep)
