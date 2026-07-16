@@ -80,13 +80,15 @@ ooze_foreign_gel_add_light (ClutterActor *parent,
   clutter_actor_set_position (light,
                               AQUA_TRAFFIC_LIGHT_MARGIN + index * step, y);
   clutter_actor_set_reactive (light, FALSE);
+  clutter_actor_add_child (parent, light);
 
   content = ooze_aqua_traffic_light_content (light, AQUA_TRAFFIC_LIGHT_SIZE,
                                              r, g, b);
   if (content)
     clutter_actor_set_content (light, content);
-
-  clutter_actor_add_child (parent, light);
+  else
+    g_warning ("Ooze: foreign Gel light %d has no content (no Cogl context)",
+               index);
 }
 
 static void
@@ -286,7 +288,6 @@ ooze_foreign_gel_attach (OozeForeignGelState *state,
   gel->actor = clutter_actor_new ();
   clutter_actor_set_size (gel->actor, width, OOZE_FOREIGN_BAR_HEIGHT);
   clutter_actor_set_reactive (gel->actor, TRUE);
-  ooze_foreign_gel_build_lights (gel->actor);
 
   g_signal_connect (gel->actor, "button-press-event",
                     G_CALLBACK (ooze_foreign_gel_on_button), gel);
@@ -294,6 +295,11 @@ ooze_foreign_gel_attach (OozeForeignGelState *state,
   clutter_actor_add_child (CLUTTER_ACTOR (window_actor), gel->actor);
   clutter_actor_set_child_above_sibling (CLUTTER_ACTOR (window_actor),
                                          gel->actor, NULL);
+
+  /* Build the lights only after the overlay is parented: the texture upload
+   * resolves its CoglContext by walking the actor's parent chain, so content
+   * created on an unparented actor comes back NULL (invisible lights). */
+  ooze_foreign_gel_build_lights (gel->actor);
 
   gel->position_id =
     g_signal_connect (window, "position-changed",
