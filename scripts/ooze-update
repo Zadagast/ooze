@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Update the installed Ooze package from a local source checkout.
+# Usually invoked as `ooze update`.
+set -euo pipefail
+
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ooze"
+CONF="$CONF_DIR/update.conf"
+
+usage() {
+  cat <<'EOF'
+Usage: ooze update [--src DIR] [--branch BRANCH]
+
+Pull the latest Ooze sources, build the .deb, and reinstall it.
+
+  --src DIR        Path to the Ooze git checkout (remembered for next time)
+  --branch BRANCH  Branch to update from (default: main)
+EOF
+}
+
+SRC=""
+BRANCH="main"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --src)
+      SRC="${2:-}"
+      shift 2
+      ;;
+    --branch)
+      BRANCH="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ooze update: unknown option '$1'" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+is_ooze_checkout() {
+  [[ -n "$1" && -d "$1/.git" && -x "$1/scripts/build-deb.sh" ]]
+}
+
+if [[ -z "$SRC" && -f "$CONF" ]]; then
+  # shellcheck source=/dev/null
+  source "$CONF"
+  SRC="${OOZE_SRC:-}"
+fi
+
+if [[ -z "$SRC" ]]; then
+  for candidate in \
+    "${OOZE_SRC:-}" \
+    "$HOME/Documents/MyProjects/Project_Aqua" \
+    "$HOME/ooze" \
+    "$HOME/src/ooze" \
+    "$HOME/Projects/ooze"; do
+    if is_ooze_checkout "$candidate"; then
+      SRC="$candidate"
+      break
+    fi
+  done
+fi
+
+if ! is_ooze_checkout "$SRC"; then
+  echo "ooze update: could not find an Ooze source checkout." >&2
+  echo "Run once with:  ooze update --src /path/to/ooze" >&2
+  exit 1
+fi
+
+mkdir -p "$CONF_DIR"
+printf 'OOZE_SRC=%q\n' "$SRC" > "$CONF"
+
+cd "$SRC"
+echo "==> Updating $SRC ($BRANCH)"
+
+current="$(git branch --show-current || true)"
+if [[ "$current" != "$BRANCH" ]]; then
+  git checkout "$BRANCH"
+fi
+git pull --ff-only
+
+echo "==> Building package"
+./scripts/build-deb.sh
+
+VERSION="$(sed -n "s/.*version: '\\([^']*\\)'.*/\\1/p" meson.build | head -1)"
+VERSION="${VERSION:-0.1.0}"
+DEB="dist/ooze_${VERSION}_amd64.deb"
+if [[ ! -f "$DEB" ]]; then
+  echo "ooze update: expected package $DEB not found" >&2
+  exit 1
+fi
+
+echo "==> Installing $DEB (sudo)"
+sudo apt install -y --reinstall --allow-downgrades "./$DEB"
+
+installed="$(dpkg-query -W -f='${Version}' ooze 2>/dev/null || echo '?')"
+echo
+echo "Ooze $installed installed."
+echo "Log out and back in to restart the compositor with the new build."

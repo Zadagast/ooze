@@ -6,7 +6,9 @@
 #include "ooze-shared-icons.h"
 
 #include <gio/gio.h>
+#include <errno.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include <meta/meta-context.h>
 #include <meta/meta-plugin.h>
@@ -168,6 +170,26 @@ main (int argc, char **argv)
 {
   g_autoptr (MetaContext) context = NULL;
   int status;
+
+  /* CLI subcommands: `ooze update` / `ooze doctor` exec the helper tools. */
+  if (argc >= 2)
+    {
+      const char *helper = NULL;
+
+      if (g_strcmp0 (argv[1], "update") == 0)
+        helper = "ooze-update";
+      else if (g_strcmp0 (argv[1], "doctor") == 0)
+        helper = "ooze-doctor";
+
+      if (helper)
+        {
+          argv[1] = (char *) helper;
+          execvp (helper, argv + 1);
+          g_printerr ("ooze: failed to run %s: %s\n",
+                      helper, g_strerror (errno));
+          return 1;
+        }
+    }
 
   /*
    * Never inherit session-wide GTK_THEME into the compositor. Foreign apps
