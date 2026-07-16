@@ -22,6 +22,7 @@
 #include "ooze-autostart.h"
 #include "ooze-polkit.h"
 #include "ooze-session-dialog.h"
+#include "ooze-foreign-gel.h"
 
 #include "../common/aqua-chrome.h"
 #include "../common/ooze-font.h"
@@ -1681,6 +1682,7 @@ ooze_plugin_start (MetaPlugin *plugin)
 
   ooze_lock_init (self);
   ooze_polkit_init (self);
+  ooze_foreign_gel_init (self);
   self->notifications = ooze_notifications_new (self);
   ooze_notifications_reflow (self->notifications);
   self->shot = ooze_shot_new (self);
@@ -1714,6 +1716,7 @@ ooze_plugin_begin_shutdown (OozePlugin *plugin)
    */
   ooze_lock_dispose (plugin);
   ooze_session_dialog_dismiss ();
+  ooze_foreign_gel_shutdown (plugin);
   ooze_polkit_shutdown ();
   ooze_shot_free (plugin->shot);
   plugin->shot = NULL;

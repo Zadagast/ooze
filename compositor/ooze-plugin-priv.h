@@ -48,6 +48,7 @@ struct _OozePlugin
   OozeGlobalMenu *global_menu;
   OozeNotifications *notifications;
   OozeShot         *shot;
+  struct _OozeForeignGelState *foreign_gel;
   gulong        monitors_changed_handler;
   gulong        workspace_added_handler;
   gulong        x11_display_opened_handler;
