@@ -103,12 +103,6 @@ ooze_tray_update_icon_content (OozeTrayIcon *icon)
   if (pb)
     content = ooze_aqua_content_from_pixbuf (icon->actor, pb);
 
-  g_message ("OOZE_TRAY_DEBUG: content name='%s' sni_pb=%p fallback_pb=%p content=%p",
-             ooze_sni_item_icon_name (icon->item),
-             (void *) ooze_sni_item_icon_pixbuf (icon->item),
-             (void *) fallback_pb,
-             (void *) content);
-
   clutter_actor_set_content (icon->actor, content);
   if (content)
     clutter_actor_set_content_gravity (icon->actor,
@@ -250,7 +244,6 @@ ooze_tray_show_menu (OozeTrayIcon *icon)
   if (!ooze_dbusmenu_get_top_items (ctx->menu, &ctx->flat, &ctx->n_flat) ||
       ctx->n_flat == 0)
     {
-      g_message ("OOZE_TRAY_DEBUG: layout not cached yet; will show on arrival");
       ooze_tray_menu_ctx_free (ctx);
       /* get_top_items kicked an async fetch; show when it lands, or fall
        * back to Activate if the exporter never delivers a layout. */
@@ -314,7 +307,6 @@ ooze_tray_show_menu (OozeTrayIcon *icon)
                                                ctx);
     }
 
-  g_message ("OOZE_TRAY_DEBUG: showing tray menu with %zu entries", out);
   ooze_aqua_menu_show_for_anchor (plugin->tray_popup,
                                   icon->actor,
                                   entries,
@@ -330,12 +322,10 @@ ooze_tray_on_icon_pressed (ClutterActor *actor G_GNUC_UNUSED,
   OozeTrayIcon *icon = user_data;
   guint button;
 
-  g_message ("OOZE_TRAY_DEBUG: icon pressed, event type=%d", clutter_event_type (event));
   if (clutter_event_type (event) != CLUTTER_BUTTON_PRESS)
     return CLUTTER_EVENT_PROPAGATE;
 
   button = clutter_event_get_button (event);
-  g_message ("OOZE_TRAY_DEBUG: button=%u menu_path=%s", button, ooze_sni_item_menu_path (icon->item));
 
   /* GNOME AppIndicator semantics: middle = SecondaryActivate. */
   if (button == CLUTTER_BUTTON_MIDDLE)
@@ -396,18 +386,6 @@ ooze_tray_add_or_update (OozePlugin *plugin, OozeSniItem *item)
   ooze_tray_layout (plugin,
                     clutter_actor_get_width (plugin->panel),
                     clutter_actor_get_height (plugin->panel));
-  {
-    gfloat ax, ay, tx, ty;
-    clutter_actor_get_transformed_position (icon->actor, &ax, &ay);
-    clutter_actor_get_transformed_position (plugin->tray_box, &tx, &ty);
-    g_message ("OOZE_TRAY_DEBUG: icon abs=(%.0f,%.0f) size=(%.0fx%.0f) reactive=%d tray_box abs=(%.0f,%.0f) panel_w=%.0f",
-               ax, ay,
-               clutter_actor_get_width (icon->actor),
-               clutter_actor_get_height (icon->actor),
-               clutter_actor_get_reactive (icon->actor),
-               tx, ty,
-               clutter_actor_get_width (plugin->panel));
-  }
 }
 
 static void
