@@ -10,4 +10,4 @@ Categories=System;
 StartupNotify=true
 StartupWMClass=org.ooze.Desktop
 Keywords=Ooze;Mutter;Wayland;Desktop;
-X-AppImage-Version=0.7.1
+X-AppImage-Version=0.1.0
