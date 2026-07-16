@@ -92,7 +92,6 @@ watch_paths=(
   "$SRC/ooze-kit"
   "$SRC/common"
   "$SRC/shared"
-  "$SRC/data"
   "$SRC/ooze-about"
   "$SRC/ooze-command"
   "$SRC/ooze-defaults"
