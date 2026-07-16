@@ -74,6 +74,50 @@ ooze_apply_wm_settings_early (void)
         }
     }
 
+  /* Alt+Tab groups applications; Super+Tab cycles individual windows. */
+  if (source)
+    {
+      g_autoptr (GSettingsSchema) wm_kb_schema = NULL;
+      g_autoptr (GSettings) wm_kb = NULL;
+
+      wm_kb_schema = g_settings_schema_source_lookup (
+          source, "org.gnome.desktop.wm.keybindings", TRUE);
+      if (wm_kb_schema)
+        {
+          wm_kb = g_settings_new_full (wm_kb_schema, NULL, NULL);
+          if (g_settings_schema_has_key (wm_kb_schema, "switch-applications"))
+            {
+              const char *switch_apps[] = { "<Alt>Tab", NULL };
+              g_settings_set_strv (wm_kb, "switch-applications", switch_apps);
+            }
+          if (g_settings_schema_has_key (wm_kb_schema,
+                                         "switch-applications-backward"))
+            {
+              const char *switch_apps_backward[] = {
+                "<Shift><Alt>Tab", NULL
+              };
+              g_settings_set_strv (wm_kb,
+                                   "switch-applications-backward",
+                                   switch_apps_backward);
+            }
+          if (g_settings_schema_has_key (wm_kb_schema, "switch-windows"))
+            {
+              const char *switch_windows[] = { "<Super>Tab", NULL };
+              g_settings_set_strv (wm_kb, "switch-windows", switch_windows);
+            }
+          if (g_settings_schema_has_key (wm_kb_schema,
+                                         "switch-windows-backward"))
+            {
+              const char *switch_windows_backward[] = {
+                "<Shift><Super>Tab", NULL
+              };
+              g_settings_set_strv (wm_kb,
+                                   "switch-windows-backward",
+                                   switch_windows_backward);
+            }
+        }
+    }
+
   /* Left-side controls for MetaFrames + GTK CSD that honor GNOME prefs. */
   if (source)
     wm_schema = g_settings_schema_source_lookup (
