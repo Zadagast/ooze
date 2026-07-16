@@ -1259,6 +1259,7 @@ ooze_plugin_map (MetaPlugin *plugin, MetaWindowActor *actor)
   clutter_actor_show (window_actor);
 
   ooze_window_chrome_apply (actor, plugin);
+  ooze_foreign_gel_maybe_attach (OOZE_PLUGIN (plugin), actor);
 
   if (window &&
       !meta_window_is_override_redirect (window) &&
