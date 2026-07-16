@@ -47,6 +47,7 @@ struct _OozePlugin
   MetaContext  *context;
   OozeAquaMenu   *menu_popup;
   OozeGlobalMenu *global_menu;
+  struct _OozeAppmenuWayland *wl_appmenu;
   OozeNotifications *notifications;
   OozeShot         *shot;
   struct _OozeForeignGelState *foreign_gel;

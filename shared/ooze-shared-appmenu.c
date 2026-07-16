@@ -146,13 +146,14 @@ ooze_appmenu_foreign_enabled (void)
 {
   const char *v = g_getenv ("OOZE_FOREIGN_GLOBAL_MENU");
 
+  /* On by default; the dbusmenu path is fully async now. */
   if (!v || !*v)
-    return FALSE;
+    return TRUE;
 
-  return g_ascii_strcasecmp (v, "1") == 0 ||
-         g_ascii_strcasecmp (v, "true") == 0 ||
-         g_ascii_strcasecmp (v, "yes") == 0 ||
-         g_ascii_strcasecmp (v, "on") == 0;
+  return g_ascii_strcasecmp (v, "0") != 0 &&
+         g_ascii_strcasecmp (v, "false") != 0 &&
+         g_ascii_strcasecmp (v, "no") != 0 &&
+         g_ascii_strcasecmp (v, "off") != 0;
 }
 
 static gboolean
