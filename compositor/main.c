@@ -215,13 +215,15 @@ main (int argc, char **argv)
   g_autoptr (MetaContext) context = NULL;
   int status;
 
-  /* CLI subcommands: `ooze update` / `ooze doctor` exec the helper tools. */
+  /* CLI subcommands exec the corresponding helper tools. */
   if (argc >= 2)
     {
       const char *helper = NULL;
 
       if (g_strcmp0 (argv[1], "update") == 0)
         helper = "ooze-update";
+      else if (g_strcmp0 (argv[1], "dev") == 0)
+        helper = "ooze-dev";
       else if (g_strcmp0 (argv[1], "doctor") == 0)
         helper = "ooze-doctor";
 
