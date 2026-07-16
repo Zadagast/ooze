@@ -76,6 +76,15 @@ if [[ ! -f "$OOZE_THEMES_DIR/WhiteSur-Light/index.theme" ]] &&
   echo "  ./scripts/install-whitesur-theme.sh"
 fi
 
+# The nested output window (mutter-devkit / "mdk") connects to the host X
+# display to show itself. We launch under a private dbus-run-session below,
+# which does not inherit the login session's X authority, so mdk otherwise
+# fails with "Invalid MIT-MAGIC-COOKIE-1 key" / "Failed to open display".
+# Grant the local user access to the host X server so it can attach.
+if [[ -n "${DISPLAY:-}" ]] && command -v xhost >/dev/null 2>&1; then
+  xhost "+SI:localuser:$(id -un)" >/dev/null 2>&1 || xhost +local: >/dev/null 2>&1 || true
+fi
+
 # Xwayland stays available for X11-only apps. Foreign AppMenu is off by default;
 # Ooze GTK apps use Wayland gtk_shell1. Pass OOZE_NO_X11=1 to force --no-x11.
 desktop_args=(--wayland --devkit)
