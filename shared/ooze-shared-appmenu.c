@@ -1,5 +1,4 @@
 #include "ooze-shared-appmenu.h"
-#include "ooze-foreign-gtk.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -313,15 +312,6 @@ ooze_appmenu_force_x11_backend (GSubprocessLauncher *launcher)
   g_subprocess_launcher_setenv (launcher, "GDK_BACKEND", "x11", TRUE);
 }
 
-static void
-ooze_appmenu_set_foreign_theme (GAppLaunchContext *ctx)
-{
-  g_autofree char *theme = ooze_foreign_gtk_theme_for_session ();
-
-  if (theme)
-    g_app_launch_context_setenv (ctx, "GTK_THEME", theme);
-}
-
 void
 ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx)
 {
@@ -330,7 +320,6 @@ ooze_appmenu_prepare_launch_context (GAppLaunchContext *ctx)
   /* Xwayland so XSETTINGS can flip WhiteSur-Light↔Dark live. AppMenu modules
    * stay off unless OOZE_FOREIGN_GLOBAL_MENU=1. */
   g_app_launch_context_setenv (ctx, "GDK_BACKEND", "x11");
-  ooze_appmenu_set_foreign_theme (ctx);
 
   if (!ooze_appmenu_foreign_enabled ())
     return;
@@ -397,12 +386,6 @@ ooze_appmenu_environ_for_foreign (char **envp)
 
   /* Xwayland for live Appearance via XSETTINGS (menus still default off). */
   envp = g_environ_setenv (envp, "GDK_BACKEND", "x11", TRUE);
-  {
-    g_autofree char *theme = ooze_foreign_gtk_theme_for_session ();
-
-    if (theme)
-      envp = g_environ_setenv (envp, "GTK_THEME", theme, TRUE);
-  }
 
   if (!ooze_appmenu_foreign_enabled ())
     return envp;
