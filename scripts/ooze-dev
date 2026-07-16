@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# Build and watch a local Ooze checkout in a nested development session.
+# Usually invoked as `ooze dev`.
+set -euo pipefail
+
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ooze"
+CONF="$CONF_DIR/update.conf"
+SRC=""
+NEST_PID=""
+WATCH_PID=""
+TMP_DIR=""
+
+usage() {
+  cat <<'EOF'
+Usage: ooze dev [--src DIR]
+
+Build the current Ooze checkout, launch a nested development session, and
+rebuild/restart it when source files change.
+
+  --src DIR        Path to the Ooze git checkout (remembered for next time)
+EOF
+}
+
+is_ooze_checkout() {
+  [[ -n "$1" && -d "$1/.git" && -x "$1/scripts/build-deb.sh" ]]
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --src)
+      SRC="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ooze dev: unknown option '$1'" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -z "$SRC" && -f "$CONF" ]]; then
+  # shellcheck source=/dev/null
+  source "$CONF"
+  SRC="${OOZE_SRC:-}"
+fi
+
+if [[ -z "$SRC" ]]; then
+  for candidate in \
+    "${OOZE_SRC:-}" \
+    "$HOME/Documents/MyProjects/Project_Aqua" \
+    "$HOME/ooze" \
+    "$HOME/src/ooze" \
+    "$HOME/Projects/ooze"; do
+    if is_ooze_checkout "$candidate"; then
+      SRC="$candidate"
+      break
+    fi
+  done
+fi
+
+if ! is_ooze_checkout "$SRC"; then
+  echo "ooze dev: could not find an Ooze source checkout." >&2
+  echo "Run once with:  ooze dev --src /path/to/ooze" >&2
+  exit 1
+fi
+
+if ! command -v inotifywait >/dev/null 2>&1; then
+  echo "ooze dev requires inotifywait (from inotify-tools)." >&2
+  echo "Install it with: sudo apt install inotify-tools" >&2
+  exit 1
+fi
+
+mkdir -p "$CONF_DIR"
+printf 'OOZE_SRC=%q\n' "$SRC" > "$CONF"
+
+BUILD_DIR="$SRC/build"
+if [[ ! -f "$BUILD_DIR/build.ninja" ]]; then
+  echo "==> Configuring $SRC/build"
+  meson setup "$BUILD_DIR"
+fi
+
+echo "==> Building $SRC"
+ninja -C "$BUILD_DIR"
+
+watch_paths=(
+  "$SRC/compositor"
+  "$SRC/ooze-kit"
+  "$SRC/common"
+  "$SRC/shared"
+  "$SRC/data"
+  "$SRC/ooze-about"
+  "$SRC/ooze-command"
+  "$SRC/ooze-defaults"
+  "$SRC/ooze-ear"
+  "$SRC/ooze-eye"
+  "$SRC/ooze-king"
+  "$SRC/ooze-launch"
+  "$SRC/ooze-monitor"
+  "$SRC/ooze-pak"
+  "$SRC/ooze-shot"
+  "$SRC/ooze-themes"
+  "$SRC/ooze-torrent"
+  "$SRC/ooze-ui"
+  "$SRC/spot"
+  "$SRC/meson.build"
+)
+
+watch_paths_existing=()
+for path in "${watch_paths[@]}"; do
+  if [[ -d "$path" || -f "$path" ]]; then
+    watch_paths_existing+=("$path")
+  fi
+done
+
+if ((${#watch_paths_existing[@]} == 0)); then
+  echo "ooze dev: no source paths were found to watch." >&2
+  exit 1
+fi
+
+cleanup() {
+  if [[ -n "$WATCH_PID" ]] && kill -0 "$WATCH_PID" 2>/dev/null; then
+    kill "$WATCH_PID" 2>/dev/null || true
+  fi
+  if [[ -n "$NEST_PID" ]] && kill -0 "$NEST_PID" 2>/dev/null; then
+    kill "$NEST_PID" 2>/dev/null || true
+    wait "$NEST_PID" 2>/dev/null || true
+  fi
+  if [[ -n "$TMP_DIR" ]]; then
+    rm -rf "$TMP_DIR"
+  fi
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+start_nest() {
+  echo "==> starting nested Ooze session"
+  "$SRC/run-devkit.sh" &
+  NEST_PID=$!
+}
+
+stop_nest() {
+  if [[ -n "$NEST_PID" ]] && kill -0 "$NEST_PID" 2>/dev/null; then
+    kill "$NEST_PID" 2>/dev/null || true
+    wait "$NEST_PID" 2>/dev/null || true
+  fi
+  NEST_PID=""
+}
+
+TMP_DIR="$(mktemp -d)"
+EVENTS="$TMP_DIR/events"
+mkfifo "$EVENTS"
+
+inotifywait --monitor --recursive --quiet \
+  --format '%w%f' \
+  --event close_write,move,create,delete \
+  "${watch_paths_existing[@]}" > "$EVENTS" &
+WATCH_PID=$!
+exec 3< "$EVENTS"
+
+start_nest
+echo "==> watching Ooze sources (Ctrl+C to stop)"
+
+while IFS= read -r -u 3 _event; do
+  # Coalesce saves from formatters, generated files, and multi-file edits.
+  while IFS= read -r -t 0.25 -u 3 _event; do
+    :
+  done
+
+  echo "==> rebuilding…"
+  if ninja -C "$BUILD_DIR"; then
+    echo "==> restarting nest"
+    stop_nest
+    start_nest
+  else
+    echo "==> build failed, keeping current session" >&2
+  fi
+done
