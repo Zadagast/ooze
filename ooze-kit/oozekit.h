@@ -8,6 +8,7 @@
 
 #ifdef OOZEKIT_HAVE_INSTALLED_NAMESPACE
 #include <oozekit/ooze-application.h>
+#include <oozekit/ooze-init.h>
 #include <oozekit/ooze-application-window.h>
 #include <oozekit/ooze-about.h>
 #include <oozekit/ooze-button.h>
@@ -27,6 +28,7 @@
 #include <oozekit/ooze-traffic-lights.h>
 #else
 #include "ooze-application.h"
+#include "ooze-init.h"
 #include "ooze-application-window.h"
 #include "ooze-about.h"
 #include "ooze-button.h"
