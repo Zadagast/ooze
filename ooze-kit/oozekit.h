@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined (__has_include)
+#if !defined (OOZEKIT_BUNDLED) && defined (__has_include)
 #  if __has_include (<oozekit/ooze-application.h>)
 #    define OOZEKIT_HAVE_INSTALLED_NAMESPACE 1
 #  endif
