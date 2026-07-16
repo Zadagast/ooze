@@ -1777,6 +1777,23 @@ ooze_dock_fill_icons (ClutterActor *container,
 
   ooze_dock_clear_icons (container);
 
+  /* Ooze Launch is a permanent leftmost dock item. */
+  {
+    const OozeDockAppSpec *spec = ooze_dock_find_spec ("org.ooze.Launch");
+    OozeDockLaunchFn launch = ooze_dock_launch_fn_for_id ("org.ooze.Launch");
+    ClutterActor *launcher;
+
+    if (spec && launch)
+      {
+        launcher = ooze_dock_create_app_launcher (stage, display, spec, launch);
+        g_object_set_data (G_OBJECT (launcher), "dock-fixed",
+                           GINT_TO_POINTER (1));
+        g_object_set_data (G_OBJECT (launcher), "dock-pinned",
+                           GINT_TO_POINTER (1));
+        ooze_dock_add_launcher (container, launcher);
+      }
+  }
+
   pins = ooze_dock_pins_load ();
   for (i = 0; pins && pins[i]; i++)
     {
@@ -1784,6 +1801,8 @@ ooze_dock_fill_icons (ClutterActor *container,
       OozeDockLaunchFn launch;
       ClutterActor *launcher;
 
+      if (ooze_dock_find_by_app_id (container, pins[i]))
+        continue;
       if (spec)
         {
           launch = ooze_dock_launch_fn_for_id (pins[i]);

@@ -1,6 +1,7 @@
 #include "ooze-launch-window.h"
 
 #include "ooze-button.h"
+#include "ooze-grid-menu.h"
 #include "ooze-icons.h"
 #include "ooze-scroll.h"
 #include "ooze-shared-appmenu.h"
@@ -51,8 +52,98 @@ static const char * const launch_generic_icons[] = {
   NULL,
 };
 
+static const char * const launch_add_icons[] = {
+  "list-add-symbolic", "list-add", NULL,
+};
+
+static const char * const launch_remove_icons[] = {
+  "list-remove-symbolic", "list-remove", NULL,
+};
+
+static const char * const launch_delete_icons[] = {
+  "edit-delete-symbolic", "edit-delete", "user-trash-symbolic", NULL,
+};
+
 static void launch_rebuild_groups_bar (OozeLaunchWindow *self);
 static void launch_refresh_grid (OozeLaunchWindow *self);
+
+static void
+ooze_launch_ensure_css (void)
+{
+  static gboolean loaded = FALSE;
+  GtkCssProvider *provider;
+  GdkDisplay *display;
+
+  if (loaded)
+    return;
+
+  display = gdk_display_get_default ();
+  if (!display)
+    return;
+
+  provider = gtk_css_provider_new ();
+  gtk_css_provider_load_from_string (
+    provider,
+    ".ooze-launch {"
+    "  background: @window_bg_color;"
+    "}"
+    ".ooze-launch .ooze-surface,"
+    ".ooze-launch scrolledwindow,"
+    ".ooze-launch scrolledwindow > viewport,"
+    ".ooze-launch .ooze-launcher-grid {"
+    "  border-radius: 0;"
+    "  border: none;"
+    "  box-shadow: none;"
+    "  margin: 0;"
+    "  outline: none;"
+    "}"
+    ".ooze-launch .ooze-launch-grid-scroll,"
+    ".ooze-launch .ooze-launch-grid-scroll > viewport,"
+    ".ooze-launch .ooze-launcher-grid {"
+    "  background: @view_bg_color;"
+    "}"
+    ".ooze-launch .ooze-search-entry {"
+    "  min-width: 120px;"
+    "  min-height: 32px;"
+    "  border-radius: 10px;"
+    "}"
+    ".ooze-launch .ooze-launcher-grid > flowboxchild {"
+    "  border-radius: 5px;"
+    "  outline: none;"
+    "  background: transparent;"
+    "}"
+    ".ooze-launch .ooze-launcher-grid > flowboxchild:hover {"
+    "  background: rgba(41,104,200,0.10);"
+    "}"
+    ".ooze-launch .ooze-launcher-grid > flowboxchild:selected {"
+    "  background: #2968c8;"
+    "}"
+    ".ooze-launch .ooze-launcher-grid > flowboxchild:selected .ooze-button-label {"
+    "  color: #ffffff;"
+    "}"
+    ".ooze-launch .ooze-launcher-tile .ooze-button-label {"
+    "  color: @window_fg_color;"
+    "}"
+    ".ooze-launch .ooze-launch-groups {"
+    "  padding: 4px 10px;"
+    "  background: transparent;"
+    "}"
+    ".ooze-launch .ooze-launch-groups > .ooze-button {"
+    "  border-radius: 8px;"
+    "}"
+    ".ooze-launch .ooze-launch-groups > .ooze-button.active {"
+    "  background: rgba(41,104,200,0.14);"
+    "  color: #2968c8;"
+    "}"
+    ".ooze-launch .ooze-launch-groups > .ooze-button.active:hover {"
+    "  background: rgba(41,104,200,0.20);"
+    "}");
+  gtk_style_context_add_provider_for_display (
+    display, GTK_STYLE_PROVIDER (provider),
+    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_object_unref (provider);
+  loaded = TRUE;
+}
 
 static void
 launch_app_free (gpointer data)
@@ -449,15 +540,13 @@ typedef struct
 } LaunchAssignment;
 
 static void
-launch_assignment_free (gpointer data,
-                        GClosure *closure G_GNUC_UNUSED)
+launch_assignment_free (gpointer data)
 {
   g_free (data);
 }
 
 static void
-launch_assign_clicked (GtkButton *button G_GNUC_UNUSED,
-                       gpointer   user_data)
+launch_assign_clicked (gpointer user_data)
 {
   LaunchAssignment *assignment = user_data;
 
@@ -471,8 +560,7 @@ launch_assign_clicked (GtkButton *button G_GNUC_UNUSED,
 }
 
 static void
-launch_delete_group_clicked (GtkButton *button G_GNUC_UNUSED,
-                             gpointer   user_data)
+launch_delete_group_clicked (gpointer user_data)
 {
   OozeLaunchWindow *self = user_data;
   LaunchGroup *group = self->active_group;
@@ -493,36 +581,24 @@ launch_show_context_menu (OozeLaunchWindow *self,
                           double            x,
                           double            y)
 {
-  GtkWidget *box;
-  GtkWidget *label;
   GtkWidget *popover;
   GdkRectangle rectangle;
   gsize i;
+  gboolean have_items = FALSE;
 
   launch_close_context_popover (self);
-  popover = gtk_popover_new ();
+  popover = ooze_grid_menu_new ();
   self->context_popover = g_object_ref_sink (popover);
   gtk_widget_set_parent (popover, anchor);
-  gtk_popover_set_has_arrow (GTK_POPOVER (popover), TRUE);
   rectangle = (GdkRectangle) { (int) x, (int) y, 1, 1 };
   gtk_popover_set_pointing_to (GTK_POPOVER (popover), &rectangle);
-
-  box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-  gtk_widget_set_margin_start (box, 8);
-  gtk_widget_set_margin_end (box, 8);
-  gtk_widget_set_margin_top (box, 8);
-  gtk_widget_set_margin_bottom (box, 8);
-  gtk_popover_set_child (GTK_POPOVER (popover), box);
-  label = gtk_label_new (app->name);
-  gtk_widget_add_css_class (label, "heading");
-  gtk_box_append (GTK_BOX (box), label);
 
   for (i = 0; i < self->groups->len; i++)
     {
       LaunchGroup *group = g_ptr_array_index (self->groups, i);
-      GtkWidget *button;
       LaunchAssignment *assignment;
       g_autofree char *label = NULL;
+      OozeGridMenuItem item;
 
       if (!group->custom ||
           (group == self->active_group &&
@@ -532,44 +608,60 @@ launch_show_context_menu (OozeLaunchWindow *self,
         label = g_strdup ("Remove from group");
       else
         label = g_strdup_printf ("Add to %s", group->name);
-      button = gtk_button_new_with_label (label);
-      gtk_widget_add_css_class (button, "ooze-menu-item");
       assignment = g_new0 (LaunchAssignment, 1);
       assignment->window = self;
       assignment->app = app;
       assignment->group = group;
       assignment->remove = launch_group_contains (group, app->id);
-      g_signal_connect_data (button, "clicked",
-                             G_CALLBACK (launch_assign_clicked),
-                             assignment, launch_assignment_free, 0);
-      gtk_box_append (GTK_BOX (box), button);
+      item = (OozeGridMenuItem) {
+        .icon_names = assignment->remove ? launch_remove_icons : launch_add_icons,
+        .label = label,
+        .sensitive = TRUE,
+        .activate = launch_assign_clicked,
+        .user_data = assignment,
+        .user_data_destroy = launch_assignment_free,
+      };
+      ooze_grid_menu_append_item (popover, &item);
+      have_items = TRUE;
     }
 
   if (self->active_group && self->active_group->custom &&
       launch_group_contains (self->active_group, app->id))
     {
-      GtkWidget *button = gtk_button_new_with_label ("Remove from this group");
       LaunchAssignment *assignment = g_new0 (LaunchAssignment, 1);
+      OozeGridMenuItem item;
 
-      gtk_widget_add_css_class (button, "ooze-menu-item");
       assignment->window = self;
       assignment->app = app;
       assignment->group = self->active_group;
       assignment->remove = TRUE;
-      g_signal_connect_data (button, "clicked",
-                             G_CALLBACK (launch_assign_clicked),
-                             assignment, launch_assignment_free, 0);
-      gtk_box_append (GTK_BOX (box), button);
+      if (have_items)
+        ooze_grid_menu_append_separator (popover);
+      item = (OozeGridMenuItem) {
+        .icon_names = launch_remove_icons,
+        .label = "Remove from this group",
+        .sensitive = TRUE,
+        .activate = launch_assign_clicked,
+        .user_data = assignment,
+        .user_data_destroy = launch_assignment_free,
+      };
+      ooze_grid_menu_append_item (popover, &item);
+      have_items = TRUE;
     }
 
   if (self->active_group && self->active_group->custom)
     {
-      GtkWidget *button = gtk_button_new_with_label ("Delete group");
+      OozeGridMenuItem item = {
+        .icon_names = launch_delete_icons,
+        .label = "Delete group",
+        .sensitive = TRUE,
+        .activate = launch_delete_group_clicked,
+        .user_data = self,
+      };
 
-      gtk_widget_add_css_class (button, "ooze-destructive");
-      g_signal_connect (button, "clicked",
-                        G_CALLBACK (launch_delete_group_clicked), self);
-      gtk_box_append (GTK_BOX (box), button);
+      if (have_items)
+        ooze_grid_menu_append_separator (popover);
+      ooze_grid_menu_append_item (popover, &item);
     }
 
   gtk_popover_popup (GTK_POPOVER (popover));
@@ -821,7 +913,8 @@ ooze_launch_window_constructed (GObject *object)
 {
   OozeLaunchWindow *self = OOZE_LAUNCH_WINDOW (object);
   GtkWidget *shell;
-  GtkWidget *surface;
+  GtkWidget *header;
+  GtkWidget *statusbar;
   GtkWidget *scroll;
   GtkWidget *search_box;
   gsize i;
@@ -829,6 +922,7 @@ ooze_launch_window_constructed (GObject *object)
   G_OBJECT_CLASS (ooze_launch_window_parent_class)->constructed (object);
   ooze_toolbar_ensure_css ();
   ooze_scroll_ensure_css ();
+  ooze_launch_ensure_css ();
 
   self->apps = g_ptr_array_new_with_free_func (launch_app_free);
   self->groups = g_ptr_array_new_with_free_func (launch_group_free);
@@ -840,31 +934,36 @@ ooze_launch_window_constructed (GObject *object)
   gtk_window_set_default_size (GTK_WINDOW (self), 720, 560);
   gtk_window_set_icon_name (GTK_WINDOW (self), "org.ooze.Launch");
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-launch");
+  gtk_widget_add_css_class (GTK_WIDGET (self), "spot-finder");
   ooze_application_window_set_title (
     OOZE_APPLICATION_WINDOW (self), "Applications");
 
-  shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 8);
-  gtk_widget_set_margin_start (shell, 16);
-  gtk_widget_set_margin_end (shell, 16);
-  gtk_widget_set_margin_top (shell, 12);
-  gtk_widget_set_margin_bottom (shell, 12);
-  surface = ooze_surface_new (OOZE_SURFACE_TOOLBAR, GTK_ORIENTATION_VERTICAL);
-  gtk_widget_set_hexpand (surface, TRUE);
-  gtk_widget_set_vexpand (surface, TRUE);
-  gtk_box_append (GTK_BOX (shell), surface);
+  shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+
+  header = ooze_surface_new (OOZE_SURFACE_TOOLBAR,
+                             GTK_ORIENTATION_HORIZONTAL);
+  gtk_widget_add_css_class (header, "ooze-launch-header");
+  gtk_widget_set_hexpand (header, TRUE);
+  gtk_box_append (GTK_BOX (shell), header);
 
   search_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_margin_start (search_box, 10);
+  gtk_widget_set_margin_end (search_box, 10);
+  gtk_widget_set_margin_top (search_box, 5);
+  gtk_widget_set_margin_bottom (search_box, 5);
   self->search = gtk_search_entry_new ();
-  gtk_entry_set_placeholder_text (GTK_ENTRY (self->search),
-                                   "Type to search apps…");
+  gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (self->search),
+                                         "Type to search apps…");
   gtk_widget_add_css_class (self->search, "ooze-search-entry");
+  gtk_widget_add_css_class (self->search, "ooze-toolbar-search");
   gtk_widget_set_hexpand (self->search, TRUE);
   gtk_box_append (GTK_BOX (search_box), self->search);
-  gtk_box_append (GTK_BOX (surface), search_box);
+  gtk_box_append (GTK_BOX (header), search_box);
   g_signal_connect (self->search, "notify::text",
                     G_CALLBACK (launch_search_changed), self);
 
   scroll = ooze_scrolled_window_new ();
+  gtk_widget_add_css_class (scroll, "ooze-launch-grid-scroll");
   gtk_widget_set_hexpand (scroll, TRUE);
   gtk_widget_set_vexpand (scroll, TRUE);
   self->grid = gtk_flow_box_new ();
@@ -879,12 +978,18 @@ ooze_launch_window_constructed (GObject *object)
   gtk_flow_box_set_filter_func (GTK_FLOW_BOX (self->grid),
                                 launch_filter_child, self, NULL);
   gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), self->grid);
-  gtk_box_append (GTK_BOX (surface), scroll);
+  gtk_box_append (GTK_BOX (shell), scroll);
+
+  statusbar = ooze_surface_new (OOZE_SURFACE_STATUSBAR,
+                                GTK_ORIENTATION_HORIZONTAL);
+  gtk_widget_add_css_class (statusbar, "ooze-launch-statusbar");
+  gtk_widget_set_hexpand (statusbar, TRUE);
+  gtk_box_append (GTK_BOX (shell), statusbar);
 
   self->groups_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
   gtk_widget_set_hexpand (self->groups_bar, TRUE);
   gtk_widget_add_css_class (self->groups_bar, "ooze-launch-groups");
-  gtk_box_append (GTK_BOX (surface), self->groups_bar);
+  gtk_box_append (GTK_BOX (statusbar), self->groups_bar);
 
   for (i = 0; i < self->apps->len; i++)
     {
