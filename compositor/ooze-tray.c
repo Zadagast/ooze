@@ -80,6 +80,8 @@ ooze_tray_update_icon_content (OozeTrayIcon *icon)
           clutter_actor_set_content (icon->actor, g_steal_pointer (&content));
           clutter_actor_set_content_gravity (icon->actor,
                                              CLUTTER_CONTENT_GRAVITY_RESIZE_ASPECT);
+          cogl_color_init_from_4f (&fallback, 0.0f, 0.0f, 0.0f, 0.0f);
+          clutter_actor_set_background_color (icon->actor, &fallback);
           return;
         }
     }
@@ -253,13 +255,11 @@ ooze_tray_on_icon_pressed (ClutterActor *actor G_GNUC_UNUSED,
   button = clutter_event_get_button (event);
   if (button == CLUTTER_BUTTON_PRIMARY)
     {
-      /* ItemIsMenu: left click shows the menu; otherwise Activate. */
-      if (ooze_sni_item_is_menu (icon->item))
+      /* Prefer the exported menu when available. Some indicators leave
+       * ItemIsMenu false even though Activate is a no-op. */
+      if (ooze_sni_item_menu_path (icon->item))
         {
-          if (ooze_sni_item_menu_path (icon->item))
-            g_idle_add (ooze_tray_open_menu_idle, icon);
-          else
-            ooze_sni_item_context_menu (icon->item, 0, 0);
+          g_idle_add (ooze_tray_open_menu_idle, icon);
         }
       else
         ooze_sni_item_activate (icon->item, 0, 0);

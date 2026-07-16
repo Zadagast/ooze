@@ -13,7 +13,7 @@
 #define OOZE_SNI_ITEM_IFACE        "org.kde.StatusNotifierItem"
 #define OOZE_SNI_DEFAULT_ITEM_PATH "/StatusNotifierItem"
 #define OOZE_SNI_ICON_MAX_PX       64
-#define OOZE_SNI_ICON_DISPLAY_PX   20
+#define OOZE_SNI_ICON_DISPLAY_PX   40
 
 struct _OozeSniItem
 {
