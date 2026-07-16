@@ -92,6 +92,12 @@ ooze_tray_update_icon_content (OozeTrayIcon *icon)
   if (pb)
     content = ooze_aqua_content_from_pixbuf (icon->actor, pb);
 
+  g_message ("OOZE_TRAY_DEBUG: content name='%s' sni_pb=%p fallback_pb=%p content=%p",
+             ooze_sni_item_icon_name (icon->item),
+             (void *) ooze_sni_item_icon_pixbuf (icon->item),
+             (void *) fallback_pb,
+             (void *) content);
+
   clutter_actor_set_content (icon->actor, content);
   if (content)
     clutter_actor_set_content_gravity (icon->actor,
