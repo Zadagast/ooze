@@ -1,7 +1,6 @@
 #include "ooze-application.h"
 
-#include "ooze-shared-icons.h"
-#include "ooze-theme.h"
+#include "ooze-init.h"
 
 struct _OozeApplication
 {
@@ -15,8 +14,7 @@ ooze_application_startup (GApplication *application)
 {
   G_APPLICATION_CLASS (ooze_application_parent_class)->startup (application);
 
-  ooze_theme_ensure ();
-  ooze_icons_configure_gtk_async ();
+  ooze_kit_init ();
 }
 
 static void

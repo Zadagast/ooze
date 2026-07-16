@@ -5,6 +5,7 @@
 #include "ooze-display-config.h"
 #include "ooze-button.h"
 #include "ooze-header-bar.h"
+#include "ooze-init.h"
 #include "ooze-surface.h"
 
 #include <adwaita.h>
@@ -113,7 +114,7 @@ ooze_portal_backend_ensure_gtk (void)
 
   if (g_once_init_enter (&initialized))
     {
-      gtk_init ();
+      ooze_kit_init ();
       g_once_init_leave (&initialized, 1);
     }
 }

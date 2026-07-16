@@ -247,6 +247,7 @@ vte_dep = dependency('vte-2.91-gtk4', required: false)
 # versioned shared library; all GTK apps link it.
 ooze_kit_lib = shared_library('ooze-kit',
   'ooze-kit/ooze-application.c',
+  'ooze-kit/ooze-init.c',
   'ooze-kit/ooze-application-window.c',
   'ooze-kit/ooze-palette.c',
   'ooze-kit/ooze-draw.c',
@@ -295,6 +296,7 @@ meson.override_dependency('oozekit', ooze_kit_dep)
 
 oozekit_public_headers = [
   'ooze-kit/ooze-application.h',
+  'ooze-kit/ooze-init.h',
   'ooze-kit/ooze-application-window.h',
   'ooze-kit/ooze-about.h',
   'ooze-kit/ooze-button.h',
