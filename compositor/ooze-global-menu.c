@@ -467,6 +467,13 @@ ooze_global_menu_query_appmenu_registrar_async (OozeGlobalMenu *menu,
   guint32 toplevel_xid;
 
   ooze_global_menu_cancel_bind_query (menu);
+
+  if (meta_window_get_client_type (window) != META_WINDOW_CLIENT_TYPE_X11)
+    {
+      ooze_global_menu_bind_window_with_registrar (menu, window, NULL, NULL);
+      return;
+    }
+
   ooze_global_menu_ensure_registrar_service (menu);
 
   xid = (guint32) meta_window_x11_get_xwindow (window);
@@ -1093,27 +1100,11 @@ ooze_global_menu_bind_window (OozeGlobalMenu *menu,
    * The registrar lookup is asynchronous; binding completes in
    * ooze_global_menu_bind_window_with_registrar().
    */
-  if (ooze_appmenu_foreign_enabled () && menu->session)
+  if (ooze_appmenu_foreign_enabled () && menu->session && is_x11)
     {
-      if (is_x11)
-        {
-          ooze_appmenu_ensure_shell_shows_menubar ();
-          ooze_global_menu_query_appmenu_registrar_async (menu, window);
-          return;
-        }
-
-      {
-        const char *bus = meta_window_get_gtk_unique_bus_name (window);
-        const char *menubar = meta_window_get_gtk_menubar_object_path (window);
-
-        if (!menubar || !*menubar)
-          menubar = meta_window_get_gtk_app_menu_object_path (window);
-        if (!bus || !*bus || !menubar || !*menubar)
-          {
-            ooze_global_menu_query_appmenu_registrar_async (menu, window);
-            return;
-          }
-      }
+      ooze_appmenu_ensure_shell_shows_menubar ();
+      ooze_global_menu_query_appmenu_registrar_async (menu, window);
+      return;
     }
 
   ooze_global_menu_bind_window_with_registrar (menu, window, NULL, NULL);

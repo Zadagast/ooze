@@ -98,6 +98,7 @@ typedef struct
   gulong        position_id;
   gulong        size_id;
   gulong        unmanaged_id;
+  gulong        actor_destroy_id;
   gboolean      theme_watched;
 } OozeForeignGel;
 
@@ -537,9 +538,22 @@ ooze_foreign_gel_on_theme_changed (gpointer user_data)
 {
   OozeForeignGel *gel = user_data;
 
+  if (!gel->actor)
+    return;
+
   /* The pill colour follows the header background; rebuild on toggle. */
   clutter_actor_destroy_all_children (gel->actor);
   ooze_foreign_gel_build_lights (gel->actor);
+}
+
+static void
+ooze_foreign_gel_on_actor_destroy (ClutterActor *actor G_GNUC_UNUSED,
+                                   gpointer      user_data)
+{
+  OozeForeignGel *gel = user_data;
+
+  gel->actor = NULL;
+  gel->actor_destroy_id = 0;
 }
 
 static void
@@ -562,7 +576,12 @@ ooze_foreign_gel_free (gpointer data)
   g_clear_signal_handler (&gel->position_id, gel->window);
   g_clear_signal_handler (&gel->size_id, gel->window);
   g_clear_signal_handler (&gel->unmanaged_id, gel->window);
-  g_clear_pointer (&gel->actor, clutter_actor_destroy);
+  if (gel->actor)
+    {
+      g_clear_signal_handler (&gel->actor_destroy_id, gel->actor);
+      clutter_actor_destroy (gel->actor);
+      gel->actor = NULL;
+    }
   g_free (gel);
 }
 
@@ -608,6 +627,9 @@ ooze_foreign_gel_attach (OozeForeignGelState *state,
 
   g_signal_connect (gel->actor, "button-press-event",
                     G_CALLBACK (ooze_foreign_gel_on_button), gel);
+  gel->actor_destroy_id =
+    g_signal_connect (gel->actor, "destroy",
+                      G_CALLBACK (ooze_foreign_gel_on_actor_destroy), gel);
 
   clutter_actor_add_child (CLUTTER_ACTOR (window_actor), gel->actor);
   clutter_actor_set_child_above_sibling (CLUTTER_ACTOR (window_actor),
