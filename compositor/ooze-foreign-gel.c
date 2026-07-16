@@ -105,9 +105,21 @@ struct _OozeForeignGelState
 {
   MetaDisplay *display;
   GHashTable  *overlays; /* MetaWindow* -> OozeForeignGel* */
+  GHashTable  *retries;  /* MetaWindow* -> OozeForeignGelRetry* */
 };
 
 typedef struct _OozeForeignGelState OozeForeignGelState;
+
+typedef struct
+{
+  OozeForeignGelState *state;
+  OozePlugin           *plugin;
+  MetaWindow           *window;
+  gulong                window_type_id;
+  gulong                wm_class_id;
+  gulong                gtk_app_id_id;
+  gulong                unmanaged_id;
+} OozeForeignGelRetry;
 
 gboolean
 ooze_foreign_gel_enabled (void)
@@ -428,7 +440,97 @@ ooze_foreign_gel_should_attach (MetaWindow *window)
 
 static void ooze_foreign_gel_remove (OozeForeignGelState *state,
                                      MetaWindow          *window);
+static void ooze_foreign_gel_attach (OozeForeignGelState *state,
+                                     OozePlugin          *plugin,
+                                     MetaWindow          *window);
 static void ooze_foreign_gel_build_lights (ClutterActor *parent);
+
+static void
+ooze_foreign_gel_retry_free (gpointer data)
+{
+  OozeForeignGelRetry *retry = data;
+
+  g_clear_signal_handler (&retry->window_type_id, retry->window);
+  g_clear_signal_handler (&retry->wm_class_id, retry->window);
+  g_clear_signal_handler (&retry->gtk_app_id_id, retry->window);
+  g_clear_signal_handler (&retry->unmanaged_id, retry->window);
+  g_free (retry);
+}
+
+static void
+ooze_foreign_gel_retry_remove (OozeForeignGelState *state,
+                               MetaWindow          *window)
+{
+  if (!state)
+    return;
+
+  g_hash_table_remove (state->retries, window);
+}
+
+static void
+ooze_foreign_gel_on_retry_unmanaged (MetaWindow *window,
+                                     gpointer    user_data)
+{
+  OozeForeignGelRetry *retry = user_data;
+
+  ooze_foreign_gel_retry_remove (retry->state, window);
+}
+
+static void
+ooze_foreign_gel_on_retry_state_changed (MetaWindow *window,
+                                         GParamSpec *pspec G_GNUC_UNUSED,
+                                         gpointer    user_data)
+{
+  OozeForeignGelRetry *retry = user_data;
+  OozeForeignGelState *state = retry->state;
+
+  if (g_hash_table_contains (state->overlays, window))
+    {
+      ooze_foreign_gel_retry_remove (state, window);
+      return;
+    }
+
+  if (!ooze_foreign_gel_should_attach (window))
+    return;
+
+  ooze_foreign_gel_attach (state, retry->plugin, window);
+  if (g_hash_table_contains (state->overlays, window))
+    ooze_foreign_gel_retry_remove (state, window);
+}
+
+static void
+ooze_foreign_gel_watch_for_retry (OozeForeignGelState *state,
+                                  OozePlugin          *plugin,
+                                  MetaWindow          *window)
+{
+  OozeForeignGelRetry *retry;
+
+  if (g_hash_table_contains (state->overlays, window) ||
+      g_hash_table_contains (state->retries, window))
+    return;
+
+  retry = g_new0 (OozeForeignGelRetry, 1);
+  retry->state = state;
+  retry->plugin = plugin;
+  retry->window = window;
+  retry->window_type_id =
+    g_signal_connect (window, "notify::window-type",
+                      G_CALLBACK (ooze_foreign_gel_on_retry_state_changed),
+                      retry);
+  retry->wm_class_id =
+    g_signal_connect (window, "notify::wm-class",
+                      G_CALLBACK (ooze_foreign_gel_on_retry_state_changed),
+                      retry);
+  retry->gtk_app_id_id =
+    g_signal_connect (window, "notify::gtk-application-id",
+                      G_CALLBACK (ooze_foreign_gel_on_retry_state_changed),
+                      retry);
+  retry->unmanaged_id =
+    g_signal_connect (window, "unmanaged",
+                      G_CALLBACK (ooze_foreign_gel_on_retry_unmanaged),
+                      retry);
+  g_hash_table_insert (state->retries, window, retry);
+}
 
 static void
 ooze_foreign_gel_on_theme_changed (gpointer user_data)
@@ -539,6 +641,18 @@ ooze_foreign_gel_attach (OozeForeignGelState *state,
                meta_window_get_description (window));
 }
 
+static void
+ooze_foreign_gel_attach_or_watch (OozeForeignGelState *state,
+                                   OozePlugin          *plugin,
+                                   MetaWindow          *window)
+{
+  ooze_foreign_gel_attach (state, plugin, window);
+
+  if (!g_hash_table_contains (state->overlays, window) &&
+      !ooze_foreign_gel_should_attach (window))
+    ooze_foreign_gel_watch_for_retry (state, plugin, window);
+}
+
 void
 ooze_foreign_gel_maybe_attach (OozePlugin      *plugin,
                                MetaWindowActor *actor)
@@ -552,7 +666,7 @@ ooze_foreign_gel_maybe_attach (OozePlugin      *plugin,
   if (!window)
     return;
 
-  ooze_foreign_gel_attach (plugin->foreign_gel, plugin, window);
+  ooze_foreign_gel_attach_or_watch (plugin->foreign_gel, plugin, window);
 }
 
 void
@@ -574,6 +688,8 @@ ooze_foreign_gel_init (OozePlugin *plugin)
   state->display = display;
   state->overlays = g_hash_table_new_full (NULL, NULL, NULL,
                                             ooze_foreign_gel_free);
+  state->retries = g_hash_table_new_full (NULL, NULL, NULL,
+                                          ooze_foreign_gel_retry_free);
   plugin->foreign_gel = state;
 
   /* Windows that mapped before init; later ones attach from the plugin's
@@ -581,7 +697,7 @@ ooze_foreign_gel_init (OozePlugin *plugin)
    * yet, so attaching there silently fails). */
   windows = meta_display_list_all_windows (display);
   for (l = windows; l != NULL; l = l->next)
-    ooze_foreign_gel_attach (state, plugin, l->data);
+    ooze_foreign_gel_attach_or_watch (state, plugin, l->data);
   g_list_free (windows);
 
   g_print ("Ooze: foreign Gel traffic lights enabled\n");
@@ -595,6 +711,7 @@ ooze_foreign_gel_shutdown (OozePlugin *plugin)
   if (!state)
     return;
 
+  g_hash_table_destroy (state->retries);
   g_hash_table_destroy (state->overlays);
   g_free (state);
   plugin->foreign_gel = NULL;
