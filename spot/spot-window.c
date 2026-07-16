@@ -47,15 +47,6 @@ static const char * const spot_context_folder_icons[] = {
 static const char * const spot_context_refresh_icons[] = {
   "view-refresh-symbolic", "view-refresh", NULL,
 };
-static const char * const spot_context_window_icons[] = {
-  "window-new-symbolic", "window-new", NULL,
-};
-static const char * const spot_context_grid_icons[] = {
-  "view-grid-symbolic", "view-grid", "view-app-grid-symbolic", NULL,
-};
-static const char * const spot_context_columns_icons[] = {
-  "view-column-symbolic", "view-column", "view-list-symbolic", NULL,
-};
 
 typedef enum {
   SPOT_VIEW_GRID    = 0,  /* default */
@@ -1677,16 +1668,6 @@ spot_show_context_menu (SpotWindow *self,
                                   spot_context_refresh_icons);
     }
 
-  ooze_grid_menu_append_separator (self->context_menu);
-  spot_context_append_action (self->context_menu, self,
-                              "as Icons", "win.view-grid",
-                              spot_context_grid_icons);
-  spot_context_append_action (self->context_menu, self,
-                              "as Columns", "win.view-columns",
-                              spot_context_columns_icons);
-  spot_context_append_action (self->context_menu, self,
-                              "New Window", "win.new-window",
-                              spot_context_window_icons);
   ooze_popover_fit_screen (GTK_POPOVER (self->context_menu));
 
   graphene_point_init (&local, (float) x, (float) y);
