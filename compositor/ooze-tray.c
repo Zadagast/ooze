@@ -5,7 +5,7 @@
 #include "ooze-dbusmenu.h"
 #include "ooze-plugin-priv.h"
 #include "ooze-sni.h"
-#include "ooze-stall.h"
+#include "../shared/ooze-icon-lookup.h"
 #include "ooze-theme.h"
 
 #include <meta/display.h>
@@ -21,6 +21,14 @@ typedef struct
   OozePlugin  *plugin;
   OozeSniItem *item;
   ClutterActor *actor;
+
+  /* Persistent dbusmenu client, created when the item exports a menu and
+   * started immediately so the layout is cached before the first click
+   * (matches Ubuntu's AppIndicator host; Ayatana menus populate lazily). */
+  GDBusConnection *session;
+  OozeDbusmenu    *menu;
+  gboolean         menu_show_pending;
+  guint            menu_pending_timeout;
 } OozeTrayIcon;
 
 typedef struct
@@ -41,6 +49,10 @@ ooze_tray_icon_free (gpointer data)
     return;
   if (icon->actor)
     clutter_actor_destroy (icon->actor);
+  if (icon->menu_pending_timeout)
+    g_source_remove (icon->menu_pending_timeout);
+  g_clear_pointer (&icon->menu, ooze_dbusmenu_free);
+  g_clear_object (&icon->session);
   g_free (icon);
 }
 
@@ -65,39 +77,36 @@ static void
 ooze_tray_update_icon_content (OozeTrayIcon *icon)
 {
   GdkPixbuf *pb;
+  g_autoptr (GdkPixbuf) fallback_pb = NULL;
   g_autoptr (ClutterContent) content = NULL;
-  CoglColor fallback;
+  CoglColor transparent;
 
   if (!icon || !icon->actor)
     return;
 
+  /* Ubuntu's AppIndicator host and KDE's SNI host never draw a background or
+   * border behind a tray icon (St.Icon "system-status-icon", padding:0). Keep
+   * the actor fully transparent so app-provided icons render flat and clean. */
+  cogl_color_init_from_4f (&transparent, 0.0f, 0.0f, 0.0f, 0.0f);
+  clutter_actor_set_background_color (icon->actor, &transparent);
+
   pb = ooze_sni_item_icon_pixbuf (icon->item);
-  if (pb)
+  if (!pb)
     {
-      content = ooze_aqua_content_from_pixbuf (icon->actor, pb);
-      if (content)
-        {
-          clutter_actor_set_content (icon->actor, g_steal_pointer (&content));
-          clutter_actor_set_content_gravity (icon->actor,
-                                             CLUTTER_CONTENT_GRAVITY_RESIZE_ASPECT);
-          cogl_color_init_from_4f (&fallback, 0.0f, 0.0f, 0.0f, 0.0f);
-          clutter_actor_set_background_color (icon->actor, &fallback);
-          return;
-        }
+      /* No resolvable icon: show a themed fallback glyph like GNOME's
+       * fallbackIconName, not a coloured placeholder box. */
+      fallback_pb = ooze_icon_lookup_load ("image-missing",
+                                           (int) (OOZE_TRAY_ICON_SIZE * 2.0f));
+      pb = fallback_pb;
     }
 
-  /* No loadable icon: neutral placeholder in the panel text color. */
-  {
-    const OozeAquaPalette *palette = ooze_theme_get_palette (NULL);
+  if (pb)
+    content = ooze_aqua_content_from_pixbuf (icon->actor, pb);
 
-    cogl_color_init_from_4f (&fallback,
-                             (float) palette->menu_text_r,
-                             (float) palette->menu_text_g,
-                             (float) palette->menu_text_b,
-                             0.35f);
-  }
-  clutter_actor_set_content (icon->actor, NULL);
-  clutter_actor_set_background_color (icon->actor, &fallback);
+  clutter_actor_set_content (icon->actor, content);
+  if (content)
+    clutter_actor_set_content_gravity (icon->actor,
+                                       CLUTTER_CONTENT_GRAVITY_RESIZE_ASPECT);
 }
 
 static void
@@ -124,60 +133,125 @@ ooze_tray_menu_ctx_free (OozeTrayMenuCtx *ctx)
 {
   if (!ctx)
     return;
+  /* ctx->menu is borrowed from the OozeTrayIcon; never freed here. */
   ooze_dbusmenu_items_free (ctx->flat, ctx->n_flat);
-  ooze_dbusmenu_free (ctx->menu);
   g_free (ctx);
 }
 
+/* Called when the persistent dbusmenu client's cached layout changes. */
+static void ooze_tray_show_menu (OozeTrayIcon *icon);
+
+static void
+ooze_tray_clear_pending_show (OozeTrayIcon *icon)
+{
+  icon->menu_show_pending = FALSE;
+  if (icon->menu_pending_timeout)
+    {
+      g_source_remove (icon->menu_pending_timeout);
+      icon->menu_pending_timeout = 0;
+    }
+}
+
 static gboolean
-ooze_tray_open_menu_idle (gpointer user_data)
+ooze_tray_pending_show_timeout (gpointer user_data)
 {
   OozeTrayIcon *icon = user_data;
-  OozePlugin *plugin;
-  OozeTrayMenuCtx *ctx;
-  g_autoptr (OozeStallScope) stall = NULL;
-  g_autoptr (GDBusConnection) session = NULL;
-  g_autoptr (GError) error = NULL;
+
+  /* The layout never arrived; treat the click as an Activate. */
+  icon->menu_pending_timeout = 0;
+  icon->menu_show_pending = FALSE;
+  if (icon->plugin && !icon->plugin->shutting_down)
+    ooze_sni_item_activate (icon->item, 0, 0);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+ooze_tray_on_menu_layout_changed (gpointer user_data)
+{
+  OozeTrayIcon *icon = user_data;
+
+  if (!icon || !icon->plugin || icon->plugin->shutting_down)
+    return;
+
+  /* A click landed before the lazy layout arrived; show it now. */
+  if (icon->menu_show_pending)
+    {
+      ooze_tray_clear_pending_show (icon);
+      ooze_tray_show_menu (icon);
+    }
+}
+
+/* Create + start the dbusmenu client as soon as the item exports a menu,
+ * so the layout is already cached when the user clicks (Ayatana exporters
+ * return an empty layout until AboutToShow has been processed). */
+static void
+ooze_tray_icon_ensure_menu (OozeTrayIcon *icon)
+{
   const char *menu_path;
   const char *bus_name;
+
+  if (!icon || icon->menu)
+    return;
+
+  menu_path = ooze_sni_item_menu_path (icon->item);
+  bus_name = ooze_sni_item_bus_name (icon->item);
+  if (!menu_path || !menu_path[0] || !bus_name)
+    return;
+
+  if (!icon->session)
+    {
+      g_autoptr (GError) error = NULL;
+
+      icon->session = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, &error);
+      if (!icon->session)
+        {
+          g_warning ("Ooze tray: session bus unavailable: %s", error->message);
+          return;
+        }
+    }
+
+  icon->menu = ooze_dbusmenu_new (icon->session, bus_name, menu_path);
+  if (!icon->menu)
+    return;
+
+  ooze_dbusmenu_set_changed_callback (icon->menu,
+                                      ooze_tray_on_menu_layout_changed,
+                                      icon);
+  ooze_dbusmenu_start (icon->menu);
+}
+
+static void
+ooze_tray_show_menu (OozeTrayIcon *icon)
+{
+  OozePlugin *plugin;
+  OozeTrayMenuCtx *ctx;
   OozeAquaMenuEntry *entries = NULL;
   gsize n = 0;
   gsize i;
   gsize out = 0;
 
-  if (!icon || !icon->plugin || !icon->item)
-    return G_SOURCE_REMOVE;
+  if (!icon || !icon->plugin || !icon->item || !icon->menu)
+    return;
 
   plugin = icon->plugin;
   if (plugin->shutting_down)
-    return G_SOURCE_REMOVE;
-  menu_path = ooze_sni_item_menu_path (icon->item);
-  bus_name = ooze_sni_item_bus_name (icon->item);
-  if (!menu_path || !menu_path[0] || !bus_name)
-    {
-      ooze_sni_item_activate (icon->item, 0, 0);
-      return G_SOURCE_REMOVE;
-    }
-
-  stall = ooze_stall_begin ("tray-dbusmenu");
-  session = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, &error);
-  if (!session)
-    {
-      g_warning ("Ooze tray: session bus unavailable: %s", error->message);
-      return G_SOURCE_REMOVE;
-    }
+    return;
 
   ctx = g_new0 (OozeTrayMenuCtx, 1);
   ctx->plugin = plugin;
   ctx->item = icon->item;
-  ctx->menu = ooze_dbusmenu_new (session, bus_name, menu_path);
-  if (!ctx->menu ||
-      !ooze_dbusmenu_get_top_items (ctx->menu, &ctx->flat, &ctx->n_flat) ||
+  ctx->menu = icon->menu; /* borrowed */
+  if (!ooze_dbusmenu_get_top_items (ctx->menu, &ctx->flat, &ctx->n_flat) ||
       ctx->n_flat == 0)
     {
       ooze_tray_menu_ctx_free (ctx);
-      ooze_sni_item_activate (icon->item, 0, 0);
-      return G_SOURCE_REMOVE;
+      /* get_top_items kicked an async fetch; show when it lands, or fall
+       * back to Activate if the exporter never delivers a layout. */
+      icon->menu_show_pending = TRUE;
+      if (!icon->menu_pending_timeout)
+        icon->menu_pending_timeout =
+          g_timeout_add (1000, ooze_tray_pending_show_timeout, icon);
+      return;
     }
 
   n = ctx->n_flat;
@@ -199,7 +273,7 @@ ooze_tray_open_menu_idle (gpointer user_data)
       g_free (entries);
       ooze_tray_menu_ctx_free (ctx);
       ooze_sni_item_activate (icon->item, 0, 0);
-      return G_SOURCE_REMOVE;
+      return;
     }
 
   if (plugin->tray_menu_ctx)
@@ -238,7 +312,6 @@ ooze_tray_open_menu_idle (gpointer user_data)
                                   entries,
                                   out);
   g_free (entries);
-  return G_SOURCE_REMOVE;
 }
 
 static gboolean
@@ -253,14 +326,21 @@ ooze_tray_on_icon_pressed (ClutterActor *actor G_GNUC_UNUSED,
     return CLUTTER_EVENT_PROPAGATE;
 
   button = clutter_event_get_button (event);
+
+  /* GNOME AppIndicator semantics: middle = SecondaryActivate. */
+  if (button == CLUTTER_BUTTON_MIDDLE)
+    {
+      ooze_sni_item_secondary_activate (icon->item, 0, 0);
+      return CLUTTER_EVENT_STOP;
+    }
+
   if (button == CLUTTER_BUTTON_PRIMARY)
     {
       /* Prefer the exported menu when available. Some indicators leave
        * ItemIsMenu false even though Activate is a no-op. */
-      if (ooze_sni_item_menu_path (icon->item))
-        {
-          g_idle_add (ooze_tray_open_menu_idle, icon);
-        }
+      ooze_tray_icon_ensure_menu (icon);
+      if (icon->menu)
+        ooze_tray_show_menu (icon);
       else
         ooze_sni_item_activate (icon->item, 0, 0);
       return CLUTTER_EVENT_STOP;
@@ -268,8 +348,9 @@ ooze_tray_on_icon_pressed (ClutterActor *actor G_GNUC_UNUSED,
 
   if (button == CLUTTER_BUTTON_SECONDARY)
     {
-      if (ooze_sni_item_menu_path (icon->item))
-        g_idle_add (ooze_tray_open_menu_idle, icon);
+      ooze_tray_icon_ensure_menu (icon);
+      if (icon->menu)
+        ooze_tray_show_menu (icon);
       else
         ooze_sni_item_context_menu (icon->item, 0, 0);
       return CLUTTER_EVENT_STOP;
@@ -298,6 +379,9 @@ ooze_tray_add_or_update (OozePlugin *plugin, OozeSniItem *item)
       g_ptr_array_add (plugin->tray_icons, icon);
     }
 
+  /* Menu path may appear on a later property update. */
+  ooze_tray_icon_ensure_menu (icon);
+
   ooze_tray_update_icon_content (icon);
   ooze_tray_layout (plugin,
                     clutter_actor_get_width (plugin->panel),
@@ -321,6 +405,16 @@ ooze_tray_on_item_removed (OozeSniItem *item, gpointer user_data)
 
   if (plugin->shutting_down || !plugin->tray_icons)
     return;
+
+  /* The open popup's ctx borrows this item's dbusmenu; drop it first. */
+  if (plugin->tray_menu_ctx &&
+      ((OozeTrayMenuCtx *) plugin->tray_menu_ctx)->item == item)
+    {
+      if (plugin->tray_popup)
+        g_clear_pointer (&plugin->tray_popup, ooze_aqua_menu_destroy);
+      ooze_tray_menu_ctx_free (plugin->tray_menu_ctx);
+      plugin->tray_menu_ctx = NULL;
+    }
 
   for (i = 0; i < plugin->tray_icons->len; i++)
     {
