@@ -1640,6 +1640,36 @@ ooze_global_menu_wants_shell_stubs (OozeGlobalMenu *menu)
   return ooze_global_menu_window_is_spot (focus);
 }
 
+MetaWindow *
+ooze_global_menu_get_fallback_window (OozeGlobalMenu *menu)
+{
+  MetaWindow *focus;
+
+  if (!menu || !menu->display)
+    return NULL;
+
+  if (ooze_global_menu_has_app_menu (menu))
+    return NULL;
+
+  focus = meta_display_get_focus_window (menu->display);
+  if (!focus)
+    {
+      /* Panel click clears focus; fall back to the last watched/bound app. */
+      if (menu->watched_window &&
+          !ooze_global_menu_window_is_spot (menu->watched_window))
+        return menu->watched_window;
+      if (menu->bound_window &&
+          !ooze_global_menu_window_is_spot (menu->bound_window))
+        return menu->bound_window;
+      return NULL;
+    }
+
+  if (ooze_global_menu_window_is_spot (focus))
+    return NULL;
+
+  return focus;
+}
+
 guint
 ooze_global_menu_get_n_top (OozeGlobalMenu *menu)
 {

@@ -24,6 +24,7 @@ struct _OozePlugin
   ClutterActor *menu_bar_labels[OOZE_GLOBAL_MENU_MAX_TOP];
   guint         n_menu_bar_labels;
   gboolean      menu_bar_from_app;
+  gboolean      menu_bar_fallback;
   gsize         pending_menu_index;
   gboolean      pending_menu_open;
   guint         pending_menu_idle;

@@ -11,6 +11,7 @@
 #include "../common/aqua-chrome.h"
 #include "../common/ooze-font.h"
 
+#include <gio/gdesktopappinfo.h>
 #include <meta/compositor.h>
 #include <meta/display.h>
 #include <meta/meta-context.h>
@@ -305,6 +306,193 @@ panel_show_bar_menu (OozePlugin *plugin, gsize menu_index, ClutterActor *anchor)
   panel_show_bar_menu_ex (plugin, menu_index, anchor, TRUE);
 }
 
+/* ── Fallback app menu (foreign windows without a menu export) ──────────── */
+
+static const char *const panel_fallback_menu_items[] = {
+  "File",
+  "Window",
+  "Help",
+};
+
+static char *
+panel_window_app_display_name (MetaWindow *window)
+{
+  const char *app_id;
+  const char *wm_class;
+  g_autoptr (GDesktopAppInfo) info = NULL;
+
+  if (!window)
+    return g_strdup ("Application");
+
+  app_id = meta_window_get_gtk_application_id (window);
+  wm_class = meta_window_get_wm_class (window);
+
+  if (app_id)
+    {
+      g_autofree char *desktop = g_strconcat (app_id, ".desktop", NULL);
+
+      info = g_desktop_app_info_new (desktop);
+    }
+  if (!info && wm_class)
+    {
+      g_autofree char *lower = g_utf8_strdown (wm_class, -1);
+      g_autofree char *desktop = g_strconcat (lower, ".desktop", NULL);
+
+      info = g_desktop_app_info_new (desktop);
+    }
+
+  if (info)
+    return g_strdup (g_app_info_get_display_name (G_APP_INFO (info)));
+  if (wm_class && *wm_class)
+    return g_strdup (wm_class);
+  return g_strdup ("Application");
+}
+
+static void
+panel_show_window_menu (OozePlugin   *plugin,
+                        ClutterActor *anchor,
+                        gboolean      user_toggle,
+                        gboolean      has_focus)
+{
+  MetaDisplay *display;
+  GList *windows;
+  GList *l;
+  g_autoptr (GArray) entries = g_array_new (FALSE, FALSE,
+                                            sizeof (OozeAquaMenuEntry));
+  OozeAquaMenuEntry row;
+  int focus_index = OOZE_MENU_WINDOW_FOCUS_BASE;
+  gboolean added_window = FALSE;
+
+  row = (OozeAquaMenuEntry){ "Minimize", OOZE_MENU_WINDOW_MINIMIZE, has_focus };
+  g_array_append_val (entries, row);
+  row = (OozeAquaMenuEntry){ "Zoom", OOZE_MENU_WINDOW_ZOOM, has_focus };
+  g_array_append_val (entries, row);
+  row = (OozeAquaMenuEntry){ "Bring All to Front", OOZE_MENU_WINDOW_BRING_ALL, TRUE };
+  g_array_append_val (entries, row);
+
+  display = meta_plugin_get_display (META_PLUGIN (plugin));
+  windows = meta_display_list_all_windows (display);
+  for (l = windows; l != NULL; l = l->next)
+    {
+      MetaWindow *w = l->data;
+      const char *title;
+
+      if (meta_window_get_window_type (w) != META_WINDOW_NORMAL)
+        continue;
+
+      if (!added_window)
+        {
+          row = (OozeAquaMenuEntry){ NULL, 0, FALSE };
+          g_array_append_val (entries, row);
+          added_window = TRUE;
+        }
+
+      title = meta_window_get_title (w);
+      if (!title || title[0] == '\0')
+        title = "Untitled";
+
+      row = (OozeAquaMenuEntry){ title, focus_index++, TRUE };
+      g_array_append_val (entries, row);
+    }
+  g_list_free (windows);
+
+  if (user_toggle)
+    ooze_aqua_menu_toggle_for_anchor (plugin->menu_popup, anchor,
+                                    (OozeAquaMenuEntry *) entries->data,
+                                    entries->len);
+  else
+    ooze_aqua_menu_show_for_anchor (plugin->menu_popup, anchor,
+                                  (OozeAquaMenuEntry *) entries->data,
+                                  entries->len);
+}
+
+static void
+panel_show_entries (OozePlugin              *plugin,
+                    ClutterActor            *anchor,
+                    gboolean                 user_toggle,
+                    const OozeAquaMenuEntry *entries,
+                    gsize                    n_entries)
+{
+  if (user_toggle)
+    ooze_aqua_menu_toggle_for_anchor (plugin->menu_popup, anchor,
+                                    entries, n_entries);
+  else
+    ooze_aqua_menu_show_for_anchor (plugin->menu_popup, anchor,
+                                  entries, n_entries);
+}
+
+static void
+panel_show_fallback_menu (OozePlugin   *plugin,
+                          gsize         menu_index,
+                          ClutterActor *anchor,
+                          gboolean      user_toggle)
+{
+  MetaWindow *win = NULL;
+  MetaWindow *focus;
+  gboolean has_focus;
+
+  if (plugin->global_menu)
+    win = ooze_global_menu_get_fallback_window (plugin->global_menu);
+
+  focus = meta_display_get_focus_window (
+    meta_plugin_get_display (META_PLUGIN (plugin)));
+  has_focus = focus != NULL;
+
+  switch (menu_index)
+    {
+    case 0:
+      {
+        g_autofree char *name = panel_window_app_display_name (win);
+        g_autofree char *hide_label = g_strdup_printf ("Hide %s", name);
+        g_autofree char *quit_label = g_strdup_printf ("Quit %s", name);
+        const char *hint = plugin->global_menu ?
+          ooze_global_menu_get_x11_launch_hint (plugin->global_menu) : NULL;
+        OozeAquaMenuEntry entries[4];
+        gsize n = 0;
+
+        if (hint)
+          {
+            entries[n++] = (OozeAquaMenuEntry){ hint, 0, FALSE };
+            entries[n++] = (OozeAquaMenuEntry){ NULL, 0, FALSE };
+          }
+        entries[n++] = (OozeAquaMenuEntry){ hide_label, OOZE_MENU_APP_HIDE,
+                                            win != NULL };
+        entries[n++] = (OozeAquaMenuEntry){ quit_label, OOZE_MENU_APP_QUIT,
+                                            win != NULL };
+
+        panel_show_entries (plugin, anchor, user_toggle, entries, n);
+      }
+      break;
+
+    case 1:
+      {
+        OozeAquaMenuEntry entries[] = {
+          { "Close Window", OOZE_MENU_FILE_CLOSE, has_focus },
+        };
+        panel_show_entries (plugin, anchor, user_toggle,
+                            entries, G_N_ELEMENTS (entries));
+      }
+      break;
+
+    case 2:
+      panel_show_window_menu (plugin, anchor, user_toggle, has_focus);
+      break;
+
+    case 3:
+      {
+        OozeAquaMenuEntry entries[] = {
+          { "About Ooze", OOZE_MENU_HELP_ABOUT, TRUE },
+        };
+        panel_show_entries (plugin, anchor, user_toggle,
+                            entries, G_N_ELEMENTS (entries));
+      }
+      break;
+
+    default:
+      break;
+    }
+}
+
 static void
 panel_show_bar_menu_ex (OozePlugin     *plugin,
                         gsize         menu_index,
@@ -366,7 +554,11 @@ panel_show_bar_menu_ex (OozePlugin     *plugin,
 
   if (plugin->global_menu &&
       !ooze_global_menu_wants_shell_stubs (plugin->global_menu))
-    return;
+    {
+      if (plugin->menu_bar_fallback)
+        panel_show_fallback_menu (plugin, menu_index, anchor, user_toggle);
+      return;
+    }
 
   focus = meta_display_get_focus_window (
     meta_plugin_get_display (META_PLUGIN (plugin)));
@@ -445,58 +637,7 @@ panel_show_bar_menu_ex (OozePlugin     *plugin,
       break;
 
     case 4:
-      {
-        MetaDisplay *display;
-        GList *windows;
-        GList *l;
-        g_autoptr (GArray) entries = g_array_new (FALSE, FALSE,
-                                                  sizeof (OozeAquaMenuEntry));
-        OozeAquaMenuEntry row;
-        int focus_index = OOZE_MENU_WINDOW_FOCUS_BASE;
-        gboolean added_window = FALSE;
-
-        row = (OozeAquaMenuEntry){ "Minimize", OOZE_MENU_WINDOW_MINIMIZE, has_focus };
-        g_array_append_val (entries, row);
-        row = (OozeAquaMenuEntry){ "Zoom", OOZE_MENU_WINDOW_ZOOM, has_focus };
-        g_array_append_val (entries, row);
-        row = (OozeAquaMenuEntry){ "Bring All to Front", OOZE_MENU_WINDOW_BRING_ALL, TRUE };
-        g_array_append_val (entries, row);
-
-        display = meta_plugin_get_display (META_PLUGIN (plugin));
-        windows = meta_display_list_all_windows (display);
-        for (l = windows; l != NULL; l = l->next)
-          {
-            MetaWindow *w = l->data;
-            const char *title;
-
-            if (meta_window_get_window_type (w) != META_WINDOW_NORMAL)
-              continue;
-
-            if (!added_window)
-              {
-                row = (OozeAquaMenuEntry){ NULL, 0, FALSE };
-                g_array_append_val (entries, row);
-                added_window = TRUE;
-              }
-
-            title = meta_window_get_title (w);
-            if (!title || title[0] == '\0')
-              title = "Untitled";
-
-            row = (OozeAquaMenuEntry){ title, focus_index++, TRUE };
-            g_array_append_val (entries, row);
-          }
-        g_list_free (windows);
-
-        if (user_toggle)
-          ooze_aqua_menu_toggle_for_anchor (plugin->menu_popup, anchor,
-                                          (OozeAquaMenuEntry *) entries->data,
-                                          entries->len);
-        else
-          ooze_aqua_menu_show_for_anchor (plugin->menu_popup, anchor,
-                                        (OozeAquaMenuEntry *) entries->data,
-                                        entries->len);
-      }
+      panel_show_window_menu (plugin, anchor, user_toggle, has_focus);
       break;
 
     case 5:
@@ -609,6 +750,8 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
   guint n;
   guint i;
   gboolean from_app;
+  MetaWindow *fallback_win = NULL;
+  g_autofree char *fallback_name = NULL;
   const char *texts[OOZE_GLOBAL_MENU_MAX_TOP];
   guint n_texts = 0;
 
@@ -620,11 +763,17 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
   palette = ooze_theme_get_palette (NULL);
   from_app = plugin->global_menu &&
              ooze_global_menu_has_app_menu (plugin->global_menu);
+  if (!from_app && plugin->global_menu &&
+      !ooze_global_menu_wants_shell_stubs (plugin->global_menu))
+    fallback_win = ooze_global_menu_get_fallback_window (plugin->global_menu);
+
   if (from_app)
     n = ooze_global_menu_get_n_top (plugin->global_menu);
-  else if (plugin->global_menu &&
-           ooze_global_menu_get_x11_launch_hint (plugin->global_menu))
-    n = 1;
+  else if (fallback_win)
+    {
+      fallback_name = panel_window_app_display_name (fallback_win);
+      n = 1 + (guint) G_N_ELEMENTS (panel_fallback_menu_items);
+    }
   else if (plugin->global_menu &&
            ooze_global_menu_wants_shell_stubs (plugin->global_menu))
     n = (guint) ooze_shell_menu_bar_n_items;
@@ -636,7 +785,6 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
   for (i = 0; i < n; i++)
     {
       const char *text;
-      const char *hint;
 
       if (from_app)
         {
@@ -644,13 +792,15 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
           if (!text || !*text)
             continue;
         }
-      else if ((hint = ooze_global_menu_get_x11_launch_hint (plugin->global_menu)) != NULL)
-        text = hint;
+      else if (fallback_win)
+        text = i == 0 ? fallback_name : panel_fallback_menu_items[i - 1];
       else
         text = ooze_shell_menu_bar_items[i];
 
       texts[n_texts++] = text;
     }
+
+  plugin->menu_bar_fallback = fallback_win != NULL;
 
   if (panel_menu_bar_labels_unchanged (plugin, from_app, texts, n_texts))
     {
@@ -677,11 +827,8 @@ ooze_panel_rebuild_menu_bar (OozePlugin *plugin)
                          GSIZE_TO_POINTER ((gsize) i));
       g_object_set_data_full (G_OBJECT (label), "ooze-menu-label-text",
                               g_strdup (text), g_free);
-      if (from_app || !ooze_global_menu_get_x11_launch_hint (plugin->global_menu))
-        {
-          g_signal_connect (label, "button-press-event",
-                            G_CALLBACK (on_menu_bar_pressed), plugin);
-        }
+      g_signal_connect (label, "button-press-event",
+                        G_CALLBACK (on_menu_bar_pressed), plugin);
 
       if (plugin->clock_label)
         clutter_actor_insert_child_below (plugin->panel, label, plugin->clock_label);
