@@ -149,6 +149,7 @@ executable('ooze',
     cc.find_library('m', required: true),
   ],
   build_rpath: mutter_typelibdir,
+  install_rpath: mutter_typelibdir,
   install: true,
 )
 
