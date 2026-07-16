@@ -16,6 +16,10 @@ G_BEGIN_DECLS
  * (they get real Mutter frames) and for Ooze's own apps (already Gel).
  */
 void ooze_foreign_gel_init (OozePlugin *plugin);
+
+/* Attach from the plugin map vfunc, where the window actor exists. */
+void ooze_foreign_gel_maybe_attach (OozePlugin      *plugin,
+                                    MetaWindowActor *actor);
 void ooze_foreign_gel_shutdown (OozePlugin *plugin);
 
 /* Whether the foreign Gel overlay is enabled for this session. */

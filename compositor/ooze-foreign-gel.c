@@ -44,7 +44,6 @@ struct _OozeForeignGelState
 {
   MetaDisplay *display;
   GHashTable  *overlays; /* MetaWindow* -> OozeForeignGel* */
-  gulong       window_created_id;
 };
 
 typedef struct _OozeForeignGelState OozeForeignGelState;
@@ -308,14 +307,25 @@ ooze_foreign_gel_attach (OozeForeignGelState *state,
 
   g_hash_table_insert (state->overlays, window, gel);
   ooze_foreign_gel_reposition (gel);
+
+  g_message ("Ooze: foreign Gel attached to %s",
+             meta_window_get_wm_class (window) ?
+               meta_window_get_wm_class (window) :
+               meta_window_get_description (window));
 }
 
-static void
-ooze_foreign_gel_on_window_created (MetaDisplay *display G_GNUC_UNUSED,
-                                    MetaWindow  *window,
-                                    gpointer     user_data)
+void
+ooze_foreign_gel_maybe_attach (OozePlugin      *plugin,
+                               MetaWindowActor *actor)
 {
-  OozePlugin *plugin = user_data;
+  MetaWindow *window;
+
+  if (!plugin->foreign_gel)
+    return;
+
+  window = meta_window_actor_get_meta_window (actor);
+  if (!window)
+    return;
 
   ooze_foreign_gel_attach (plugin->foreign_gel, plugin, window);
 }
@@ -339,11 +349,11 @@ ooze_foreign_gel_init (OozePlugin *plugin)
   state->display = display;
   state->overlays = g_hash_table_new_full (NULL, NULL, NULL,
                                             ooze_foreign_gel_free);
-  state->window_created_id =
-    g_signal_connect (display, "window-created",
-                      G_CALLBACK (ooze_foreign_gel_on_window_created), plugin);
   plugin->foreign_gel = state;
 
+  /* Windows that mapped before init; later ones attach from the plugin's
+   * map vfunc (at "window-created" the compositor actor does not exist
+   * yet, so attaching there silently fails). */
   windows = meta_display_list_all_windows (display);
   for (l = windows; l != NULL; l = l->next)
     ooze_foreign_gel_attach (state, plugin, l->data);
@@ -360,7 +370,6 @@ ooze_foreign_gel_shutdown (OozePlugin *plugin)
   if (!state)
     return;
 
-  g_clear_signal_handler (&state->window_created_id, state->display);
   g_hash_table_destroy (state->overlays);
   g_free (state);
   plugin->foreign_gel = NULL;
