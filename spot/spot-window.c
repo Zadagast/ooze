@@ -234,13 +234,13 @@ spot_ensure_css (void)
                                      ".spot-sidebar-list row { padding: 5px 6px; }"
                                      ".spot-sidebar-list row:hover { background: rgba(128,128,128,0.10); }"
                                      ".spot-sidebar-list row:selected {"
-                                     "  background: #2968c8;"
+                                     "  background: @accent_bg_color;"
                                      "}"
                                      ".spot-sidebar-list .spot-sidebar-label {"
                                      "  color: @sidebar_fg_color;"
                                      "}"
                                      ".spot-sidebar-list row:selected .spot-sidebar-label {"
-                                     "  color: #ffffff;"
+                                     "  color: @accent_fg_color;"
                                      "}"
 
                                      /* ── Column browser ──
@@ -262,10 +262,10 @@ spot_ensure_css (void)
                                      "}"
                                      ".spot-column row { padding: 2px 8px;"
                                      "                   color: @view_fg_color; }"
-                                     ".spot-column row:hover { background: rgba(41,104,200,0.10); }"
+                                     ".spot-column row:hover { background: alpha(@accent_bg_color, 0.10); }"
                                      ".spot-column row:selected {"
-                                     "  background: #2968c8;"
-                                     "  color: #ffffff;"
+                                     "  background: @accent_bg_color;"
+                                     "  color: @accent_fg_color;"
                                      "}"
 
                                      /* ── Status bar ──
@@ -291,10 +291,10 @@ spot_ensure_css (void)
                                      "  background: none;"
                                      "}"
                                      ".spot-grid-view > flowboxchild:selected {"
-                                     "  background: #2968c8;"
+                                     "  background: @accent_bg_color;"
                                      "}"
                                      ".spot-grid-view > flowboxchild:hover:not(:selected) {"
-                                     "  background: rgba(41,104,200,0.10);"
+                                     "  background: alpha(@accent_bg_color, 0.10);"
                                      "}"
 
                                      /* Filename label — colour follows window fg, not view fg */
@@ -302,19 +302,19 @@ spot_ensure_css (void)
                                      "  color: @window_fg_color;"
                                      "}"
                                      ".spot-grid-view > flowboxchild:selected .spot-grid-label {"
-                                     "  color: #ffffff;"
+                                     "  color: @accent_fg_color;"
                                      "}"
 
                                      /* Shell / GTK drop feedback */
                                      ".spot-finder .spot-drop-active {"
-                                     "  outline: 2px solid #2968c8;"
+                                     "  outline: 2px solid @accent_bg_color;"
                                      "  outline-offset: -2px;"
-                                     "  background: rgba(41,104,200,0.08);"
+                                     "  background: alpha(@accent_bg_color, 0.08);"
                                      "}"
                                      ".spot-finder .spot-drop-folder {"
-                                     "  outline: 2px solid #2968c8;"
+                                     "  outline: 2px solid @accent_bg_color;"
                                      "  outline-offset: -2px;"
-                                     "  background: rgba(41,104,200,0.18);"
+                                     "  background: alpha(@accent_bg_color, 0.18);"
                                      "}");
   gtk_style_context_add_provider_for_display (display,
                                               GTK_STYLE_PROVIDER (provider),

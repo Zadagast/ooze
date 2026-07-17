@@ -60,7 +60,7 @@ ooze_toolbar_ensure_css (void)
     ".ooze-toolbar-btn {"
     "  min-width: 76px;"
     "}"
-    ".ooze-toolbar-btn:active { color: #ffffff; }"
+    ".ooze-toolbar-btn:active { color: @accent_fg_color; }"
     /* Trailing search / accessory — optical middle of the bar. */
     ".ooze-toolbar-search {"
     "  min-width: 120px;"

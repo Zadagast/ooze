@@ -10,7 +10,8 @@ G_BEGIN_DECLS
  * Sets Inter 11pt regular as the default UI font for the process and loads
  * shared CSS so kit/app chrome stays weight 400 unless marked .ooze-emphasis.
  * Also installs the shared Ooze Gel CSD look (9px corners + Aqua shadow) for
- * windows that opt in with the "spot-finder" CSS class.
+ * windows that opt in with the "spot-finder" CSS class. Ooze accent named
+ * colors are installed here too and track the light/dark color scheme.
  */
 void ooze_theme_ensure (void);
 gboolean ooze_theme_is_dark (void);
