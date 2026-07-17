@@ -36,6 +36,7 @@
 #define DOCK_SPRING_MS    700
 #define DOCK_HOLD_MS      400
 #define DOCK_DRAG_MS      150
+#define DOCK_DROP_MS      200
 #define DOCK_UNPIN_MS     180
 #define DOCK_ACTION_PIN   1
 #define DOCK_ACTION_UNPIN 2
@@ -2242,6 +2243,52 @@ ooze_dock_child_index (ClutterActor *container, ClutterActor *actor)
   return -1;
 }
 
+static void
+ooze_dock_ease_drop (ClutterActor *container,
+                     ClutterActor *actor)
+{
+  ClutterActor *child;
+  int index;
+
+  if (!container || !actor ||
+      !CLUTTER_IS_ACTOR (container) || !CLUTTER_IS_ACTOR (actor) ||
+      clutter_actor_get_parent (actor) != container)
+    return;
+
+  index = ooze_dock_child_index (container, actor);
+  if (index < 0)
+    return;
+
+  /*
+   * The box layout applies the final slot positions on the next relayout
+   * after the child order changes. Enable a short easing window on every
+   * live icon so that relayout moves settle together, while leaving the
+   * active drag transform to the release path below.
+   */
+  for (child = clutter_actor_get_first_child (container);
+       child != NULL;
+       child = clutter_actor_get_next_sibling (child))
+    {
+      if (!CLUTTER_IS_ACTOR (child))
+        continue;
+      clutter_actor_save_easing_state (child);
+      clutter_actor_set_easing_duration (child, DOCK_DROP_MS);
+      clutter_actor_set_easing_mode (child, CLUTTER_EASE_OUT_CUBIC);
+    }
+
+  /* Re-assert the current order to queue the layout transition. */
+  clutter_actor_set_child_at_index (container, actor, index);
+  clutter_actor_queue_relayout (container);
+
+  for (child = clutter_actor_get_first_child (container);
+       child != NULL;
+       child = clutter_actor_get_next_sibling (child))
+    {
+      if (CLUTTER_IS_ACTOR (child))
+        clutter_actor_restore_easing_state (child);
+    }
+}
+
 static gboolean
 on_app_launcher_motion (ClutterActor *actor,
                         ClutterEvent *event,
@@ -2327,6 +2374,7 @@ on_app_launcher_released (ClutterActor *actor,
 
   if (was_dragging)
     {
+      ooze_dock_ease_drop (container, actor);
       if (container && ooze_dock_app_is_pinned (actor))
         {
           ooze_dock_save_pins_from_container (container);
