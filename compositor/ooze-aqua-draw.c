@@ -592,7 +592,9 @@ ooze_aqua_traffic_light_content (ClutterActor *ref_actor,
                                int           size,
                                gfloat        r,
                                gfloat        g,
-                               gfloat        b)
+                               gfloat        b,
+                               gboolean      show_glyphs,
+                               AquaTrafficGlyph glyph)
 {
   cairo_surface_t *surface;
   cairo_t *cr;
@@ -611,6 +613,12 @@ ooze_aqua_traffic_light_content (ClutterActor *ref_actor,
                             r,
                             g,
                             b);
+  if (show_glyphs)
+    aqua_traffic_draw_glyph (cr,
+                             size / 2.0,
+                             size / 2.0,
+                             size,
+                             glyph);
 
   cairo_destroy (cr);
   content = ooze_aqua_content_from_surface (ref_actor, surface);

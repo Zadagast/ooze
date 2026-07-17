@@ -8,6 +8,7 @@ struct _OozeTrafficLights
 {
   GtkWidget parent_instance;
   GtkWindow *window;
+  gboolean  hovered;
 };
 
 G_DEFINE_FINAL_TYPE (OozeTrafficLights, ooze_traffic_lights, GTK_TYPE_WIDGET)
@@ -138,6 +139,21 @@ ooze_traffic_lights_snapshot (GtkWidget   *widget,
                             AQUA_TRAFFIC_ZOOM_G,
                             AQUA_TRAFFIC_ZOOM_B);
 
+  if (OOZE_TRAFFIC_LIGHTS (widget)->hovered)
+    {
+      cx = AQUA_TRAFFIC_LIGHT_MARGIN + AQUA_TRAFFIC_LIGHT_SIZE / 2.0;
+      aqua_traffic_draw_glyph (cr, cx, cy, AQUA_TRAFFIC_LIGHT_SIZE,
+                               AQUA_TRAFFIC_GLYPH_CLOSE);
+
+      cx += AQUA_TRAFFIC_LIGHT_SIZE + AQUA_TRAFFIC_LIGHT_GAP;
+      aqua_traffic_draw_glyph (cr, cx, cy, AQUA_TRAFFIC_LIGHT_SIZE,
+                               AQUA_TRAFFIC_GLYPH_MINIMIZE);
+
+      cx += AQUA_TRAFFIC_LIGHT_SIZE + AQUA_TRAFFIC_LIGHT_GAP;
+      aqua_traffic_draw_glyph (cr, cx, cy, AQUA_TRAFFIC_LIGHT_SIZE,
+                               AQUA_TRAFFIC_GLYPH_ZOOM);
+    }
+
   cairo_destroy (cr);
 }
 
@@ -159,6 +175,33 @@ ooze_traffic_lights_click (GtkGestureClick *gesture,
 
   ooze_traffic_lights_activate (self, button);
   return TRUE;
+}
+
+static void
+ooze_traffic_lights_set_hovered (OozeTrafficLights *self,
+                                 gboolean           hovered)
+{
+  if (self->hovered == hovered)
+    return;
+
+  self->hovered = hovered;
+  gtk_widget_queue_draw (GTK_WIDGET (self));
+}
+
+static void
+ooze_traffic_lights_enter (GtkEventControllerMotion *controller G_GNUC_UNUSED,
+                           gdouble                   x G_GNUC_UNUSED,
+                           gdouble                   y G_GNUC_UNUSED,
+                           OozeTrafficLights        *self)
+{
+  ooze_traffic_lights_set_hovered (self, TRUE);
+}
+
+static void
+ooze_traffic_lights_leave (GtkEventControllerMotion *controller G_GNUC_UNUSED,
+                           OozeTrafficLights        *self)
+{
+  ooze_traffic_lights_set_hovered (self, FALSE);
 }
 
 static void
@@ -185,6 +228,7 @@ static void
 ooze_traffic_lights_init (OozeTrafficLights *self)
 {
   GtkGesture *gesture;
+  GtkEventController *motion;
 
   gtk_widget_set_cursor_from_name (GTK_WIDGET (self), "default");
   gtk_widget_set_valign (GTK_WIDGET (self), GTK_ALIGN_CENTER);
@@ -194,6 +238,11 @@ ooze_traffic_lights_init (OozeTrafficLights *self)
   gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (gesture), GDK_BUTTON_PRIMARY);
   g_signal_connect (gesture, "pressed", G_CALLBACK (ooze_traffic_lights_click), self);
   gtk_widget_add_controller (GTK_WIDGET (self), GTK_EVENT_CONTROLLER (gesture));
+
+  motion = gtk_event_controller_motion_new ();
+  g_signal_connect (motion, "enter", G_CALLBACK (ooze_traffic_lights_enter), self);
+  g_signal_connect (motion, "leave", G_CALLBACK (ooze_traffic_lights_leave), self);
+  gtk_widget_add_controller (GTK_WIDGET (self), motion);
 }
 
 OozeTrafficLights *
