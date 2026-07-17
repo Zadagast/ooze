@@ -66,6 +66,7 @@ static const char * const launch_delete_icons[] = {
 
 static void launch_rebuild_groups_bar (OozeLaunchWindow *self);
 static void launch_refresh_grid (OozeLaunchWindow *self);
+static void launch_focus_search (OozeLaunchWindow *self);
 
 static void
 ooze_launch_ensure_css (void)
@@ -685,11 +686,9 @@ launch_tile_pressed (GtkGestureClick *gesture,
 }
 
 static void
-launch_app_clicked (GtkButton *button,
-                    gpointer   user_data)
+launch_app_launch (OozeLaunchWindow *self,
+                   LaunchApp        *app)
 {
-  OozeLaunchWindow *self = user_data;
-  LaunchApp *app = g_object_get_data (G_OBJECT (button), "launch-app");
   g_autoptr (GAppLaunchContext) context = g_app_launch_context_new ();
   g_autoptr (GError) error = NULL;
 
@@ -702,6 +701,188 @@ launch_app_clicked (GtkButton *button,
     }
 
   gtk_widget_set_visible (GTK_WIDGET (self), FALSE);
+}
+
+static void
+launch_app_clicked (GtkButton *button,
+                    gpointer   user_data)
+{
+  launch_app_launch (user_data,
+                     g_object_get_data (G_OBJECT (button), "launch-app"));
+}
+
+static LaunchApp *
+launch_app_from_focus (GtkWidget *focus)
+{
+  while (focus)
+    {
+      LaunchApp *app = g_object_get_data (G_OBJECT (focus), "launch-app");
+
+      if (app)
+        return app;
+      focus = gtk_widget_get_parent (focus);
+    }
+
+  return NULL;
+}
+
+static LaunchApp *
+launch_first_visible_app (OozeLaunchWindow *self)
+{
+  GtkWidget *child;
+
+  for (child = gtk_widget_get_first_child (self->grid);
+       child;
+       child = gtk_widget_get_next_sibling (child))
+    {
+      GtkWidget *tile;
+
+      if (!gtk_widget_get_visible (child))
+        continue;
+      tile = gtk_flow_box_child_get_child (GTK_FLOW_BOX_CHILD (child));
+      return g_object_get_data (G_OBJECT (tile), "launch-app");
+    }
+
+  return NULL;
+}
+
+static gboolean
+launch_focus_first_visible_tile (OozeLaunchWindow *self)
+{
+  GtkWidget *child;
+
+  for (child = gtk_widget_get_first_child (self->grid);
+       child;
+       child = gtk_widget_get_next_sibling (child))
+    {
+      GtkWidget *tile;
+
+      if (!gtk_widget_get_visible (child))
+        continue;
+      tile = gtk_flow_box_child_get_child (GTK_FLOW_BOX_CHILD (child));
+      return gtk_widget_grab_focus (tile);
+    }
+
+  return FALSE;
+}
+
+static void
+launch_focus_search (OozeLaunchWindow *self)
+{
+  gtk_widget_grab_focus (self->search);
+}
+
+static gboolean
+launch_key_pressed (GtkEventControllerKey *controller G_GNUC_UNUSED,
+                    guint                  keyval,
+                    guint                  keycode G_GNUC_UNUSED,
+                    GdkModifierType        state,
+                    gpointer               user_data)
+{
+  OozeLaunchWindow *self = user_data;
+  GtkWidget *focus = gtk_root_get_focus (GTK_ROOT (self));
+  LaunchApp *app;
+
+  if (keyval == GDK_KEY_Escape)
+    {
+      if (gtk_editable_get_text (GTK_EDITABLE (self->search))[0] != '\0')
+        {
+          gtk_editable_set_text (GTK_EDITABLE (self->search), "");
+          launch_focus_search (self);
+        }
+      else
+        {
+          gtk_window_close (GTK_WINDOW (self));
+        }
+      return GDK_EVENT_STOP;
+    }
+
+  if (keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter)
+    {
+      if (focus == self->search)
+        app = launch_first_visible_app (self);
+      else
+        app = launch_app_from_focus (focus);
+
+      if (app)
+        {
+          launch_app_launch (self, app);
+          return GDK_EVENT_STOP;
+        }
+    }
+
+  if (!(state & (GDK_CONTROL_MASK | GDK_ALT_MASK |
+                 GDK_META_MASK | GDK_SUPER_MASK)))
+    {
+      GtkDirectionType direction = GTK_DIR_TAB_FORWARD;
+
+      switch (keyval)
+        {
+        case GDK_KEY_Left:
+          direction = GTK_DIR_LEFT;
+          break;
+        case GDK_KEY_Right:
+          direction = GTK_DIR_RIGHT;
+          break;
+        case GDK_KEY_Up:
+          direction = GTK_DIR_UP;
+          break;
+        case GDK_KEY_Down:
+          direction = GTK_DIR_DOWN;
+          break;
+        default:
+          direction = GTK_DIR_TAB_FORWARD;
+          break;
+        }
+
+      if (keyval == GDK_KEY_Down && focus == self->search)
+        {
+          if (launch_focus_first_visible_tile (self))
+            return GDK_EVENT_STOP;
+        }
+      else if (focus != self->search &&
+               !(focus && GTK_IS_EDITABLE (focus)) &&
+               (keyval == GDK_KEY_Left || keyval == GDK_KEY_Right ||
+                keyval == GDK_KEY_Up || keyval == GDK_KEY_Down))
+        {
+          if (gtk_widget_child_focus (self->grid, direction))
+            return GDK_EVENT_STOP;
+        }
+    }
+
+  if (focus && GTK_IS_EDITABLE (focus))
+    return GDK_EVENT_PROPAGATE;
+
+  if (!(state & (GDK_CONTROL_MASK | GDK_ALT_MASK |
+                 GDK_META_MASK | GDK_SUPER_MASK)))
+    {
+      gunichar unicode = gdk_keyval_to_unicode (keyval);
+
+      if (g_unichar_isprint (unicode))
+        {
+          char utf8[6];
+          int length;
+          int position;
+
+          length = g_unichar_to_utf8 (unicode, utf8);
+          utf8[length] = '\0';
+          launch_focus_search (self);
+          position = gtk_editable_get_position (
+            GTK_EDITABLE (self->search));
+          gtk_editable_insert_text (GTK_EDITABLE (self->search),
+                                     utf8, length, &position);
+          return GDK_EVENT_STOP;
+        }
+    }
+
+  return GDK_EVENT_PROPAGATE;
+}
+
+static void
+launch_window_map (GtkWidget *widget G_GNUC_UNUSED,
+                   gpointer   user_data)
+{
+  launch_focus_search (user_data);
 }
 
 static GtkWidget *
@@ -961,6 +1142,7 @@ ooze_launch_window_constructed (GObject *object)
   gtk_box_append (GTK_BOX (header), search_box);
   g_signal_connect (self->search, "notify::text",
                     G_CALLBACK (launch_search_changed), self);
+  launch_focus_search (self);
 
   scroll = ooze_scrolled_window_new ();
   gtk_widget_add_css_class (scroll, "ooze-launch-grid-scroll");
@@ -1001,6 +1183,17 @@ ooze_launch_window_constructed (GObject *object)
   launch_rebuild_groups_bar (self);
   ooze_application_window_set_content (
     OOZE_APPLICATION_WINDOW (self), shell);
+
+  {
+    GtkEventController *controller = gtk_event_controller_key_new ();
+
+    gtk_event_controller_set_propagation_phase (
+      controller, GTK_PHASE_CAPTURE);
+    g_signal_connect (controller, "key-pressed",
+                      G_CALLBACK (launch_key_pressed), self);
+    gtk_widget_add_controller (GTK_WIDGET (self), controller);
+  }
+  g_signal_connect (self, "map", G_CALLBACK (launch_window_map), self);
 }
 
 static void
