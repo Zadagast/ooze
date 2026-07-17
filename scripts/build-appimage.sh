@@ -18,7 +18,7 @@ BUILD_DIR="${BUILD_DIR:-$ROOT/build}"
 DIST_DIR="${DIST_DIR:-$ROOT/dist}"
 APPDIR="${APPDIR_PATH:-$DIST_DIR/Ooze.AppDir}"
 TOOLS_DIR="${TOOLS_DIR:-$ROOT/packaging/appimage/tools}"
-VERSION="${VERSION:-$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo 0.1.0)}"
+VERSION="${VERSION:-$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo 0.2.0)}"
 OUTPUT="${OUTPUT:-$DIST_DIR/Ooze-${VERSION}-${ARCH}.AppImage}"
 
 # Required nested-session binaries (my-desktop was renamed to ooze).

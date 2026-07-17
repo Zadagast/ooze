@@ -12,6 +12,16 @@ An Aqua-inspired Wayland desktop built on [Mutter](https://gitlab.gnome.org/GNOM
 
 ## Highlights
 
+- **Alpha 0.2.0** adds traffic-light hover glyphs, keyboard-driven Ooze Launch,
+  dock reordering for pinned and running apps with drop settling, foreign Gel
+  chrome for Wayland windows, and the Ooze Shot screenshot app.
+- The release also brings global and application menus, the notifications
+  server, the polkit agent, the end-session dialog, `ooze dev`'s nested rebuild
+  loop, and `ooze update` for rebuilding and reinstalling the package.
+- ScreenCast portal support now has a fixed monitor picker, and grid/pinstripe
+  context menus make the desktop and launcher more useful.
+- Crash, RPATH, theming, and standalone OozeKit bootstrap fixes improve
+  stability; a headless render smoke test now runs in CI.
 - Global menu bar, floating dock, desktop icons, and StatusNotifier / AppIndicator tray
 - One-click light / dark mode for the whole desktop
 - Compositor session lock (PAM) for native Wayland sessions
@@ -34,7 +44,7 @@ chmod +x Ooze-*.AppImage && ./Ooze-*.AppImage
 ```
 
 ```sh
-sudo apt install ./ooze_0.1.0_amd64.deb
+sudo apt install ./ooze_0.2.0_amd64.deb
 ```
 
 Or build from source (needs Mutter 18 dev packages — Ubuntu 26.04):
