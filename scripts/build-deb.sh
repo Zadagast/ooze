@@ -16,7 +16,7 @@ ARCH="${ARCH:-amd64}"
 # configured build dir can hold a stale project version until ninja
 # reconfigures it, so introspecting it here would mislabel the package.
 VERSION="${VERSION:-$(sed -n "s/.*version: '\\([^']*\\)'.*/\\1/p" meson.build | head -1)}"
-VERSION="${VERSION:-0.2.0}"
+VERSION="${VERSION:-0.2.1}"
 DEB_NAME="ooze_${VERSION}_${ARCH}.deb"
 OUTPUT="${OUTPUT:-$DIST_DIR/$DEB_NAME}"
 
