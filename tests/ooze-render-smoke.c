@@ -56,6 +56,7 @@ prepare_test_environment (void)
   g_assert_cmpint (chmod (runtime_dir, 0700), ==, 0);
   g_assert_true (g_setenv ("XDG_RUNTIME_DIR", runtime_dir, TRUE));
   g_assert_true (g_setenv ("GTK_A11Y", "none", TRUE));
+  g_assert_true (g_setenv ("GSETTINGS_BACKEND", "memory", TRUE));
   g_unsetenv ("DBUS_SESSION_BUS_ADDRESS");
 
   prepare_test_icon_theme ();
