@@ -1,5 +1,6 @@
 #include "ooze-launch-window.h"
 
+#include "ooze-about.h"
 #include "ooze-button.h"
 #include "ooze-grid-menu.h"
 #include "ooze-icons.h"
@@ -885,6 +886,22 @@ launch_window_map (GtkWidget *widget G_GNUC_UNUSED,
   launch_focus_search (user_data);
 }
 
+static void
+launch_action_about (GSimpleAction *action G_GNUC_UNUSED,
+                     GVariant      *parameter G_GNUC_UNUSED,
+                     gpointer       user_data)
+{
+  ooze_about_present (GTK_WINDOW (user_data),
+                      "Ooze Launch",
+                      "org.ooze.Launch",
+                      "Find and open applications on Ooze Desktop.",
+                      OOZE_VERSION);
+}
+
+static const GActionEntry launch_actions[] = {
+  { .name = "about", .activate = launch_action_about },
+};
+
 static GtkWidget *
 launch_make_tile (OozeLaunchWindow *self,
                   LaunchApp        *app)
@@ -1118,6 +1135,18 @@ ooze_launch_window_constructed (GObject *object)
   gtk_widget_add_css_class (GTK_WIDGET (self), "spot-finder");
   ooze_application_window_set_title (
     OOZE_APPLICATION_WINDOW (self), "Applications");
+  g_action_map_add_action_entries (G_ACTION_MAP (self),
+                                   launch_actions,
+                                   G_N_ELEMENTS (launch_actions),
+                                   self);
+  {
+    GMenu *help = g_menu_new ();
+
+    g_menu_append (help, "About Ooze Launch", "win.about");
+    ooze_application_window_append_menu_section (
+      OOZE_APPLICATION_WINDOW (self), "Help", G_MENU_MODEL (help));
+    g_object_unref (help);
+  }
 
   shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 

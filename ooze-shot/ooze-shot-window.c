@@ -1,5 +1,6 @@
 #include "ooze-shot-window.h"
 
+#include "ooze-about.h"
 #include "ooze-button.h"
 #include "ooze-application.h"
 #include "ooze-surface.h"
@@ -38,6 +39,22 @@ static const char *const capture_icons[] = { "camera-photo", "camera", NULL };
 static const char *const copy_icons[] = { "edit-copy", NULL };
 static const char *const reveal_icons[] = { "folder-open", "document-open", NULL };
 static const char *const eye_icons[] = { "image-x-generic", "image-viewer", NULL };
+
+static void
+shot_action_about (GSimpleAction *action G_GNUC_UNUSED,
+                   GVariant      *parameter G_GNUC_UNUSED,
+                   gpointer       user_data)
+{
+  ooze_about_present (GTK_WINDOW (user_data),
+                      "Ooze Shot",
+                      "camera-photo",
+                      "Capture screenshots on Ooze Desktop.",
+                      OOZE_VERSION);
+}
+
+static const GActionEntry shot_actions[] = {
+  { .name = "about", .activate = shot_action_about },
+};
 
 static void
 shot_set_status (OozeShotWindow *self,
@@ -325,6 +342,18 @@ ooze_shot_window_constructed (GObject *object)
   gtk_widget_add_css_class (GTK_WIDGET (self), "spot-finder");
   ooze_application_window_set_title (
     OOZE_APPLICATION_WINDOW (self), "Ooze Shot");
+  g_action_map_add_action_entries (G_ACTION_MAP (self),
+                                   shot_actions,
+                                   G_N_ELEMENTS (shot_actions),
+                                   self);
+  {
+    GMenu *help = g_menu_new ();
+
+    g_menu_append (help, "About Ooze Shot", "win.about");
+    ooze_application_window_append_menu_section (
+      OOZE_APPLICATION_WINDOW (self), "Help", G_MENU_MODEL (help));
+    g_object_unref (help);
+  }
 
   shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
