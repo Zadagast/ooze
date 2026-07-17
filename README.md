@@ -12,6 +12,8 @@ An Aqua-inspired Wayland desktop built on [Mutter](https://gitlab.gnome.org/GNOM
 
 ## Highlights
 
+- **Patch 0.2.1** unifies Ooze's dark-aware blue accent across first-party apps
+  and adds per-app headless render smoke tests to CI.
 - **Alpha 0.2.0** adds traffic-light hover glyphs, keyboard-driven Ooze Launch,
   dock reordering for pinned and running apps with drop settling, foreign Gel
   chrome for Wayland windows, and the Ooze Shot screenshot app.
@@ -44,7 +46,7 @@ chmod +x Ooze-*.AppImage && ./Ooze-*.AppImage
 ```
 
 ```sh
-sudo apt install ./ooze_0.2.0_amd64.deb
+sudo apt install ./ooze_0.2.1_amd64.deb
 ```
 
 Or build from source (needs Mutter 18 dev packages — Ubuntu 26.04):
