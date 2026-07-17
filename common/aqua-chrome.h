@@ -38,6 +38,13 @@ G_BEGIN_DECLS
 #define AQUA_TRAFFIC_ZOOM_G 0.788
 #define AQUA_TRAFFIC_ZOOM_B 0.251
 
+typedef enum
+{
+  AQUA_TRAFFIC_GLYPH_CLOSE,
+  AQUA_TRAFFIC_GLYPH_MINIMIZE,
+  AQUA_TRAFFIC_GLYPH_ZOOM,
+} AquaTrafficGlyph;
+
 void aqua_traffic_draw_circle (cairo_t *cr,
                                gdouble  cx,
                                gdouble  cy,
@@ -45,5 +52,11 @@ void aqua_traffic_draw_circle (cairo_t *cr,
                                gdouble  r,
                                gdouble  g,
                                gdouble  b);
+
+void aqua_traffic_draw_glyph (cairo_t         *cr,
+                              gdouble          cx,
+                              gdouble          cy,
+                              gdouble          size,
+                              AquaTrafficGlyph glyph);
 
 G_END_DECLS

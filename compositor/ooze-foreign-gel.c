@@ -95,10 +95,14 @@ typedef struct
   OozePlugin   *plugin;
   MetaWindow   *window;
   ClutterActor *actor;
+  ClutterActor *lights[3];
   gulong        position_id;
   gulong        size_id;
   gulong        unmanaged_id;
   gulong        actor_destroy_id;
+  gulong        enter_id;
+  gulong        leave_id;
+  gboolean      hovered;
   gboolean      theme_watched;
 } OozeForeignGel;
 
@@ -177,7 +181,7 @@ static void
 ooze_foreign_gel_add_pill (ClutterActor *parent)
 {
   ClutterActor *pill = clutter_actor_new ();
-  ClutterContent *content;
+  g_autoptr (ClutterContent) content = NULL;
   gfloat cy = ooze_foreign_gel_centre_y ();
   gfloat x0 = ooze_foreign_gel_first_x () - OOZE_FOREIGN_COVER_EXTENT;
   gfloat x1 = ooze_foreign_gel_first_x () + 2.0f * ooze_foreign_gel_pitch () +
@@ -195,20 +199,44 @@ ooze_foreign_gel_add_pill (ClutterActor *parent)
   content = ooze_foreign_gel_pill_content (pill, (int) (x1 - x0),
                                            (int) height);
   if (content)
-    clutter_actor_set_content (pill, content);
+    ooze_aqua_actor_set_content (pill, g_steal_pointer (&content),
+                                 (int) (x1 - x0), (int) height);
   else
     g_warning ("Ooze: foreign Gel pill has no content (no Cogl context)");
 }
 
 static void
-ooze_foreign_gel_add_light (ClutterActor *parent,
-                            int           index,
-                            gfloat        r,
-                            gfloat        g,
-                            gfloat        b)
+ooze_foreign_gel_set_light_content (OozeForeignGel *gel,
+                                    int             index,
+                                    gfloat          r,
+                                    gfloat          g,
+                                    gfloat          b,
+                                    ClutterActor   *light)
+{
+  gfloat size = ooze_foreign_gel_size ();
+  g_autoptr (ClutterContent) content = NULL;
+
+  content = ooze_aqua_traffic_light_content (
+    light, (int) size, r, g, b, gel->hovered,
+    index == 0 ? AQUA_TRAFFIC_GLYPH_CLOSE :
+    index == 1 ? AQUA_TRAFFIC_GLYPH_MINIMIZE :
+                 AQUA_TRAFFIC_GLYPH_ZOOM);
+  if (content)
+    ooze_aqua_actor_set_content (light, g_steal_pointer (&content),
+                                 (int) size, (int) size);
+  else
+    g_warning ("Ooze: foreign Gel light %d has no content (no Cogl context)",
+               index);
+}
+
+static void
+ooze_foreign_gel_add_light (OozeForeignGel *gel,
+                            int             index,
+                            gfloat          r,
+                            gfloat          g,
+                            gfloat          b)
 {
   ClutterActor *light = clutter_actor_new ();
-  ClutterContent *content;
   gfloat size = ooze_foreign_gel_size ();
   gfloat cx = ooze_foreign_gel_first_x () + index * ooze_foreign_gel_pitch ();
   gfloat cy = ooze_foreign_gel_centre_y ();
@@ -216,30 +244,56 @@ ooze_foreign_gel_add_light (ClutterActor *parent,
   clutter_actor_set_size (light, size, size);
   clutter_actor_set_position (light, cx - size / 2.0f, cy - size / 2.0f);
   clutter_actor_set_reactive (light, FALSE);
-  clutter_actor_add_child (parent, light);
-
-  content = ooze_aqua_traffic_light_content (light, (int) size, r, g, b);
-  if (content)
-    clutter_actor_set_content (light, content);
-  else
-    g_warning ("Ooze: foreign Gel light %d has no content (no Cogl context)",
-               index);
+  clutter_actor_add_child (gel->actor, light);
+  gel->lights[index] = light;
+  ooze_foreign_gel_set_light_content (gel, index, r, g, b, light);
 }
 
 static void
-ooze_foreign_gel_build_lights (ClutterActor *parent)
+ooze_foreign_gel_build_lights (OozeForeignGel *gel)
 {
-  ooze_foreign_gel_add_pill (parent);
+  guint i;
 
-  ooze_foreign_gel_add_light (parent, 0,
+  for (i = 0; i < G_N_ELEMENTS (gel->lights); i++)
+    gel->lights[i] = NULL;
+
+  ooze_foreign_gel_add_pill (gel->actor);
+
+  ooze_foreign_gel_add_light (gel, 0,
                               AQUA_TRAFFIC_CLOSE_R, AQUA_TRAFFIC_CLOSE_G,
                               AQUA_TRAFFIC_CLOSE_B);
-  ooze_foreign_gel_add_light (parent, 1,
+  ooze_foreign_gel_add_light (gel, 1,
                               AQUA_TRAFFIC_MINIMIZE_R, AQUA_TRAFFIC_MINIMIZE_G,
                               AQUA_TRAFFIC_MINIMIZE_B);
-  ooze_foreign_gel_add_light (parent, 2,
+  ooze_foreign_gel_add_light (gel, 2,
                               AQUA_TRAFFIC_ZOOM_R, AQUA_TRAFFIC_ZOOM_G,
                               AQUA_TRAFFIC_ZOOM_B);
+}
+
+static void
+ooze_foreign_gel_update_lights (OozeForeignGel *gel)
+{
+  static const gfloat colors[3][3] = {
+    { AQUA_TRAFFIC_CLOSE_R,    AQUA_TRAFFIC_CLOSE_G,    AQUA_TRAFFIC_CLOSE_B },
+    { AQUA_TRAFFIC_MINIMIZE_R, AQUA_TRAFFIC_MINIMIZE_G, AQUA_TRAFFIC_MINIMIZE_B },
+    { AQUA_TRAFFIC_ZOOM_R,     AQUA_TRAFFIC_ZOOM_G,     AQUA_TRAFFIC_ZOOM_B },
+  };
+  guint i;
+
+  if (!gel || !gel->actor)
+    return;
+
+  for (i = 0; i < G_N_ELEMENTS (gel->lights); i++)
+    {
+      if (!gel->lights[i])
+        continue;
+
+      ooze_foreign_gel_set_light_content (gel, i,
+                                          colors[i][0],
+                                          colors[i][1],
+                                          colors[i][2],
+                                          gel->lights[i]);
+    }
 }
 
 static OozeForeignHit
@@ -290,7 +344,7 @@ ooze_foreign_gel_on_geometry_changed (MetaWindow *window G_GNUC_UNUSED,
 /* ── Input ───────────────────────────────────────────────────────────────── */
 
 static gboolean
-ooze_foreign_gel_on_button (ClutterActor *actor G_GNUC_UNUSED,
+ooze_foreign_gel_on_button (ClutterActor *actor,
                             ClutterEvent *event,
                             gpointer      user_data)
 {
@@ -298,7 +352,8 @@ ooze_foreign_gel_on_button (ClutterActor *actor G_GNUC_UNUSED,
   gfloat x = 0.0f;
   gfloat y = 0.0f;
 
-  if (clutter_event_type (event) != CLUTTER_BUTTON_PRESS)
+  if (!gel || gel->actor != actor || !gel->window ||
+      clutter_event_type (event) != CLUTTER_BUTTON_PRESS)
     return CLUTTER_EVENT_PROPAGATE;
 
   clutter_event_get_coords (event, &x, &y);
@@ -326,7 +381,39 @@ ooze_foreign_gel_on_button (ClutterActor *actor G_GNUC_UNUSED,
     case OOZE_FOREIGN_HIT_NONE:
     default:
       return CLUTTER_EVENT_PROPAGATE;
-    }
+  }
+}
+
+static gboolean
+ooze_foreign_gel_on_enter (ClutterActor *actor,
+                           ClutterEvent *event G_GNUC_UNUSED,
+                           gpointer      user_data)
+{
+  OozeForeignGel *gel = user_data;
+
+  if (!gel || gel->actor != actor || gel->hovered)
+    return CLUTTER_EVENT_PROPAGATE;
+
+  gel->hovered = TRUE;
+  ooze_foreign_gel_update_lights (gel);
+
+  return CLUTTER_EVENT_PROPAGATE;
+}
+
+static gboolean
+ooze_foreign_gel_on_leave (ClutterActor *actor,
+                           ClutterEvent *event G_GNUC_UNUSED,
+                           gpointer      user_data)
+{
+  OozeForeignGel *gel = user_data;
+
+  if (!gel || gel->actor != actor || !gel->hovered)
+    return CLUTTER_EVENT_PROPAGATE;
+
+  gel->hovered = FALSE;
+  ooze_foreign_gel_update_lights (gel);
+
+  return CLUTTER_EVENT_PROPAGATE;
 }
 
 /* ── Lifecycle ───────────────────────────────────────────────────────────── */
@@ -444,7 +531,7 @@ static void ooze_foreign_gel_remove (OozeForeignGelState *state,
 static void ooze_foreign_gel_attach (OozeForeignGelState *state,
                                      OozePlugin          *plugin,
                                      MetaWindow          *window);
-static void ooze_foreign_gel_build_lights (ClutterActor *parent);
+static void ooze_foreign_gel_build_lights (OozeForeignGel *gel);
 
 static void
 ooze_foreign_gel_retry_free (gpointer data)
@@ -542,8 +629,10 @@ ooze_foreign_gel_on_theme_changed (gpointer user_data)
     return;
 
   /* The pill colour follows the header background; rebuild on toggle. */
+  for (guint i = 0; i < G_N_ELEMENTS (gel->lights); i++)
+    gel->lights[i] = NULL;
   clutter_actor_destroy_all_children (gel->actor);
-  ooze_foreign_gel_build_lights (gel->actor);
+  ooze_foreign_gel_build_lights (gel);
 }
 
 static void
@@ -554,6 +643,11 @@ ooze_foreign_gel_on_actor_destroy (ClutterActor *actor G_GNUC_UNUSED,
 
   gel->actor = NULL;
   gel->actor_destroy_id = 0;
+  gel->enter_id = 0;
+  gel->leave_id = 0;
+  gel->hovered = FALSE;
+  for (guint i = 0; i < G_N_ELEMENTS (gel->lights); i++)
+    gel->lights[i] = NULL;
 }
 
 static void
@@ -578,7 +672,11 @@ ooze_foreign_gel_free (gpointer data)
   g_clear_signal_handler (&gel->unmanaged_id, gel->window);
   if (gel->actor)
     {
+      g_clear_signal_handler (&gel->enter_id, gel->actor);
+      g_clear_signal_handler (&gel->leave_id, gel->actor);
       g_clear_signal_handler (&gel->actor_destroy_id, gel->actor);
+      for (guint i = 0; i < G_N_ELEMENTS (gel->lights); i++)
+        gel->lights[i] = NULL;
       clutter_actor_destroy (gel->actor);
       gel->actor = NULL;
     }
@@ -627,6 +725,12 @@ ooze_foreign_gel_attach (OozeForeignGelState *state,
 
   g_signal_connect (gel->actor, "button-press-event",
                     G_CALLBACK (ooze_foreign_gel_on_button), gel);
+  gel->enter_id =
+    g_signal_connect (gel->actor, "enter-event",
+                      G_CALLBACK (ooze_foreign_gel_on_enter), gel);
+  gel->leave_id =
+    g_signal_connect (gel->actor, "leave-event",
+                      G_CALLBACK (ooze_foreign_gel_on_leave), gel);
   gel->actor_destroy_id =
     g_signal_connect (gel->actor, "destroy",
                       G_CALLBACK (ooze_foreign_gel_on_actor_destroy), gel);
@@ -638,7 +742,7 @@ ooze_foreign_gel_attach (OozeForeignGelState *state,
   /* Build the lights only after the overlay is parented: the texture upload
    * resolves its CoglContext by walking the actor's parent chain, so content
    * created on an unparented actor comes back NULL (invisible lights). */
-  ooze_foreign_gel_build_lights (gel->actor);
+  ooze_foreign_gel_build_lights (gel);
 
   ooze_theme_watch (ooze_theme_get_default (),
                     ooze_foreign_gel_on_theme_changed, gel);

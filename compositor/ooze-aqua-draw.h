@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../common/aqua-chrome.h"
+
 #include <cairo/cairo.h>
 #include <clutter/clutter.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
@@ -44,7 +46,9 @@ ClutterContent *ooze_aqua_traffic_light_content (ClutterActor *ref_actor,
                                                int           size,
                                                gfloat        r,
                                                gfloat        g,
-                                               gfloat        b);
+                                               gfloat        b,
+                                               gboolean      show_glyphs,
+                                               AquaTrafficGlyph glyph);
 
 
 ClutterContent *ooze_aqua_menu_feather_content (ClutterActor *ref_actor,
