@@ -61,7 +61,9 @@ jobs:
             libpolkit-agent-1-dev \
             libpolkit-gobject-1-dev \
             libpipewire-0.3-dev \
-            desktop-file-utils
+            desktop-file-utils \
+            xvfb \
+            dbus-x11
 
       - name: Configure
         run: meson setup build
@@ -70,7 +72,7 @@ jobs:
         run: ninja -C build
 
       - name: Test
-        run: meson test -C build --print-errorlogs
+        run: xvfb-run -a env GSK_RENDERER=cairo LIBGL_ALWAYS_SOFTWARE=1 meson test -C build --print-errorlogs
 
       - name: Validate desktop files
         run: |
