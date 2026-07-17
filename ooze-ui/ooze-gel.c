@@ -401,12 +401,12 @@ ooze_gel_ensure_css (void)
                                      ".ooze-resize-n,"
                                      ".ooze-resize-s {"
                                      "  min-height: 4px;"
-                                     "  background: rgba(85, 85, 97, 0.88);"
+                                     "  background: @borders;"
                                      "}"
                                      ".ooze-resize-e,"
                                      ".ooze-resize-w {"
                                      "  min-width: 4px;"
-                                     "  background: rgba(85, 85, 97, 0.88);"
+                                     "  background: @borders;"
                                      "}"
                                      ".ooze-resize-ne,"
                                      ".ooze-resize-nw,"
@@ -414,7 +414,7 @@ ooze_gel_ensure_css (void)
                                      ".ooze-resize-sw {"
                                      "  min-width:  4px;"
                                      "  min-height: 4px;"
-                                     "  background: rgba(85, 85, 97, 0.88);"
+                                     "  background: @borders;"
                                      "}"
 
                                      /* Invisible grips for normal Ooze CSD windows. */

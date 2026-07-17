@@ -16,6 +16,24 @@ typedef struct
 
 static AdwStyleManager *style_manager;
 static gboolean style_manager_ready;
+static GtkCssProvider *accent_provider;
+
+static void ooze_theme_dark_changed (AdwStyleManager *manager,
+                                     GParamSpec     *pspec,
+                                     gpointer        user_data);
+
+static void
+ooze_theme_load_css (gboolean dark)
+{
+  const char *accent_color = dark ? "#72a6f2" : "#2968c8";
+  g_autofree char *css = g_strdup_printf (
+    "@define-color accent_bg_color #2968c8;"
+    "@define-color accent_fg_color #ffffff;"
+    "@define-color accent_color %s;",
+    accent_color);
+
+  gtk_css_provider_load_from_string (accent_provider, css);
+}
 
 static void
 ooze_theme_notify_free (OozeThemeNotify *notify)
@@ -31,7 +49,18 @@ ooze_theme_style_manager_init_idle (gpointer user_data G_GNUC_UNUSED)
 {
   style_manager = g_object_ref (adw_style_manager_get_default ());
   style_manager_ready = TRUE;
+  g_signal_connect (style_manager, "notify::dark",
+                    G_CALLBACK (ooze_theme_dark_changed), NULL);
+  ooze_theme_load_css (adw_style_manager_get_dark (style_manager));
   return G_SOURCE_REMOVE;
+}
+
+static void
+ooze_theme_dark_changed (AdwStyleManager *manager,
+                         GParamSpec     *pspec G_GNUC_UNUSED,
+                         gpointer        user_data G_GNUC_UNUSED)
+{
+  ooze_theme_load_css (adw_style_manager_get_dark (manager));
 }
 
 static gboolean
@@ -146,9 +175,14 @@ ooze_theme_ensure (void)
     ".spot-finder {"
     "  background: @window_bg_color;"
     "}");
-  gtk_style_context_add_provider_for_display (display,
-                                              GTK_STYLE_PROVIDER (p),
-                                              GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 10);
+  accent_provider = gtk_css_provider_new ();
+  ooze_theme_load_css (FALSE);
+  gtk_style_context_add_provider_for_display (
+    display, GTK_STYLE_PROVIDER (p),
+    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 10);
+  gtk_style_context_add_provider_for_display (
+    display, GTK_STYLE_PROVIDER (accent_provider),
+    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 10);
   g_object_unref (p);
 
   /* Aqua sliding-window scrollbars (always-visible proportional thumbs). */
