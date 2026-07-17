@@ -6,6 +6,9 @@
 #include <gtk/gtk.h>
 
 #include <math.h>
+#include <sys/stat.h>
+
+static void prepare_test_environment (void);
 
 static double
 color_distance (const GdkRGBA *a,
@@ -41,6 +44,21 @@ prepare_test_icon_theme (void)
     -1,
     NULL));
   g_setenv ("OOZE_DATA_DIR", root, TRUE);
+}
+
+static void
+prepare_test_environment (void)
+{
+  g_autofree char *runtime_dir = NULL;
+
+  runtime_dir = g_dir_make_tmp ("ooze-render-runtime-XXXXXX", NULL);
+  g_assert_nonnull (runtime_dir);
+  g_assert_cmpint (chmod (runtime_dir, 0700), ==, 0);
+  g_assert_true (g_setenv ("XDG_RUNTIME_DIR", runtime_dir, TRUE));
+  g_assert_true (g_setenv ("GTK_A11Y", "none", TRUE));
+  g_unsetenv ("DBUS_SESSION_BUS_ADDRESS");
+
+  prepare_test_icon_theme ();
 }
 
 static void
@@ -121,7 +139,6 @@ test_render_smoke (void)
   guint height;
   guint changed;
 
-  prepare_test_icon_theme ();
   ooze_kit_init ();
   display = gdk_display_get_default ();
   g_assert_nonnull (display);
@@ -198,6 +215,7 @@ test_render_smoke (void)
 int
 main (int argc, char **argv)
 {
+  prepare_test_environment ();
   g_test_init (&argc, &argv, NULL);
   g_test_add_func ("/render/smoke", test_render_smoke);
   return g_test_run ();
