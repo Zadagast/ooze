@@ -3,150 +3,205 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ooze — an Aqua-inspired desktop for Linux</title>
-<meta name="description" content="Ooze is an Aqua-inspired Wayland desktop built on Mutter, with first-party apps that share one look.">
+<title>Ooze — a desktop that makes sense</title>
+<meta name="description" content="Ooze brings back the clarity of classic Mac OS and old GNOME, with Linux freedom underneath.">
 <link rel="icon" type="image/png" href="assets/ooze-splat.png">
 <style>
   :root {
-    --bg: #0e1116;
-    --surface: #161b22;
-    --text: #e6edf3;
-    --muted: #9aa4b2;
-    --accent: #4b8de4;
-    --radius: 14px;
+    --sky: #dcecff;
+    --sky-deep: #b5d5fa;
+    --ink: #10284b;
+    --muted: #466486;
+    --blue: #2968c8;
+    --blue-dark: #174b9d;
+    --glass: rgba(255, 255, 255, 0.72);
+    --line: rgba(35, 91, 157, 0.25);
+    --shadow: 0 22px 60px rgba(30, 74, 132, 0.2);
+    --radius: 24px;
   }
   * { box-sizing: border-box; margin: 0; }
+  html { scroll-behavior: smooth; }
   body {
-    background: var(--bg);
-    color: var(--text);
-    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    background:
+      radial-gradient(circle at 15% 0%, #fff 0, transparent 34rem),
+      linear-gradient(135deg, var(--sky) 0%, #f7fbff 45%, var(--sky-deep) 100%);
+    color: var(--ink);
+    font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  main { max-width: 880px; margin: 0 auto; padding: 0 20px 80px; }
-  section { margin-top: 72px; }
-
-  .hero { text-align: center; padding-top: 72px; }
-  .hero img.logo { width: 88px; height: auto; }
-  .hero h1 { font-size: 2.6rem; margin-top: 12px; letter-spacing: -0.02em; }
-  .hero p.tag { color: var(--muted); font-size: 1.15rem; max-width: 560px; margin: 10px auto 0; }
-  .actions { margin-top: 28px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  main { max-width: 1080px; margin: auto; padding: 0 24px 90px; }
+  section { margin-top: 92px; }
+  .hero { text-align: center; padding-top: 54px; }
+  .logo {
+    width: 78px; height: auto; filter: drop-shadow(0 10px 12px rgba(23, 75, 157, .24));
+  }
+  .eyebrow {
+    color: var(--blue-dark); font-size: .8rem; font-weight: 800;
+    letter-spacing: .16em; text-transform: uppercase; margin-top: 22px;
+  }
+  h1 {
+    color: #0c326c; font-size: clamp(3rem, 8vw, 6.8rem);
+    letter-spacing: -.075em; line-height: .95; margin-top: 8px;
+    text-shadow: 0 3px 0 rgba(255,255,255,.8);
+  }
+  .tag {
+    color: var(--muted); font-size: clamp(1.15rem, 2.5vw, 1.45rem);
+    font-weight: 600; max-width: 720px; margin: 22px auto 0;
+  }
+  .pitch {
+    color: var(--ink); font-size: 1.12rem; max-width: 700px;
+    margin: 18px auto 0;
+  }
+  .actions {
+    display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;
+    margin-top: 30px;
+  }
   .btn {
-    display: inline-block; padding: 10px 22px; border-radius: 999px;
-    text-decoration: none; font-weight: 600; font-size: 0.95rem;
+    border: 1px solid var(--line); border-radius: 999px; display: inline-block;
+    font-weight: 800; padding: 11px 24px; text-decoration: none;
+    transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
   }
-  .btn.primary { background: var(--accent); color: #fff; }
-  .btn.primary:hover { filter: brightness(1.1); }
-  .btn.ghost { color: var(--text); border: 1px solid #30363d; }
-  .btn.ghost:hover { border-color: var(--muted); }
-
-  video, .shot img {
-    width: 100%; border-radius: var(--radius); display: block;
-    border: 1px solid #30363d;
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(23,75,157,.2); }
+  .btn.primary { background: linear-gradient(#4389df, var(--blue)); color: #fff; }
+  .btn.ghost { background: rgba(255,255,255,.48); color: var(--blue-dark); }
+  .media, .card, pre {
+    background: var(--glass); border: 1px solid var(--line);
+    box-shadow: var(--shadow); backdrop-filter: blur(14px);
   }
-  .caption { text-align: center; color: var(--muted); font-size: 0.9rem; margin-top: 10px; }
-
-  h2 { font-size: 1.5rem; text-align: center; margin-bottom: 28px; letter-spacing: -0.01em; }
-
-  .points { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
-  .point { background: var(--surface); border: 1px solid #30363d; border-radius: var(--radius); padding: 20px; }
-  .point h3 { font-size: 1.02rem; margin-bottom: 6px; }
-  .point p { color: var(--muted); font-size: 0.93rem; }
-
-  .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 700px) { .shots { grid-template-columns: 1fr; } }
-
+  .media { border-radius: var(--radius); padding: 10px; }
+  video, .shot img { border-radius: 17px; display: block; width: 100%; }
+  .caption { color: var(--muted); font-size: .92rem; margin-top: 13px; text-align: center; }
+  h2 {
+    color: #0c326c; font-size: clamp(2rem, 4vw, 3.1rem);
+    letter-spacing: -.055em; line-height: 1.05; margin-bottom: 28px;
+  }
+  .center { text-align: center; }
+  .intro { color: var(--muted); font-size: 1.1rem; max-width: 700px; margin-top: -12px; }
+  .points { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 17px; }
+  .card { border-radius: 18px; padding: 22px; }
+  .card h3 { color: #123e7d; font-size: 1.08rem; margin-bottom: 6px; }
+  .card p { color: var(--muted); font-size: .97rem; }
+  .apps { columns: 2 320px; column-gap: 34px; }
+  .apps p { break-inside: avoid; color: var(--muted); margin-bottom: 15px; }
+  .apps strong { color: var(--ink); }
+  .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .shot { border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+  .install { max-width: 760px; }
+  .install p { color: var(--muted); margin: 13px 0 8px; }
+  .install a { color: var(--blue-dark); font-weight: 700; }
   pre {
-    background: var(--surface); border: 1px solid #30363d; border-radius: var(--radius);
-    padding: 18px 20px; overflow-x: auto; font-size: 0.9rem; line-height: 1.7;
+    border-radius: 15px; color: #123e7d; overflow-x: auto;
+    padding: 16px 19px; font-size: .92rem;
   }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  .install p { color: var(--muted); margin: 14px 0 8px; }
-  .install a { color: var(--accent); }
-
-  footer { text-align: center; color: var(--muted); font-size: 0.85rem; margin-top: 80px; }
-  footer a { color: var(--muted); }
+  footer { color: var(--muted); font-size: .88rem; margin-top: 92px; text-align: center; }
+  footer a { color: var(--blue-dark); }
+  @media (max-width: 700px) {
+    body { font-size: 16px; }
+    .hero { padding-top: 35px; }
+    section { margin-top: 68px; }
+    .shots { grid-template-columns: 1fr; }
+    h2 { font-size: 2.35rem; }
+  }
 </style>
 </head>
 <body>
 <main>
-
   <header class="hero">
     <img class="logo" src="assets/ooze-splat.png" alt="Ooze logo">
+    <p class="eyebrow">A desktop that makes sense</p>
     <h1>Ooze</h1>
-    <p class="tag">An Aqua-inspired desktop for Linux. Built on Mutter, with first-party apps that share one look.</p>
+    <p class="tag">The clarity of classic Mac OS and old GNOME, rebuilt on Linux.</p>
+    <p class="pitch">No walled garden. No subscription. Just a calm, consistent desktop
+      with Linux freedom underneath it.</p>
     <div class="actions">
-      <a class="btn primary" href="https://github.com/Zadagast/ooze/releases/download/v0.2.0/Ooze-v0.2.0-x86_64.AppImage">Download AppImage</a>
-      <a class="btn ghost" href="https://github.com/Zadagast/ooze/releases/download/v0.2.0/ooze_0.2.0_amd64.deb">Download .deb</a>
+      <a class="btn primary" href="https://github.com/Zadagast/ooze/releases/download/v0.2.1/Ooze-v0.2.1-x86_64.AppImage">Download AppImage</a>
+      <a class="btn ghost" href="https://github.com/Zadagast/ooze/releases/download/v0.2.1/ooze_0.2.1_amd64.deb">Download .deb</a>
     </div>
   </header>
 
-  <section>
+  <section class="media">
     <video src="assets/ooze-desktop-demo.mp4" autoplay muted loop playsinline></video>
-    <p class="caption">Files, terminal, and one-click dark mode.</p>
+    <p class="caption">A real desktop: menu bar, floating dock, Gel windows, and matching apps.</p>
   </section>
 
   <section>
-    <h2>What you get</h2>
+    <h2>What makes Ooze different</h2>
+    <p class="intro">Most Linux desktops give you a shell and a pile of unrelated apps.
+      Ooze is built as one complete, opinionated desktop.</p>
+    <div class="points" style="margin-top: 26px">
+      <article class="card"><h3>Your whole screen looks like one desktop.</h3><p>Ooze puts its Gel frames and traffic lights on its own apps and supported third-party Wayland windows.</p></article>
+      <article class="card"><h3>A real desktop, not just a launcher.</h3><p>A menu bar, floating dock, desktop icons, wallpaper, and lively animations work together.</p></article>
+      <article class="card"><h3>One switch changes everything.</h3><p>Light and dark mode follow through the shell, Ooze apps, and supported foreign GTK applications.</p></article>
+      <article class="card"><h3>A full set of built-in apps matches.</h3><p>Files, settings, terminal, screenshots, images, sound, torrents, software, and displays share one visual language.</p></article>
+      <article class="card"><h3>It bridges old and new.</h3><p>Wayland, X11, classic app menus, foreign GTK themes, notifications, and system-tray applications live together.</p></article>
+      <article class="card"><h3>Made to be tinkered with.</h3><p>OozeKit and a nested build-and-run workflow make new Ooze apps part of the desktop.</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>The apps that come with it</h2>
+    <div class="apps">
+      <p><strong>Spot</strong> — the file manager for folders, files, Trash, and icon or column views.</p>
+      <p><strong>Ooze King</strong> — the settings hub for displays, themes, defaults, sound, software, torrents, and more.</p>
+      <p><strong>Ooze Command</strong> — a clean, tabbed terminal.</p>
+      <p><strong>Ooze Launch</strong> — a searchable launcher with categories, custom groups, and keyboard navigation.</p>
+      <p><strong>Ooze Shot</strong> — screenshots with preview, copy, reveal, and Ooze Eye actions.</p>
+      <p><strong>Ooze Eye</strong> — an image viewer with zoom, fit-to-window, and next/previous controls.</p>
+      <p><strong>Ooze Ear</strong> — audio devices, volume, mute, and stream routing.</p>
+      <p><strong>Ooze Torrent</strong> — torrent and magnet downloads with progress and pause/resume.</p>
+      <p><strong>Software (Ooze Pak)</strong> — install and remove Flatpak applications.</p>
+      <p><strong>Ooze Monitor</strong> — resolution, refresh rate, scale, orientation, and monitor layout.</p>
+      <p><strong>Ooze Defaults</strong> — default apps for links, files, media, text, and torrents.</p>
+      <p><strong>Ooze Themes</strong> — appearance, icon, cursor, and foreign-GTK theme preferences.</p>
+      <p><strong>Ooze About</strong> — information about your computer and Ooze apps.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Works with the rest of Linux</h2>
     <div class="points">
-      <div class="point">
-        <h3>A complete shell</h3>
-        <p>Global menu bar, floating dock, and desktop icons on a Wayland compositor.</p>
-      </div>
-      <div class="point">
-        <h3>One design language</h3>
-        <p>File manager, terminal, viewer, and settings — all first-party, all matching.</p>
-      </div>
-      <div class="point">
-        <h3>Light and dark</h3>
-        <p>Switch the whole desktop from the Ooze menu. Every app follows instantly.</p>
-      </div>
-      <div class="point">
-        <h3>Runs your apps</h3>
-        <p>Any Wayland or X11 application works, via built-in Xwayland support.</p>
-      </div>
-      <div class="point">
-        <h3>Screen sharing</h3>
-        <p>First-party Ooze ScreenCast portal: share a monitor from Flatpak Discord or browser <code>getDisplayMedia</code>. Window share and screenshots to come.</p>
-      </div>
-      <div class="point">
-        <h3>Default applications</h3>
-        <p>Set browser, mail, and other defaults in Ooze King.</p>
-      </div>
-      <div class="point">
-        <h3>Self-contained</h3>
-        <p>WhiteSur themes and elementary icons are bundled.</p>
-      </div>
-      <div class="point">
-        <h3>Two tracks</h3>
-        <p>Log into the stable <code>.deb</code>; iterate with <code>./run-devkit.sh</code> in a nested window. See <a href="https://github.com/Zadagast/ooze/blob/main/DEVELOPING.md">DEVELOPING.md</a>.</p>
-      </div>
+      <article class="card"><h3>Wayland and X11</h3><p>Modern Wayland apps and older X11 apps run side by side through built-in Xwayland support.</p></article>
+      <article class="card"><h3>Foreign-window Gel</h3><p>Supported third-party Wayland windows receive Ooze frames and traffic lights too.</p></article>
+      <article class="card"><h3>Menus, tray, and notifications</h3><p>Global menus, StatusNotifier/AppIndicator tray items, and clickable notification cards fit into the shell.</p></article>
+      <article class="card"><h3>Light and dark</h3><p>Bundled WhiteSur themes follow Ooze's appearance live for foreign GTK applications.</p></article>
+      <article class="card"><h3>A complete session</h3><p>Autostart, polkit authentication, PAM lock screen, and logout, restart, shutdown, and suspend actions are built in.</p></article>
+      <article class="card"><h3>Screen sharing</h3><p>The first-party ScreenCast portal lets Flatpak Discord and browser calls share a monitor through a native picker.</p></article>
     </div>
   </section>
 
-  <section>
-    <div class="shots">
-      <div class="shot"><img src="assets/ooze-light.png" alt="Ooze desktop, light mode" loading="lazy"></div>
-      <div class="shot"><img src="assets/ooze-dark.png" alt="Ooze desktop, dark mode" loading="lazy"></div>
-    </div>
-    <p class="caption">Light and dark — same desktop, one click apart.</p>
+  <section class="shots">
+    <div class="shot"><img src="assets/ooze-light.png" alt="Ooze desktop in light mode" loading="lazy"></div>
+    <div class="shot"><img src="assets/ooze-dark.png" alt="Ooze desktop in dark mode" loading="lazy"></div>
   </section>
+  <p class="caption">Light and dark — the same desktop, one click apart.</p>
 
   <section class="install">
-    <h2>Try it</h2>
-    <p>Grab the AppImage or <code>.deb</code> from <a href="https://github.com/Zadagast/ooze/releases/tag/v0.2.0">Releases</a> — AppImage runs nested on any Wayland desktop:</p>
-    <pre><code>chmod +x Ooze-v0.2.0-x86_64.AppImage &amp;&amp; ./Ooze-v0.2.0-x86_64.AppImage</code></pre>
+    <h2>Try Ooze</h2>
+    <p>Download the Alpha 0.2.1 AppImage or native session package from
+      <a href="https://github.com/Zadagast/ooze/releases/tag/v0.2.1">Releases</a>.
+      The AppImage runs nested on an existing Wayland desktop.</p>
+    <pre><code>chmod +x Ooze-v0.2.1-x86_64.AppImage &amp;&amp; ./Ooze-v0.2.1-x86_64.AppImage</code></pre>
     <p>Or install the native session package:</p>
-    <pre><code>sudo apt install ./ooze_0.2.0_amd64.deb</code></pre>
-    <p><a href="https://github.com/Zadagast/ooze/releases/download/v0.2.0/ooze_0.2.0_amd64.deb">Download ooze_0.2.0_amd64.deb</a></p>
-    <p>Or build from source (Mutter 18 dev packages, e.g. Ubuntu 26.04):</p>
-    <pre><code>git clone https://github.com/Zadagast/ooze
-cd ooze &amp;&amp; ./run-devkit.sh</code></pre>
+    <pre><code>sudo apt install ./ooze_0.2.1_amd64.deb</code></pre>
+    <p><a href="https://github.com/Zadagast/ooze/releases/download/v0.2.1/ooze_0.2.1_amd64.deb">Download ooze_0.2.1_amd64.deb</a></p>
+  </section>
+
+  <section>
+    <h2>Made to be built</h2>
+    <p class="intro">Ooze is a Mutter 18 plugin with an installable OozeKit toolkit,
+      a nested development loop, and headless CI checks for every app that can be
+      constructed without live services.</p>
+    <div class="actions" style="justify-content: flex-start">
+      <a class="btn ghost" href="https://github.com/Zadagast/ooze/blob/main/DEVELOPING.md">Development guide</a>
+      <a class="btn ghost" href="https://github.com/Zadagast/ooze/blob/main/docs/build-an-ooze-app.md">Build an Ooze app</a>
+    </div>
   </section>
 
   <footer>
-    <p>Ooze · <a href="https://github.com/Zadagast/ooze">GitHub</a> · Compositor pieces inherit upstream Mutter licensing.</p>
+    <p><strong>Ooze is Alpha 0.2.1.</strong> A bold, early, work-in-progress desktop that already feels like coming home.</p>
+    <p style="margin-top: 8px"><a href="https://github.com/Zadagast/ooze">GitHub</a> · Compositor pieces inherit upstream Mutter licensing.</p>
   </footer>
-
 </main>
 </body>
 </html>
