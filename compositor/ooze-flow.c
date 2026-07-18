@@ -16,13 +16,20 @@ typedef struct
 } OozeFlowBlob;
 
 static const OozeFlowBlob flow_blobs[] = {
-  { 0.23, 0.32, 0.17, 0.72, 0.10, 0.17, 0.13 },
-  { 0.42, 0.27, 0.14, 0.51, 1.80, 0.14, 0.18 },
-  { 0.62, 0.39, 0.18, 0.63, 3.25, 0.18, 0.12 },
-  { 0.77, 0.28, 0.13, 0.43, 4.40, 0.13, 0.16 },
-  { 0.29, 0.67, 0.16, 0.57, 5.10, 0.16, 0.14 },
-  { 0.51, 0.72, 0.19, 0.46, 2.55, 0.18, 0.13 },
-  { 0.74, 0.67, 0.15, 0.68, 0.90, 0.15, 0.17 },
+  { 0.16, 0.25, 0.14, 0.72, 0.10, 0.14, 0.11 },
+  { 0.30, 0.20, 0.11, 0.51, 1.80, 0.11, 0.15 },
+  { 0.47, 0.25, 0.15, 0.63, 3.25, 0.15, 0.10 },
+  { 0.64, 0.19, 0.10, 0.43, 4.40, 0.10, 0.13 },
+  { 0.82, 0.28, 0.13, 0.57, 5.10, 0.13, 0.12 },
+  { 0.22, 0.52, 0.12, 0.46, 2.55, 0.12, 0.10 },
+  { 0.40, 0.66, 0.16, 0.68, 0.90, 0.15, 0.14 },
+  { 0.58, 0.50, 0.10, 0.37, 5.70, 0.10, 0.12 },
+  { 0.77, 0.49, 0.14, 0.59, 2.10, 0.13, 0.11 },
+  { 0.90, 0.68, 0.11, 0.78, 3.90, 0.11, 0.14 },
+  { 0.12, 0.80, 0.10, 0.48, 1.30, 0.10, 0.12 },
+  { 0.34, 0.88, 0.13, 0.66, 4.80, 0.12, 0.10 },
+  { 0.63, 0.82, 0.11, 0.54, 0.35, 0.11, 0.13 },
+  { 0.84, 0.88, 0.13, 0.41, 2.90, 0.12, 0.10 },
 };
 
 static gdouble
@@ -108,6 +115,8 @@ ooze_flow_render_with_color (cairo_surface_t *surface,
           gdouble normalized_x = ((gdouble) x + 0.5) / width;
           gdouble field = 0.0;
           gdouble specular = 0.0;
+          gdouble rim;
+          gdouble glass;
           gdouble red;
           gdouble green;
           gdouble blue;
@@ -146,16 +155,20 @@ ooze_flow_render_with_color (cairo_surface_t *surface,
                                (radius * radius * 0.16));
             }
 
-          alpha = flow_smoothstep (0.72, 1.20, field);
+          alpha = flow_smoothstep (0.48, 1.45, field);
           if (alpha <= 0.001)
             continue;
 
-          alpha *= dark ? 0.68 : 0.56;
-          specular = CLAMP (specular * 0.16, 0.0, 0.30);
+          rim = flow_smoothstep (0.38, 0.82, field) -
+                flow_smoothstep (1.05, 1.70, field);
+          glass = CLAMP (flow_smoothstep (0.55, 1.35, field) * 0.35 +
+                         rim * 0.55, 0.0, 0.78);
+          alpha *= dark ? 0.48 : 0.38;
+          specular = CLAMP (specular * 0.34, 0.0, 0.58);
 
-          red = base_red + specular;
-          green = base_green + specular * 1.10;
-          blue = base_blue + specular * 1.25;
+          red = base_red + glass * 0.16 + specular;
+          green = base_green + glass * 0.18 + specular * 1.10;
+          blue = base_blue + glass * 0.24 + specular * 1.30;
 
           a = (guint8) CLAMP (alpha * 255.0, 0.0, 255.0);
           r = (guint8) CLAMP (red * alpha * 255.0, 0.0, 255.0);
