@@ -1,14 +1,15 @@
 /*
  * Ooze screensaver — a non-grabbing animated overlay inside Mutter.
  *
- * Ooze Flow is rendered as a reduced-resolution Cairo metaball field over the
- * shared Aqua wallpaper.
+ * Ooze Flow is rendered by a Cogl fragment shader over the shared wallpaper,
+ * with a full-resolution Cairo renderer retained as a fallback.
  */
 
 #include "ooze-screensaver.h"
 #include "ooze-plugin-priv.h"
 #include "ooze-aqua-draw.h"
 #include "ooze-flow.h"
+#include "ooze-flow-gpu.h"
 #include "ooze-lock.h"
 #include "ooze-wallpaper.h"
 #include "ooze-theme.h"
@@ -38,6 +39,7 @@ typedef struct
   int              render_height;
   gdouble          phase;
   gint64           last_render_us;
+  OozeFlowGpu     *gpu;
 } OozeFlowState;
 
 struct _OozeSaverMode
@@ -84,7 +86,7 @@ ooze_screensaver_flow_render (OozePlugin *plugin,
   gdouble blue;
   gint64 now;
 
-  if (!flow || !flow->surface)
+  if (!flow)
     return;
 
   now = g_get_monotonic_time ();
@@ -97,25 +99,39 @@ ooze_screensaver_flow_render (OozePlugin *plugin,
   red = 0.10 + palette->wallpaper_edge_r * 0.25;
   green = 0.24 + palette->wallpaper_mid_g * 0.25;
   blue = 0.58 + palette->wallpaper_mid_b * 0.25;
-  ooze_flow_render_with_color (flow->surface,
-                               flow->render_width,
-                               flow->render_height,
-                               flow->phase,
-                               dark,
+  if (flow->gpu)
+    {
+      ooze_flow_gpu_set_phase (flow->gpu, flow->phase);
+      ooze_flow_gpu_set_color (flow->gpu,
                                CLAMP (red, 0.0, 1.0),
                                CLAMP (green, 0.0, 1.0),
-                               CLAMP (blue, 0.0, 1.0));
+                               CLAMP (blue, 0.0, 1.0),
+                               dark);
+      clutter_actor_queue_redraw (plugin->screensaver_flow_actor);
+    }
+  else if (flow->surface)
+    {
+      ooze_flow_render_with_color (flow->surface,
+                                   flow->render_width,
+                                   flow->render_height,
+                                   flow->phase,
+                                   dark,
+                                   CLAMP (red, 0.0, 1.0),
+                                   CLAMP (green, 0.0, 1.0),
+                                   CLAMP (blue, 0.0, 1.0));
+
+      {
+        g_autoptr (ClutterContent) content = NULL;
+
+        content = ooze_aqua_content_from_surface (
+          plugin->screensaver_flow_actor,
+          flow->surface);
+        if (content)
+          clutter_actor_set_content (plugin->screensaver_flow_actor,
+                                     g_steal_pointer (&content));
+      }
+    }
   flow->last_render_us = now;
-
-  {
-    g_autoptr (ClutterContent) content = NULL;
-
-    content = ooze_aqua_content_from_surface (plugin->screensaver_flow_actor,
-                                               flow->surface);
-    if (content)
-      clutter_actor_set_content (plugin->screensaver_flow_actor,
-                                 g_steal_pointer (&content));
-  }
 }
 
 static void
@@ -126,6 +142,7 @@ ooze_screensaver_flow_free (OozePlugin *plugin)
   if (!flow)
     return;
 
+  ooze_flow_gpu_free (flow->gpu);
   g_clear_pointer (&flow->surface, cairo_surface_destroy);
   g_free (flow);
   plugin->screensaver_flow = NULL;
@@ -192,9 +209,10 @@ ooze_screensaver_mode_resize (OozePlugin *plugin,
   clutter_actor_set_size (plugin->screensaver_flow_actor,
                           (gfloat) width,
                           (gfloat) height);
-  render_width = MAX (64, width / 4);
-  render_height = MAX (36, height / 4);
+  render_width = MAX (1, width);
+  render_height = MAX (1, height);
 
+  clutter_actor_set_content (plugin->screensaver_flow_actor, NULL);
   ooze_screensaver_flow_free (plugin);
   flow = g_new0 (OozeFlowState, 1);
   flow->width = width;
@@ -204,6 +222,16 @@ ooze_screensaver_mode_resize (OozePlugin *plugin,
   flow->surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32,
                                               render_width,
                                               render_height);
+  flow->gpu = ooze_flow_gpu_new ();
+  if (flow->gpu)
+    {
+      g_autoptr (ClutterContent) content = NULL;
+
+      ooze_flow_gpu_set_size (flow->gpu, width, height);
+      content = g_object_ref (ooze_flow_gpu_get_content (flow->gpu));
+      clutter_actor_set_content (plugin->screensaver_flow_actor,
+                                 g_steal_pointer (&content));
+    }
   plugin->screensaver_flow = flow;
 }
 

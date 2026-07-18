@@ -71,6 +71,7 @@ ooze_flow_render_with_color (cairo_surface_t *surface,
   int stride;
   unsigned char *data;
   gdouble aspect;
+  gdouble blob_positions[G_N_ELEMENTS (flow_blobs)][2];
   int y;
 
   g_return_if_fail (surface != NULL);
@@ -89,6 +90,12 @@ ooze_flow_render_with_color (cairo_surface_t *surface,
   memset (data, 0, (gsize) stride * surface_height);
 
   aspect = (gdouble) width / (gdouble) height;
+
+  for (gsize i = 0; i < G_N_ELEMENTS (flow_blobs); i++)
+    flow_blob_position (&flow_blobs[i],
+                        phase,
+                        &blob_positions[i][0],
+                        &blob_positions[i][1]);
 
   for (y = 0; y < height; y++)
     {
@@ -113,8 +120,8 @@ ooze_flow_render_with_color (cairo_surface_t *surface,
 
           for (i = 0; i < G_N_ELEMENTS (flow_blobs); i++)
             {
-              gdouble blob_x;
-              gdouble blob_y;
+              gdouble blob_x = blob_positions[i][0];
+              gdouble blob_y = blob_positions[i][1];
               gdouble dx;
               gdouble dy;
               gdouble distance;
@@ -123,7 +130,6 @@ ooze_flow_render_with_color (cairo_surface_t *surface,
               gdouble highlight_y;
               gdouble highlight_distance;
 
-              flow_blob_position (&flow_blobs[i], phase, &blob_x, &blob_y);
               dx = (normalized_x - blob_x) * aspect;
               dy = normalized_y - blob_y;
               distance = (dx * dx + dy * dy) / (radius * radius);
