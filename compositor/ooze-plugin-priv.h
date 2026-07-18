@@ -77,6 +77,7 @@ struct _OozePlugin
   ClutterGrab  *lock_grab;
   GSubprocess  *lock_auth_proc;
   guint         lock_clock_timer;
+  guint         lock_fade_id;
   guint         lock_idle_watch_id;
   guint         lock_logind_sub_id;
   GDBusConnection *lock_logind_conn;
