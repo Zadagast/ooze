@@ -261,6 +261,12 @@ install_data('data/icons/hicolor/scalable/apps/org.ooze.Launch.svg',
 install_data('data/icons/hicolor/scalable/apps/org.ooze.Launch.svg',
   install_dir: ooze_data_dir / 'icons/hicolor/scalable/apps',
 )
+install_data('data/icons/hicolor/scalable/apps/org.ooze.Scenery.svg',
+  install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps',
+)
+install_data('data/icons/hicolor/scalable/apps/org.ooze.Scenery.svg',
+  install_dir: ooze_data_dir / 'icons/hicolor/scalable/apps',
+)
 
 vte_dep = dependency('vte-2.91-gtk4', required: false)
 
@@ -532,6 +538,30 @@ if gtk4_dep.found() and adw_dep.found()
   )
 
   install_data('data/org.ooze.Launch.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
+  executable('ooze-scenery',
+    'ooze-scenery/main.c',
+    'ooze-scenery/ooze-scenery-window.c',
+    'compositor/ooze-flow.c',
+    ooze_shared_sources,
+    include_directories: ooze_app_inc + [include_directories('ooze-scenery'),
+                                         inc_compositor],
+    dependencies: [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      gdk_pixbuf_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.Scenery.desktop',
     install_dir: get_option('datadir') / 'applications',
   )
 

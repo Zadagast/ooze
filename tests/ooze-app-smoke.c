@@ -8,6 +8,7 @@
 #include "ooze-monitor-window.h"
 #include "ooze-pak-window.h"
 #include "ooze-shot-window.h"
+#include "ooze-scenery-window.h"
 #include "ooze-surface.h"
 #include "spot-window.h"
 #include "ooze-themes-window.h"
@@ -262,6 +263,12 @@ new_pak_window (GtkApplication *app)
   return GTK_WIDGET (ooze_pak_window_new (app));
 }
 
+static GtkWidget *
+new_scenery_window (GtkApplication *app)
+{
+  return ooze_scenery_window_new (app);
+}
+
 static GtkApplication *test_app;
 
 static void
@@ -330,6 +337,12 @@ test_pak (void)
   assert_window_renders (test_app, new_pak_window, "Ooze Pak");
 }
 
+static void
+test_scenery (void)
+{
+  assert_window_renders (test_app, new_scenery_window, "Ooze Scenery");
+}
+
 int
 main (int argc, char **argv)
 {
@@ -358,6 +371,7 @@ main (int argc, char **argv)
   g_test_add_func ("/app/monitor", test_monitor);
   g_test_add_func ("/app/themes", test_themes);
   g_test_add_func ("/app/pak", test_pak);
+  g_test_add_func ("/app/scenery", test_scenery);
 
   {
     int status = g_test_run ();

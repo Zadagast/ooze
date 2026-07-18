@@ -61,6 +61,8 @@ test_app_smoke = executable('test-app-smoke',
   '../ooze-monitor/ooze-display-pane.c',
   '../ooze-monitor/ooze-display-config.c',
   '../ooze-pak/ooze-pak-window.c',
+  '../ooze-scenery/ooze-scenery-window.c',
+  '../compositor/ooze-flow.c',
   '../ooze-pak/ooze-pak-flatpak.c',
   '../ooze-eye/ooze-eye-window.c',
   '../ooze-shot/ooze-shot-window.c',
@@ -85,6 +87,8 @@ test_app_smoke = executable('test-app-smoke',
     include_directories('../ooze-about'),
     include_directories('../ooze-defaults'),
     include_directories('../ooze-themes'),
+    include_directories('../ooze-scenery'),
+    inc_compositor,
   ],
   dependencies: [
     ooze_kit_dep,
@@ -107,6 +111,7 @@ test_app_smoke = executable('test-app-smoke',
 test_app_smoke_env = [
   'GSK_RENDERER=cairo',
   'LIBGL_ALWAYS_SOFTWARE=1',
+  'GSETTINGS_SCHEMA_DIR=' + meson.project_build_root(),
 ]
 
 test('app-smoke-spot', test_app_smoke,
@@ -151,5 +156,9 @@ test('app-smoke-themes', test_app_smoke,
 )
 test('app-smoke-pak', test_app_smoke,
   args: ['-p', '/app/pak'],
+  env: test_app_smoke_env,
+)
+test('app-smoke-scenery', test_app_smoke,
+  args: ['-p', '/app/scenery'],
   env: test_app_smoke_env,
 )
