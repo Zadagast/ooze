@@ -140,6 +140,7 @@ ooze_flow_gpu_new (void)
   CoglContext *context;
   CoglSnippet *snippet;
   OozeFlowGpu *flow;
+  g_autoptr (GError) blend_error = NULL;
 
   backend = clutter_get_default_backend ();
   context = backend ? clutter_backend_get_cogl_context (backend) : NULL;
@@ -150,6 +151,16 @@ ooze_flow_gpu_new (void)
   flow->pipeline = cogl_pipeline_new (context);
   if (!flow->pipeline)
     {
+      g_object_unref (flow);
+      return NULL;
+    }
+  if (!cogl_pipeline_set_blend (
+        flow->pipeline,
+        "RGBA = ADD(SRC_COLOR, DST_COLOR*(1-SRC_COLOR[A]))",
+        &blend_error))
+    {
+      g_warning ("Unable to enable Ooze Flow blending: %s",
+                 blend_error->message);
       g_object_unref (flow);
       return NULL;
     }

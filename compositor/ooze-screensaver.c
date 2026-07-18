@@ -38,6 +38,7 @@ typedef struct
   int              render_width;
   int              render_height;
   gdouble          phase;
+  gint64           phase_start_us;
   gint64           last_render_us;
   OozeFlowGpu     *gpu;
 } OozeFlowState;
@@ -176,6 +177,7 @@ ooze_screensaver_mode_start (OozePlugin *plugin G_GNUC_UNUSED)
   if (flow)
     {
       flow->phase = 0.0;
+      flow->phase_start_us = g_get_monotonic_time ();
       flow->last_render_us = 0;
       ooze_screensaver_flow_render (plugin, TRUE);
     }
@@ -183,14 +185,19 @@ ooze_screensaver_mode_start (OozePlugin *plugin G_GNUC_UNUSED)
 
 static void
 ooze_screensaver_mode_step (OozePlugin *plugin G_GNUC_UNUSED,
-                            gdouble      progress)
+                            gdouble      progress G_GNUC_UNUSED)
 {
   OozeFlowState *flow = ooze_screensaver_get_flow (plugin);
+  gint64 now;
 
   if (!flow)
     return;
 
-  flow->phase = progress * G_PI * 2.0;
+  now = g_get_monotonic_time ();
+  if (flow->phase_start_us == 0)
+    flow->phase_start_us = now;
+  flow->phase = (now - flow->phase_start_us) *
+                (G_PI * 2.0 / 10000000.0);
   ooze_screensaver_flow_render (plugin, FALSE);
 }
 
