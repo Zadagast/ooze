@@ -13,6 +13,7 @@ static const char * const ooze_dock_default_pins[] = {
   "org.ooze.Monitor",
   "org.ooze.King",
   "org.ooze.Pak",
+  "org.ooze.Scenery",
   "org.ooze.About",
   NULL,
 };
@@ -79,6 +80,8 @@ ooze_dock_pins_load (void)
 
   if (!ooze_dock_pins_contains (out, "org.ooze.Shot"))
     g_ptr_array_add (out, g_strdup ("org.ooze.Shot"));
+  if (!ooze_dock_pins_contains (out, "org.ooze.Scenery"))
+    g_ptr_array_add (out, g_strdup ("org.ooze.Scenery"));
   g_ptr_array_add (out, NULL);
   return (char **) g_ptr_array_free (out, FALSE);
 }
