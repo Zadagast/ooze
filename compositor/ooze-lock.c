@@ -723,6 +723,17 @@ ooze_lock_request (OozePlugin *plugin)
   if (plugin->shutting_down || plugin->locked)
     return;
 
+  if (plugin->lock_fade_id)
+    {
+      g_source_remove (plugin->lock_fade_id);
+      plugin->lock_fade_id = 0;
+    }
+  if (plugin->lock_overlay)
+    {
+      clutter_actor_remove_all_transitions (plugin->lock_overlay);
+      ooze_lock_destroy_ui (plugin);
+    }
+
   plugin->locked = TRUE;
   ooze_screensaver_lock_backdrop (plugin);
 
