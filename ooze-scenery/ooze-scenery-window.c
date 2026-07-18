@@ -442,6 +442,13 @@ on_start_after_changed (GtkSpinButton *spin,
 }
 
 static void
+on_spin_activate (GtkSpinButton *spin,
+                  gpointer       user_data G_GNUC_UNUSED)
+{
+  gtk_spin_button_update (spin);
+}
+
+static void
 on_lock_after_changed (GtkSpinButton *spin,
                        gpointer       user_data)
 {
@@ -457,6 +464,17 @@ on_lock_enabled_changed (GtkCheckButton *button,
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
   g_settings_set_boolean (self->screensaver_settings, "lock-enabled",
                           gtk_check_button_get_active (button));
+}
+
+static gboolean
+on_close_request (GtkWindow *window G_GNUC_UNUSED,
+                  gpointer   user_data)
+{
+  OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
+
+  gtk_spin_button_update (GTK_SPIN_BUTTON (self->start_after));
+  gtk_spin_button_update (GTK_SPIN_BUTTON (self->lock_after));
+  return FALSE;
 }
 
 static GtkWidget *
@@ -629,10 +647,14 @@ scenery_build_screensaver_page (OozeSceneryWindow *self)
   gtk_box_append (GTK_BOX (side), self->lock_after);
   g_signal_connect (self->start_after, "value-changed",
                     G_CALLBACK (on_start_after_changed), self);
+  g_signal_connect (self->start_after, "activate",
+                    G_CALLBACK (on_spin_activate), self);
   g_signal_connect (self->lock_enabled, "toggled",
                     G_CALLBACK (on_lock_enabled_changed), self);
   g_signal_connect (self->lock_after, "value-changed",
                     G_CALLBACK (on_lock_after_changed), self);
+  g_signal_connect (self->lock_after, "activate",
+                    G_CALLBACK (on_spin_activate), self);
   return page;
 }
 
@@ -692,6 +714,8 @@ ooze_scenery_window_constructed (GObject *object)
   GSimpleAction *about;
 
   G_OBJECT_CLASS (ooze_scenery_window_parent_class)->constructed (object);
+  g_signal_connect (self, "close-request",
+                    G_CALLBACK (on_close_request), self);
   ooze_toolbar_ensure_css ();
   self->background_settings = g_settings_new ("org.gnome.desktop.background");
   self->scenery_settings = g_settings_new ("org.ooze.scenery");
