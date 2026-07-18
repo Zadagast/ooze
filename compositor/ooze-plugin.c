@@ -1908,6 +1908,7 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->lock_grab = NULL;
   plugin->lock_auth_proc = NULL;
   plugin->lock_clock_timer = 0;
+  plugin->lock_fade_id = 0;
   plugin->lock_idle_watch_id = 0;
   plugin->lock_logind_sub_id = 0;
   plugin->lock_logind_conn = NULL;

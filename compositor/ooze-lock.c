@@ -38,12 +38,14 @@
 #define OOZE_LOCK_USER_FONT      "Inter Medium 15"
 #define OOZE_LOCK_STATUS_FONT    "Inter 12"
 #define OOZE_LOCK_SHAKE_MS        280
+#define OOZE_LOCK_FADE_MS         350
 #define OOZE_LOCK_HELPER_NAME    "ooze-pam-helper"
 
 static void ooze_lock_dismiss (OozePlugin *plugin, gboolean authenticated);
 static void ooze_lock_set_status (OozePlugin *plugin, const char *text);
 static void ooze_lock_sync_idle_watch (OozePlugin *plugin);
 static void ooze_lock_set_locked_hint (gboolean locked);
+static gboolean ooze_lock_finish_dismiss (gpointer user_data);
 
 static ClutterActor *
 lock_make_label (ClutterActor *ref,
@@ -471,7 +473,6 @@ ooze_lock_build_ui (OozePlugin *plugin)
   ClutterActor *entry_bg;
   ClutterActor *btn;
   ClutterActor *user_label;
-  g_autoptr (ClutterContent) wallpaper = NULL;
   g_autoptr (ClutterContent) card_content = NULL;
   g_autoptr (ClutterContent) entry_content = NULL;
   g_autoptr (ClutterContent) btn_content = NULL;
@@ -501,21 +502,6 @@ ooze_lock_build_ui (OozePlugin *plugin)
                           (gfloat) stage_h);
   clutter_actor_set_position (plugin->lock_overlay, 0.0f, 0.0f);
   clutter_actor_set_reactive (plugin->lock_overlay, TRUE);
-
-  wallpaper = ooze_aqua_wallpaper_content (plugin->lock_overlay, stage_w, stage_h);
-  if (wallpaper)
-    {
-      clutter_actor_set_content (plugin->lock_overlay,
-                                 g_steal_pointer (&wallpaper));
-    }
-  else
-    {
-      CoglColor fallback;
-
-      cogl_color_init_from_4f (&fallback, 18.0f / 255.0f, 20.0f / 255.0f,
-                               28.0f / 255.0f, 1.0f);
-      clutter_actor_set_background_color (plugin->lock_overlay, &fallback);
-    }
 
   {
     ClutterActor *dim = clutter_actor_new ();
@@ -659,6 +645,29 @@ ooze_lock_destroy_ui (OozePlugin *plugin)
 }
 
 static void
+ooze_lock_release_grab (OozePlugin *plugin)
+{
+  if (plugin->lock_grab)
+    {
+      clutter_grab_dismiss (plugin->lock_grab);
+      plugin->lock_grab = NULL;
+    }
+}
+
+static gboolean
+ooze_lock_finish_dismiss (gpointer user_data)
+{
+  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+
+  plugin->lock_fade_id = 0;
+  ooze_lock_destroy_ui (plugin);
+  ooze_lock_sync_idle_watch (plugin);
+  ooze_screensaver_unlock_backdrop (plugin);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
 ooze_lock_dismiss (OozePlugin *plugin, gboolean authenticated)
 {
   if (!plugin->locked)
@@ -672,7 +681,27 @@ ooze_lock_dismiss (OozePlugin *plugin, gboolean authenticated)
       g_clear_object (&plugin->lock_auth_proc);
     }
 
-  ooze_lock_destroy_ui (plugin);
+  ooze_lock_release_grab (plugin);
+
+  if (plugin->lock_overlay)
+    {
+      clutter_actor_remove_all_transitions (plugin->lock_overlay);
+      clutter_actor_save_easing_state (plugin->lock_overlay);
+      clutter_actor_set_easing_mode (plugin->lock_overlay,
+                                     CLUTTER_EASE_IN_CUBIC);
+      clutter_actor_set_easing_duration (plugin->lock_overlay,
+                                         OOZE_LOCK_FADE_MS);
+      clutter_actor_set_opacity (plugin->lock_overlay, 0);
+      clutter_actor_restore_easing_state (plugin->lock_overlay);
+      plugin->lock_fade_id =
+        g_timeout_add (OOZE_LOCK_FADE_MS + 30,
+                       ooze_lock_finish_dismiss,
+                       plugin);
+    }
+  else
+    {
+      ooze_lock_finish_dismiss (plugin);
+    }
 
   if (authenticated)
     {
@@ -680,8 +709,6 @@ ooze_lock_dismiss (OozePlugin *plugin, gboolean authenticated)
       ooze_lock_session_call ("Unlock", NULL);
     }
 
-  ooze_lock_sync_idle_watch (plugin);
-  ooze_screensaver_rearm (plugin);
 }
 
 void
@@ -696,8 +723,19 @@ ooze_lock_request (OozePlugin *plugin)
   if (plugin->shutting_down || plugin->locked)
     return;
 
+  if (plugin->lock_fade_id)
+    {
+      g_source_remove (plugin->lock_fade_id);
+      plugin->lock_fade_id = 0;
+    }
+  if (plugin->lock_overlay)
+    {
+      clutter_actor_remove_all_transitions (plugin->lock_overlay);
+      ooze_lock_destroy_ui (plugin);
+    }
+
   plugin->locked = TRUE;
-  ooze_screensaver_dismiss (plugin);
+  ooze_screensaver_lock_backdrop (plugin);
 
   if (plugin->menu_popup && ooze_aqua_menu_is_open (plugin->menu_popup))
     ooze_aqua_menu_close (plugin->menu_popup);
@@ -712,6 +750,15 @@ ooze_lock_request (OozePlugin *plugin)
                                           plugin->lock_overlay);
   if (plugin->lock_password)
     clutter_actor_grab_key_focus (plugin->lock_password);
+
+  clutter_actor_set_opacity (plugin->lock_overlay, 0);
+  clutter_actor_save_easing_state (plugin->lock_overlay);
+  clutter_actor_set_easing_mode (plugin->lock_overlay,
+                                 CLUTTER_EASE_OUT_CUBIC);
+  clutter_actor_set_easing_duration (plugin->lock_overlay,
+                                     OOZE_LOCK_FADE_MS);
+  clutter_actor_set_opacity (plugin->lock_overlay, 255);
+  clutter_actor_restore_easing_state (plugin->lock_overlay);
 
   ooze_lock_set_locked_hint (TRUE);
 
@@ -918,6 +965,12 @@ ooze_lock_dispose (OozePlugin *plugin)
     {
       g_subprocess_force_exit (plugin->lock_auth_proc);
       g_clear_object (&plugin->lock_auth_proc);
+    }
+
+  if (plugin->lock_fade_id)
+    {
+      g_source_remove (plugin->lock_fade_id);
+      plugin->lock_fade_id = 0;
     }
 
   plugin->locked = FALSE;

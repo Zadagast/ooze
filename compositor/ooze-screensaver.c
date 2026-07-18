@@ -294,7 +294,8 @@ ooze_screensaver_on_stage_event (ClutterActor *stage G_GNUC_UNUSED,
 {
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
 
-  if (plugin->screensaver_active && plugin->screensaver_input_armed)
+  if (plugin->screensaver_active && !plugin->locked &&
+      plugin->screensaver_input_armed)
     {
       ooze_screensaver_dismiss (plugin);
       return CLUTTER_EVENT_STOP;
@@ -311,6 +312,9 @@ ooze_screensaver_on_user_active (MetaIdleMonitor *monitor G_GNUC_UNUSED,
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
 
   plugin->screensaver_user_active_watch_id = 0;
+  if (plugin->locked)
+    return;
+
   if (plugin->screensaver_active)
     ooze_screensaver_dismiss (plugin);
   else
@@ -485,6 +489,80 @@ ooze_screensaver_activate (OozePlugin *plugin)
   clutter_timeline_rewind (plugin->screensaver_timeline);
   clutter_timeline_start (plugin->screensaver_timeline);
   ooze_screensaver_sync_watches (plugin);
+}
+
+void
+ooze_screensaver_lock_backdrop (OozePlugin *plugin)
+{
+  g_return_if_fail (OOZE_IS_PLUGIN (plugin));
+
+  if (plugin->shutting_down)
+    return;
+
+  ooze_screensaver_build (plugin);
+  if (!plugin->screensaver_overlay)
+    return;
+
+  if (plugin->screensaver_fade_id)
+    {
+      g_source_remove (plugin->screensaver_fade_id);
+      plugin->screensaver_fade_id = 0;
+    }
+
+  if (!plugin->screensaver_active)
+    {
+      plugin->screensaver_active = TRUE;
+      plugin->screensaver_input_armed = FALSE;
+      clutter_actor_remove_all_transitions (plugin->screensaver_overlay);
+      clutter_actor_show (plugin->screensaver_overlay);
+      clutter_actor_set_opacity (plugin->screensaver_overlay, 255);
+      ooze_screensaver_mode.start (plugin);
+    }
+  else
+    {
+      plugin->screensaver_input_armed = FALSE;
+    }
+
+  if (plugin->screensaver_timeline &&
+      !clutter_timeline_is_playing (plugin->screensaver_timeline))
+    clutter_timeline_start (plugin->screensaver_timeline);
+
+  ooze_screensaver_sync_watches (plugin);
+}
+
+void
+ooze_screensaver_unlock_backdrop (OozePlugin *plugin)
+{
+  MetaDisplay *display;
+  MetaBackend *backend;
+  MetaIdleMonitor *monitor;
+
+  g_return_if_fail (OOZE_IS_PLUGIN (plugin));
+
+  if (!plugin->screensaver_active)
+    {
+      ooze_screensaver_rearm (plugin);
+      return;
+    }
+
+  display = meta_plugin_get_display (META_PLUGIN (plugin));
+  if (!display)
+    {
+      ooze_screensaver_dismiss (plugin);
+      return;
+    }
+
+  backend = meta_context_get_backend (meta_display_get_context (display));
+  monitor = meta_backend_get_core_idle_monitor (backend);
+  if (!monitor || meta_idle_monitor_get_idletime (monitor) < 1000)
+    ooze_screensaver_dismiss (plugin);
+  else
+    {
+      if (plugin->screensaver_timeline &&
+          !clutter_timeline_is_playing (plugin->screensaver_timeline))
+        clutter_timeline_start (plugin->screensaver_timeline);
+      ooze_screensaver_rearm (plugin);
+    }
 }
 
 void
