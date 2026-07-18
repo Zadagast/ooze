@@ -83,6 +83,17 @@ struct _OozePlugin
   GSettings    *session_settings;
   GSettings    *screensaver_settings;
 
+  /* Screensaver (non-grabbing compositor overlay + animation timeline) */
+  gboolean      screensaver_active;
+  ClutterActor *screensaver_overlay;
+  ClutterTimeline *screensaver_timeline;
+  guint         screensaver_idle_watch_id;
+  guint         screensaver_user_active_watch_id;
+  guint         screensaver_arm_id;
+  guint         screensaver_fade_id;
+  gulong        screensaver_stage_capture_id;
+  gboolean      screensaver_input_armed;
+
   /* StatusNotifier tray (AppIndicator host) */
   ClutterActor *tray_box;
   GPtrArray    *tray_icons; /* OozeTrayIcon* */
