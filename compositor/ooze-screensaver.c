@@ -1,13 +1,14 @@
 /*
  * Ooze screensaver — a non-grabbing animated overlay inside Mutter.
  *
- * Phase 1 provides the idle/input/theme plumbing and timeline seam for the
- * future Ooze Flow renderer.  The current visual is the shared Aqua wallpaper.
+ * Ooze Flow is rendered as a reduced-resolution Cairo metaball field over the
+ * shared Aqua wallpaper.
  */
 
 #include "ooze-screensaver.h"
 #include "ooze-plugin-priv.h"
 #include "ooze-aqua-draw.h"
+#include "ooze-flow.h"
 #include "ooze-lock.h"
 #include "ooze-theme.h"
 
@@ -18,6 +19,7 @@
 #include <clutter/clutter.h>
 
 #include <glib.h>
+#include <cairo/cairo.h>
 
 #define OOZE_SCREENSAVER_FADE_IN_MS   1200
 #define OOZE_SCREENSAVER_FADE_OUT_MS   350
@@ -25,6 +27,17 @@
 #define OOZE_SCREENSAVER_TIMELINE_MS 10000
 
 typedef struct _OozeSaverMode OozeSaverMode;
+
+typedef struct
+{
+  cairo_surface_t *surface;
+  int              width;
+  int              height;
+  int              render_width;
+  int              render_height;
+  gdouble          phase;
+  gint64           last_render_us;
+} OozeFlowState;
 
 struct _OozeSaverMode
 {
@@ -35,28 +48,155 @@ struct _OozeSaverMode
 };
 
 static void ooze_screensaver_sync_watches (OozePlugin *plugin);
+static void ooze_screensaver_mode_resize (OozePlugin *plugin,
+                                          int          width,
+                                          int          height);
+
+static OozeFlowState *
+ooze_screensaver_get_flow (OozePlugin *plugin)
+{
+  return plugin->screensaver_flow;
+}
+
+static void
+ooze_screensaver_flow_render (OozePlugin *plugin,
+                              gboolean    force)
+{
+  OozeFlowState *flow = ooze_screensaver_get_flow (plugin);
+  const OozeAquaPalette *palette;
+  gboolean dark;
+  gdouble red;
+  gdouble green;
+  gdouble blue;
+  gint64 now;
+
+  if (!flow || !flow->surface)
+    return;
+
+  now = g_get_monotonic_time ();
+  if (!force && flow->last_render_us != 0 &&
+      now - flow->last_render_us < 33000)
+    return;
+
+  dark = ooze_theme_is_dark (NULL);
+  palette = ooze_theme_get_palette (NULL);
+  red = 0.10 + palette->wallpaper_edge_r * 0.25;
+  green = 0.24 + palette->wallpaper_mid_g * 0.25;
+  blue = 0.58 + palette->wallpaper_mid_b * 0.25;
+  ooze_flow_render_with_color (flow->surface,
+                               flow->render_width,
+                               flow->render_height,
+                               flow->phase,
+                               dark,
+                               CLAMP (red, 0.0, 1.0),
+                               CLAMP (green, 0.0, 1.0),
+                               CLAMP (blue, 0.0, 1.0));
+  flow->last_render_us = now;
+
+  {
+    g_autoptr (ClutterContent) content = NULL;
+
+    content = ooze_aqua_content_from_surface (plugin->screensaver_flow_actor,
+                                               flow->surface);
+    if (content)
+      clutter_actor_set_content (plugin->screensaver_flow_actor,
+                                 g_steal_pointer (&content));
+  }
+}
+
+static void
+ooze_screensaver_flow_free (OozePlugin *plugin)
+{
+  OozeFlowState *flow = ooze_screensaver_get_flow (plugin);
+
+  if (!flow)
+    return;
+
+  g_clear_pointer (&flow->surface, cairo_surface_destroy);
+  g_free (flow);
+  plugin->screensaver_flow = NULL;
+}
 
 static void
 ooze_screensaver_mode_start (OozePlugin *plugin G_GNUC_UNUSED)
 {
+  OozeFlowState *flow;
+
+  if (!plugin->screensaver_flow_actor)
+    {
+      plugin->screensaver_flow_actor = clutter_actor_new ();
+      clutter_actor_set_position (plugin->screensaver_flow_actor, 0.0f, 0.0f);
+      clutter_actor_set_reactive (plugin->screensaver_flow_actor, FALSE);
+      clutter_actor_add_child (plugin->screensaver_overlay,
+                               plugin->screensaver_flow_actor);
+    }
+
+  flow = ooze_screensaver_get_flow (plugin);
+  if (!flow)
+    {
+      ooze_screensaver_mode_resize (plugin,
+                                    (int) clutter_actor_get_width (
+                                      plugin->screensaver_overlay),
+                                    (int) clutter_actor_get_height (
+                                      plugin->screensaver_overlay));
+      flow = ooze_screensaver_get_flow (plugin);
+    }
+
+  if (flow)
+    {
+      flow->phase = 0.0;
+      flow->last_render_us = 0;
+      ooze_screensaver_flow_render (plugin, TRUE);
+    }
 }
 
 static void
 ooze_screensaver_mode_step (OozePlugin *plugin G_GNUC_UNUSED,
-                            gdouble      progress G_GNUC_UNUSED)
+                            gdouble      progress)
 {
+  OozeFlowState *flow = ooze_screensaver_get_flow (plugin);
+
+  if (!flow)
+    return;
+
+  flow->phase = progress * G_PI * 2.0;
+  ooze_screensaver_flow_render (plugin, FALSE);
 }
 
 static void
-ooze_screensaver_mode_resize (OozePlugin *plugin G_GNUC_UNUSED,
-                              int          width G_GNUC_UNUSED,
-                              int          height G_GNUC_UNUSED)
+ooze_screensaver_mode_resize (OozePlugin *plugin,
+                              int          width,
+                              int          height)
 {
+  OozeFlowState *flow;
+  int render_width;
+  int render_height;
+
+  if (!plugin->screensaver_flow_actor)
+    return;
+
+  clutter_actor_set_size (plugin->screensaver_flow_actor,
+                          (gfloat) width,
+                          (gfloat) height);
+  render_width = MAX (64, width / 4);
+  render_height = MAX (36, height / 4);
+
+  ooze_screensaver_flow_free (plugin);
+  flow = g_new0 (OozeFlowState, 1);
+  flow->width = width;
+  flow->height = height;
+  flow->render_width = render_width;
+  flow->render_height = render_height;
+  flow->surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32,
+                                              render_width,
+                                              render_height);
+  plugin->screensaver_flow = flow;
 }
 
 static void
 ooze_screensaver_mode_stop (OozePlugin *plugin G_GNUC_UNUSED)
 {
+  ooze_screensaver_flow_free (plugin);
 }
 
 static const OozeSaverMode ooze_screensaver_mode = {
@@ -106,7 +246,11 @@ ooze_screensaver_on_theme_changed (gpointer user_data)
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
 
   if (!plugin->shutting_down)
-    ooze_screensaver_refresh_wallpaper (plugin);
+    {
+      ooze_screensaver_refresh_wallpaper (plugin);
+      if (plugin->screensaver_active)
+        ooze_screensaver_flow_render (plugin, TRUE);
+    }
 }
 
 static void
@@ -457,6 +601,8 @@ ooze_screensaver_dispose (OozePlugin *plugin)
   plugin->screensaver_idle_watch_id = 0;
   plugin->screensaver_user_active_watch_id = 0;
 
+  ooze_screensaver_mode.stop (plugin);
+
   if (plugin->screensaver_stage_capture_id)
     {
       ClutterActor *stage = ooze_screensaver_get_stage (plugin);
@@ -469,6 +615,7 @@ ooze_screensaver_dispose (OozePlugin *plugin)
 
   g_clear_object (&plugin->screensaver_timeline);
   g_clear_pointer (&plugin->screensaver_overlay, clutter_actor_destroy);
+  plugin->screensaver_flow_actor = NULL;
   plugin->screensaver_active = FALSE;
   plugin->screensaver_input_armed = FALSE;
 }

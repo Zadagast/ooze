@@ -20,6 +20,20 @@ test('render-smoke', test_render_smoke,
   ],
 )
 
+test_flow_smoke = executable('test-flow-smoke',
+  'ooze-flow-smoke.c',
+  '../compositor/ooze-flow.c',
+  include_directories: inc_compositor,
+  dependencies: [gio_dep, cairo_dep, cc.find_library('m')],
+)
+
+test('flow-smoke', test_flow_smoke,
+  env: [
+    'GSK_RENDERER=cairo',
+    'LIBGL_ALWAYS_SOFTWARE=1',
+  ],
+)
+
 test_app_shared_sources = [
   '../shared/ooze-shared-appmenu.c',
   '../shared/ooze-dnd-bridge.c',

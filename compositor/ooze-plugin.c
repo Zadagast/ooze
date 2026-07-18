@@ -1922,4 +1922,6 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->screensaver_fade_id = 0;
   plugin->screensaver_stage_capture_id = 0;
   plugin->screensaver_input_armed = FALSE;
+  plugin->screensaver_flow = NULL;
+  plugin->screensaver_flow_actor = NULL;
 }

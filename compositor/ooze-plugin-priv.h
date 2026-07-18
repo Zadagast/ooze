@@ -93,6 +93,8 @@ struct _OozePlugin
   guint         screensaver_fade_id;
   gulong        screensaver_stage_capture_id;
   gboolean      screensaver_input_armed;
+  gpointer      screensaver_flow;
+  ClutterActor *screensaver_flow_actor;
 
   /* StatusNotifier tray (AppIndicator host) */
   ClutterActor *tray_box;
