@@ -222,7 +222,7 @@ scenery_flow_tick (GtkWidget     *widget,
                     self->flow_width,
                     self->flow_height,
                     self->flow_phase,
-                    FALSE);
+                    ooze_theme_is_dark ());
   cairo_surface_mark_dirty (self->flow_surface);
   gtk_widget_queue_draw (widget);
   return G_SOURCE_CONTINUE;
@@ -755,6 +755,7 @@ ooze_scenery_window_constructed (GObject *object)
   g_signal_connect (about, "activate",
                     G_CALLBACK (scenery_action_about), self);
   g_action_map_add_action (G_ACTION_MAP (self), G_ACTION (about));
+  g_object_unref (about);
 }
 
 static void
