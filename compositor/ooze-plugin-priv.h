@@ -83,6 +83,8 @@ struct _OozePlugin
   GDBusConnection *lock_logind_conn;
   GSettings    *session_settings;
   GSettings    *screensaver_settings;
+  GSettings    *background_settings;
+  GSettings    *scenery_settings;
 
   /* Screensaver (non-grabbing compositor overlay + animation timeline) */
   gboolean      screensaver_active;

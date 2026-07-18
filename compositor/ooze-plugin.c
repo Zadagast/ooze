@@ -17,6 +17,7 @@
 #include "ooze-stall.h"
 #include "ooze-lock.h"
 #include "ooze-screensaver.h"
+#include "ooze-wallpaper.h"
 #include "ooze-tray.h"
 #include "ooze-notifications.h"
 #include "ooze-shot.h"
@@ -687,40 +688,6 @@ ooze_plugin_update_layout (OozePlugin *plugin, MetaDisplay *display)
   ooze_plugin_update_builtin_struts (plugin, display);
 }
 
-static void
-ooze_plugin_refresh_wallpapers (OozePlugin *plugin)
-{
-  ClutterActor *child;
-
-  if (!plugin->background_group)
-    return;
-
-  /*
-   * Repaint wallpaper cloth for the new palette only. Do NOT call
-   * ooze_plugin_on_monitors_changed here — that destroys desktop icons and
-   * reloads every themed icon on the main thread, which freezes launches
-   * after Light↔Dark (clicks still reach clients under the fade overlay).
-   */
-  for (child = clutter_actor_get_first_child (plugin->background_group);
-       child != NULL;
-       child = clutter_actor_get_next_sibling (child))
-    {
-      g_autoptr (ClutterContent) wallpaper = NULL;
-      int width = (int) clutter_actor_get_width (child);
-      int height = (int) clutter_actor_get_height (child);
-
-      if (width < 1 || height < 1)
-        continue;
-
-      wallpaper = ooze_aqua_wallpaper_content (child, width, height);
-      if (wallpaper)
-        ooze_aqua_actor_set_content (child,
-                                     g_steal_pointer (&wallpaper),
-                                     width,
-                                     height);
-    }
-}
-
 static gboolean
 ooze_plugin_chrome_theme_idle (gpointer user_data)
 {
@@ -798,7 +765,7 @@ ooze_plugin_refresh_theme (OozePlugin *plugin)
   ooze_panel_recolor_menu_bar (plugin);
   ooze_tray_refresh_appearance (plugin);
   ooze_plugin_update_layout (plugin, display);
-  ooze_plugin_refresh_wallpapers (plugin);
+  ooze_wallpaper_refresh (plugin);
   ooze_plugin_schedule_chrome_theme_refresh (plugin);
 }
 
@@ -1001,9 +968,10 @@ ooze_plugin_on_monitors_changed (MetaMonitorManager *monitor_manager G_GNUC_UNUS
       meta_display_get_monitor_geometry (display, i, &rect);
 
       background_actor = clutter_actor_new ();
-      wallpaper = ooze_aqua_wallpaper_content (background_actor,
-                                             rect.width,
-                                             rect.height);
+      wallpaper = ooze_wallpaper_content (plugin,
+                                          background_actor,
+                                          rect.width,
+                                          rect.height);
       if (wallpaper)
         ooze_aqua_actor_set_content (background_actor,
                                    g_steal_pointer (&wallpaper),
@@ -1708,6 +1676,7 @@ ooze_plugin_start (MetaPlugin *plugin)
                           G_CALLBACK (on_stage_key_press), self);
     }
 
+  ooze_wallpaper_init (self);
   ooze_lock_init (self);
   ooze_screensaver_init (self);
   ooze_polkit_init (self);
@@ -1745,6 +1714,7 @@ ooze_plugin_begin_shutdown (OozePlugin *plugin)
    */
   ooze_screensaver_dispose (plugin);
   ooze_lock_dispose (plugin);
+  ooze_wallpaper_dispose (plugin);
   ooze_session_dialog_dismiss ();
   ooze_foreign_gel_shutdown (plugin);
   ooze_polkit_shutdown ();
@@ -1914,6 +1884,8 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->lock_logind_conn = NULL;
   plugin->session_settings = NULL;
   plugin->screensaver_settings = NULL;
+  plugin->background_settings = NULL;
+  plugin->scenery_settings = NULL;
   plugin->screensaver_active = FALSE;
   plugin->screensaver_overlay = NULL;
   plugin->screensaver_timeline = NULL;

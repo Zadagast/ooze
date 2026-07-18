@@ -13,6 +13,8 @@ void     ooze_screensaver_dismiss   (OozePlugin *plugin);
 void     ooze_screensaver_rearm     (OozePlugin *plugin);
 void     ooze_screensaver_lock_backdrop (OozePlugin *plugin);
 void     ooze_screensaver_unlock_backdrop (OozePlugin *plugin);
+void     ooze_screensaver_refresh_wallpaper (OozePlugin *plugin);
+void     ooze_screensaver_mode_changed (OozePlugin *plugin);
 gboolean ooze_screensaver_is_active (OozePlugin *plugin);
 
 G_END_DECLS

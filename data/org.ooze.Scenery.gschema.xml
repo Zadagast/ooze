@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.ooze.scenery" path="/org/ooze/scenery/">
+    <key name="screensaver-mode" type="s">
+      <default>'flow'</default>
+      <summary>Screensaver visual mode</summary>
+      <description>
+        Choose the visual shown when the session is idle. The flow mode
+        displays the animated Ooze Flow backdrop; none keeps the desktop
+        clear while retaining the normal lock-on-idle behavior.
+      </description>
+    </key>
+  </schema>
+</schemalist>

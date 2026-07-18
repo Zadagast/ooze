@@ -34,6 +34,15 @@ test('flow-smoke', test_flow_smoke,
   ],
 )
 
+test_wallpaper_smoke = executable('test-wallpaper-smoke',
+  'ooze-wallpaper-smoke.c',
+  '../compositor/ooze-wallpaper-source.c',
+  include_directories: inc_compositor,
+  dependencies: [gio_dep, gdk_pixbuf_dep, cc.find_library('m')],
+)
+
+test('wallpaper-smoke', test_wallpaper_smoke)
+
 test_app_shared_sources = [
   '../shared/ooze-shared-appmenu.c',
   '../shared/ooze-dnd-bridge.c',

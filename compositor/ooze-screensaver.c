@@ -10,6 +10,7 @@
 #include "ooze-aqua-draw.h"
 #include "ooze-flow.h"
 #include "ooze-lock.h"
+#include "ooze-wallpaper.h"
 #include "ooze-theme.h"
 
 #include <meta/display.h>
@@ -51,6 +52,19 @@ static void ooze_screensaver_sync_watches (OozePlugin *plugin);
 static void ooze_screensaver_mode_resize (OozePlugin *plugin,
                                           int          width,
                                           int          height);
+
+static gboolean
+ooze_screensaver_flow_enabled (OozePlugin *plugin)
+{
+  g_autofree char *mode = NULL;
+
+  if (!plugin->scenery_settings)
+    return TRUE;
+
+  mode = g_settings_get_string (plugin->scenery_settings,
+                                "screensaver-mode");
+  return g_strcmp0 (mode, "flow") == 0;
+}
 
 static OozeFlowState *
 ooze_screensaver_get_flow (OozePlugin *plugin)
@@ -220,7 +234,7 @@ ooze_screensaver_get_stage (OozePlugin *plugin)
   return CLUTTER_ACTOR (meta_backend_get_stage (backend));
 }
 
-static void
+void
 ooze_screensaver_refresh_wallpaper (OozePlugin *plugin)
 {
   g_autoptr (ClutterContent) wallpaper = NULL;
@@ -232,9 +246,10 @@ ooze_screensaver_refresh_wallpaper (OozePlugin *plugin)
 
   width = (int) clutter_actor_get_width (plugin->screensaver_overlay);
   height = (int) clutter_actor_get_height (plugin->screensaver_overlay);
-  wallpaper = ooze_aqua_wallpaper_content (plugin->screensaver_overlay,
-                                            width,
-                                            height);
+  wallpaper = ooze_wallpaper_content (plugin,
+                                      plugin->screensaver_overlay,
+                                      width,
+                                      height);
   if (wallpaper)
     clutter_actor_set_content (plugin->screensaver_overlay,
                                g_steal_pointer (&wallpaper));
@@ -329,6 +344,12 @@ ooze_screensaver_on_idle (MetaIdleMonitor *monitor G_GNUC_UNUSED,
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
 
   plugin->screensaver_idle_watch_id = 0;
+  if (!ooze_screensaver_flow_enabled (plugin))
+    {
+      ooze_screensaver_sync_watches (plugin);
+      return;
+    }
+
   ooze_screensaver_activate (plugin);
 }
 
@@ -452,6 +473,7 @@ ooze_screensaver_activate (OozePlugin *plugin)
   g_return_if_fail (OOZE_IS_PLUGIN (plugin));
 
   if (plugin->shutting_down || plugin->locked ||
+      !ooze_screensaver_flow_enabled (plugin) ||
       plugin->screensaver_active)
     return;
 
@@ -496,7 +518,7 @@ ooze_screensaver_lock_backdrop (OozePlugin *plugin)
 {
   g_return_if_fail (OOZE_IS_PLUGIN (plugin));
 
-  if (plugin->shutting_down)
+  if (plugin->shutting_down || !ooze_screensaver_flow_enabled (plugin))
     return;
 
   ooze_screensaver_build (plugin);
@@ -538,6 +560,12 @@ ooze_screensaver_unlock_backdrop (OozePlugin *plugin)
   MetaIdleMonitor *monitor;
 
   g_return_if_fail (OOZE_IS_PLUGIN (plugin));
+
+  if (!ooze_screensaver_flow_enabled (plugin))
+    {
+      ooze_screensaver_dismiss (plugin);
+      return;
+    }
 
   if (!plugin->screensaver_active)
     {
@@ -612,6 +640,18 @@ gboolean
 ooze_screensaver_is_active (OozePlugin *plugin)
 {
   return plugin && plugin->screensaver_active;
+}
+
+void
+ooze_screensaver_mode_changed (OozePlugin *plugin)
+{
+  g_return_if_fail (OOZE_IS_PLUGIN (plugin));
+
+  if (!ooze_screensaver_flow_enabled (plugin) &&
+      plugin->screensaver_active)
+    ooze_screensaver_dismiss (plugin);
+  else
+    ooze_screensaver_sync_watches (plugin);
 }
 
 void
