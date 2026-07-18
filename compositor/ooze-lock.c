@@ -10,6 +10,7 @@
 #include "ooze-theme.h"
 #include "ooze-aqua-draw.h"
 #include "ooze-aqua-menu.h"
+#include "ooze-screensaver.h"
 
 #include "../common/ooze-font.h"
 
@@ -680,6 +681,7 @@ ooze_lock_dismiss (OozePlugin *plugin, gboolean authenticated)
     }
 
   ooze_lock_sync_idle_watch (plugin);
+  ooze_screensaver_rearm (plugin);
 }
 
 void
@@ -694,10 +696,12 @@ ooze_lock_request (OozePlugin *plugin)
   if (plugin->shutting_down || plugin->locked)
     return;
 
+  plugin->locked = TRUE;
+  ooze_screensaver_dismiss (plugin);
+
   if (plugin->menu_popup && ooze_aqua_menu_is_open (plugin->menu_popup))
     ooze_aqua_menu_close (plugin->menu_popup);
 
-  plugin->locked = TRUE;
   ooze_lock_build_ui (plugin);
 
   display = meta_plugin_get_display (META_PLUGIN (plugin));

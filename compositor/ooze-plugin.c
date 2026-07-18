@@ -16,6 +16,7 @@
 #include "ooze-xsettings.h"
 #include "ooze-stall.h"
 #include "ooze-lock.h"
+#include "ooze-screensaver.h"
 #include "ooze-tray.h"
 #include "ooze-notifications.h"
 #include "ooze-shot.h"
@@ -1708,6 +1709,7 @@ ooze_plugin_start (MetaPlugin *plugin)
     }
 
   ooze_lock_init (self);
+  ooze_screensaver_init (self);
   ooze_polkit_init (self);
   ooze_foreign_gel_init (self);
   self->notifications = ooze_notifications_new (self);
@@ -1741,6 +1743,7 @@ ooze_plugin_begin_shutdown (OozePlugin *plugin)
    * alive.  Tear down anything that can hold focus, a grab, an actor, or a
    * callback before asking MetaContext to dispose the backend.
    */
+  ooze_screensaver_dispose (plugin);
   ooze_lock_dispose (plugin);
   ooze_session_dialog_dismiss ();
   ooze_foreign_gel_shutdown (plugin);
@@ -1910,4 +1913,13 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->lock_logind_conn = NULL;
   plugin->session_settings = NULL;
   plugin->screensaver_settings = NULL;
+  plugin->screensaver_active = FALSE;
+  plugin->screensaver_overlay = NULL;
+  plugin->screensaver_timeline = NULL;
+  plugin->screensaver_idle_watch_id = 0;
+  plugin->screensaver_user_active_watch_id = 0;
+  plugin->screensaver_arm_id = 0;
+  plugin->screensaver_fade_id = 0;
+  plugin->screensaver_stage_capture_id = 0;
+  plugin->screensaver_input_armed = FALSE;
 }
