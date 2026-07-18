@@ -152,9 +152,8 @@ scenery_draw_screensaver (GtkDrawingArea *area,
   g_autofree char *mode =
     g_settings_get_string (self->scenery_settings, "screensaver-mode");
   gboolean flow = g_strcmp0 (mode, "flow") == 0;
-  gboolean dark = ooze_theme_is_dark ();
 
-  scenery_draw_aqua (cr, width, height, dark);
+  scenery_draw_wallpaper (NULL, cr, width, height, self);
   if (flow && self->flow_surface)
     {
       cairo_save (cr);
