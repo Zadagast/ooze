@@ -348,6 +348,7 @@ ooze_polkit_dialog_build (const char *message)
   g_autoptr (ClutterContent) cancel_content = NULL;
   CoglColor scrub;
   CoglColor text_color;
+  MtkRectangle monitor;
   int stage_w = 0;
   int stage_h = 0;
   gfloat card_x;
@@ -361,6 +362,7 @@ ooze_polkit_dialog_build (const char *message)
   backend = meta_context_get_backend (meta_display_get_context (display));
   stage = CLUTTER_ACTOR (meta_backend_get_stage (backend));
   meta_display_get_size (display, &stage_w, &stage_h);
+  ooze_plugin_get_active_monitor_geometry (display, &monitor);
 
   cogl_color_init_from_4f (&scrub, 0.0f, 0.0f, 0.0f, 0.35f);
   cogl_color_init_from_4f (&text_color, text_r, text_g, text_b, 1.0f);
@@ -458,8 +460,8 @@ ooze_polkit_dialog_build (const char *message)
                                                0.92f, 0.45f, 0.38f);
   clutter_actor_add_child (card, agent.status_label);
 
-  card_x = ((gfloat) stage_w - OOZE_POLKIT_CARD_W) / 2.0f;
-  card_y = ((gfloat) stage_h - OOZE_POLKIT_CARD_H) / 2.0f;
+  card_x = monitor.x + ((gfloat) monitor.width - OOZE_POLKIT_CARD_W) / 2.0f;
+  card_y = monitor.y + ((gfloat) monitor.height - OOZE_POLKIT_CARD_H) / 2.0f;
   clutter_actor_set_position (card, card_x, card_y);
   clutter_actor_set_position (title,
                               (OOZE_POLKIT_CARD_W -
