@@ -23,8 +23,8 @@
 #include <glib.h>
 #include <cairo/cairo.h>
 
-#define OOZE_SCREENSAVER_FADE_IN_MS   1200
-#define OOZE_SCREENSAVER_FADE_OUT_MS   350
+#define OOZE_SCREENSAVER_FADE_IN_MS   1600
+#define OOZE_SCREENSAVER_FADE_OUT_MS   1100
 #define OOZE_SCREENSAVER_ARM_DELAY_MS  250
 #define OOZE_SCREENSAVER_TIMELINE_MS 10000
 
@@ -538,7 +538,7 @@ ooze_screensaver_activate (OozePlugin *plugin)
   clutter_actor_set_opacity (plugin->screensaver_overlay, 0);
   clutter_actor_save_easing_state (plugin->screensaver_overlay);
   clutter_actor_set_easing_mode (plugin->screensaver_overlay,
-                                 CLUTTER_EASE_OUT_CUBIC);
+                                 CLUTTER_EASE_IN_OUT_SINE);
   clutter_actor_set_easing_duration (plugin->screensaver_overlay,
                                      OOZE_SCREENSAVER_FADE_IN_MS);
   clutter_actor_set_opacity (plugin->screensaver_overlay, 255);
@@ -656,7 +656,7 @@ ooze_screensaver_dismiss (OozePlugin *plugin)
       clutter_actor_remove_all_transitions (plugin->screensaver_overlay);
       clutter_actor_save_easing_state (plugin->screensaver_overlay);
       clutter_actor_set_easing_mode (plugin->screensaver_overlay,
-                                     CLUTTER_EASE_IN_CUBIC);
+                                     CLUTTER_EASE_IN_OUT_SINE);
       clutter_actor_set_easing_duration (plugin->screensaver_overlay,
                                          OOZE_SCREENSAVER_FADE_OUT_MS);
       clutter_actor_set_opacity (plugin->screensaver_overlay, 0);
