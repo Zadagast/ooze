@@ -38,9 +38,13 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 DESTDIR="$STAGE" ninja -C "$BUILD_DIR" install
 
-echo "==> Bundling WhiteSur foreign GTK themes"
-OOZE_THEMES_DEST="$STAGE/usr/share/ooze/themes" \
-  "$ROOT/scripts/install-whitesur-theme.sh"
+if [[ "${SKIP_WHITESUR:-0}" == 1 ]]; then
+  echo "==> Skipping WhiteSur bundling (SKIP_WHITESUR=1)"
+else
+  echo "==> Bundling WhiteSur foreign GTK themes"
+  OOZE_THEMES_DEST="$STAGE/usr/share/ooze/themes" \
+    "$ROOT/scripts/install-whitesur-theme.sh"
+fi
 
 # Expose WhiteSur on the standard freedesktop theme path so foreign apps
 # resolve it without Ooze's XDG_DATA_DIRS. Otherwise they fall back to light
