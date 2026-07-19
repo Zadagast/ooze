@@ -2,6 +2,7 @@
 
 #include "ooze-about.h"
 #include "ooze-button.h"
+#include "ooze-feedback.h"
 #include "ooze-flow.h"
 #include "ooze-shared-appmenu.h"
 #include "ooze-scroll.h"
@@ -42,7 +43,9 @@ struct _OozeSceneryWindow
   GtkWidget *start_after;
   GtkWidget *lock_enabled;
   GtkWidget *lock_after;
-  GtkWidget *sidebar;
+  GtkWidget *nav_wallpaper;
+  GtkWidget *nav_screensaver;
+  GtkWidget *custom_tiles;
   GdkPixbuf *selected_pixbuf;
   char *selected_uri;
   cairo_surface_t *flow_surface;
@@ -90,58 +93,76 @@ scenery_ensure_css (void)
     "  margin: 0;"
     "  outline: none;"
     "}"
-    ".scenery-sidebar-list { background: none; }"
-    ".scenery-sidebar-list row { padding: 7px 8px; }"
-    ".scenery-sidebar-list row:hover {"
-    "  background: rgba(128,128,128,0.10);"
-    "}"
-    ".scenery-sidebar-list row:selected { background: @accent_bg_color; }"
-    ".scenery-sidebar-list .scenery-sidebar-label {"
-    "  color: @sidebar_fg_color;"
-    "}"
-    ".scenery-sidebar-list row:selected .scenery-sidebar-label {"
-    "  color: @accent_fg_color;"
-    "}"
-    ".scenery-toolbar-title {"
-    "  font-weight: 600;"
-    "  padding: 0 8px;"
-    "}"
-    ".scenery-page { padding: 16px 20px 20px; }"
+    ".scenery-page { padding: 14px 18px 18px; }"
     ".scenery-preview {"
     "  min-height: 150px;"
     "  border-radius: 8px;"
     "  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.18);"
     "}"
     ".scenery-section {"
-    "  margin: 8px 0 2px;"
-    "  font-weight: 600;"
+    "  margin: 12px 2px 2px;"
+    "  font-weight: 700;"
+    "  font-size: 0.85em;"
+    "  color: alpha(currentColor, 0.55);"
     "}"
     ".scenery-grid { padding: 2px 0; }"
+    ".scenery-grid > flowboxchild {"
+    "  min-width: 148px;"
+    "  border-radius: 5px;"
+    "  outline: none;"
+    "  background: none;"
+    "}"
+    ".scenery-grid > flowboxchild:checked {"
+    "  background: @accent_bg_color;"
+    "}"
+    ".scenery-grid > flowboxchild:hover:not(:checked) {"
+    "  background: alpha(@accent_bg_color, 0.10);"
+    "}"
+    ".spot-grid-cell {"
+    "  min-width: 140px;"
+    "  min-height: 132px;"
+    "  padding: 3px 3px 4px;"
+    "}"
+    ".spot-grid-label {"
+    "  color: @window_fg_color;"
+    "}"
+    ".scenery-grid > flowboxchild:checked .spot-grid-label {"
+    "  color: @accent_fg_color;"
+    "}"
     ".scenery-tile {"
-    "  min-width: 164px;"
-    "  padding: 7px;"
+    "  min-width: 148px;"
+    "  min-height: 140px;"
+    "  padding: 0;"
+    "  border: none;"
+    "  box-shadow: none;"
     "}"
     ".scenery-tile drawingarea {"
-    "  min-width: 148px;"
-    "  min-height: 86px;"
+    "  min-width: 128px;"
+    "  min-height: 82px;"
+    "  border-radius: 5px;"
     "}"
     ".scenery-action-tile {"
-    "  min-width: 164px;"
-    "  min-height: 116px;"
+    "  min-width: 148px;"
+    "  min-height: 140px;"
+    "  padding: 0;"
+    "  border: none;"
+    "  box-shadow: none;"
     "}"
     ".scenery-mode-tile {"
-    "  min-width: 190px;"
-    "  min-height: 82px;"
-    "  padding: 10px;"
+    "  min-width: 148px;"
+    "  min-height: 140px;"
+    "  padding: 0;"
+    "  border: none;"
+    "  box-shadow: none;"
     "}"
-    ".scenery-mode-title { font-weight: 600; }"
-    ".scenery-mode-description { opacity: 0.78; font-size: 0.9em; }"
     ".scenery-settings-card {"
     "  padding: 12px 14px;"
     "  background: alpha(@card_bg_color, 0.72);"
     "  border-radius: 8px;"
+    "  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);"
     "}"
-    ".scenery-settings-card label { margin-right: 16px; }");
+    ".scenery-settings-card label { margin-right: 12px; }"
+    ".scenery-unit { color: alpha(currentColor, 0.55); }");
   gtk_style_context_add_provider_for_display (
     display, GTK_STYLE_PROVIDER (provider),
     GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -256,6 +277,30 @@ scenery_draw_screensaver (GtkDrawingArea *area,
 }
 
 static void
+scenery_mode_tile_draw (GtkDrawingArea *area,
+                        cairo_t        *cr,
+                        int             width,
+                        int             height,
+                        gpointer        user_data)
+{
+  OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
+  const char *mode = g_object_get_data (G_OBJECT (area), "mode");
+
+  scenery_draw_wallpaper (NULL, cr, width, height, self);
+  if (g_strcmp0 (mode, "flow") == 0)
+    {
+      cairo_surface_t *surface =
+        cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
+
+      ooze_flow_render (surface, width, height, 2.4, ooze_theme_is_dark ());
+      cairo_surface_mark_dirty (surface);
+      cairo_set_source_surface (cr, surface, 0, 0);
+      cairo_paint (cr);
+      cairo_surface_destroy (surface);
+    }
+}
+
+static void
 scenery_flow_resize (OozeSceneryWindow *self,
                      int                width,
                      int                height)
@@ -350,6 +395,7 @@ scenery_set_wallpaper (OozeSceneryWindow *self,
 
   scenery_refresh_selection (self);
   scenery_refresh_preview (self);
+  ooze_feedback_show (GTK_WINDOW (self), "Wallpaper updated");
 }
 
 static void
@@ -406,7 +452,7 @@ scenery_make_tile (OozeSceneryWindow *self,
                    GdkPixbuf         *pixbuf)
 {
   WallpaperTile *tile = g_new0 (WallpaperTile, 1);
-  GtkWidget *button = gtk_button_new ();
+  GtkWidget *button = ooze_button_new (OOZE_BUTTON_TOOLBAR);
   GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
   GtkWidget *preview = gtk_drawing_area_new ();
   GtkWidget *caption = gtk_label_new (label);
@@ -414,13 +460,19 @@ scenery_make_tile (OozeSceneryWindow *self,
   tile->button = button;
   tile->uri = g_strdup (uri);
   tile->pixbuf = pixbuf ? g_object_ref (pixbuf) : NULL;
-  gtk_widget_set_size_request (preview, 148, 86);
+  gtk_widget_set_size_request (preview, 128, 82);
   gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (preview),
                                   scenery_tile_draw, tile, NULL);
   gtk_box_append (GTK_BOX (box), preview);
   gtk_box_append (GTK_BOX (box), caption);
+  gtk_widget_add_css_class (box, "spot-grid-cell");
+  gtk_widget_add_css_class (caption, "spot-grid-label");
+  gtk_label_set_xalign (GTK_LABEL (caption), 0.5);
   gtk_label_set_ellipsize (GTK_LABEL (caption), PANGO_ELLIPSIZE_END);
-  gtk_label_set_max_width_chars (GTK_LABEL (caption), 22);
+  gtk_label_set_max_width_chars (GTK_LABEL (caption), 12);
+  gtk_label_set_lines (GTK_LABEL (caption), 2);
+  gtk_label_set_wrap (GTK_LABEL (caption), TRUE);
+  gtk_label_set_wrap_mode (GTK_LABEL (caption), PANGO_WRAP_WORD_CHAR);
   gtk_widget_set_tooltip_text (button, label);
   gtk_button_set_child (GTK_BUTTON (button), box);
   gtk_widget_add_css_class (button, "scenery-tile");
@@ -435,7 +487,24 @@ scenery_make_tile (OozeSceneryWindow *self,
 static GtkWidget *
 scenery_make_choose_tile (OozeSceneryWindow *self)
 {
-  GtkWidget *button = gtk_button_new_with_label ("Choose…");
+  static const char *icons[] = {
+    "folder-open", "document-open", "image-x-generic", NULL
+  };
+  GtkWidget *button = ooze_button_new (OOZE_BUTTON_TOOLBAR);
+  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 3);
+  GtkWidget *icon = ooze_icon_image_new (icons, OOZE_ICON_SIZE_GRID);
+  GtkWidget *label = gtk_label_new ("Choose…");
+
+  gtk_widget_add_css_class (box, "spot-grid-cell");
+  gtk_widget_add_css_class (label, "spot-grid-label");
+  gtk_label_set_xalign (GTK_LABEL (label), 0.5);
+  gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
+  gtk_label_set_lines (GTK_LABEL (label), 2);
+  gtk_label_set_wrap (GTK_LABEL (label), TRUE);
+  gtk_label_set_wrap_mode (GTK_LABEL (label), PANGO_WRAP_WORD_CHAR);
+  gtk_box_append (GTK_BOX (box), icon);
+  gtk_box_append (GTK_BOX (box), label);
+  gtk_button_set_child (GTK_BUTTON (button), box);
   gtk_widget_add_css_class (button, "scenery-action-tile");
   gtk_widget_set_tooltip_text (button, "Choose an image from your files");
   g_signal_connect (button, "clicked", G_CALLBACK (on_choose_clicked), self);
@@ -470,6 +539,47 @@ scenery_refresh_selection_in_box (GtkWidget   *box,
     }
 }
 
+static GtkWidget *scenery_make_choose_tile (OozeSceneryWindow *self);
+
+static void
+scenery_refresh_custom_tile (OozeSceneryWindow *self)
+{
+  GtkWidget *child;
+  g_autofree char *path = NULL;
+
+  if (!self->custom_tiles)
+    return;
+
+  for (child = gtk_widget_get_first_child (self->custom_tiles);
+       child;
+       child = gtk_widget_get_next_sibling (child))
+    {
+      GtkWidget *tile = gtk_flow_box_child_get_child (
+        GTK_FLOW_BOX_CHILD (child));
+
+      if (tile && g_object_get_data (G_OBJECT (tile), "custom-tile"))
+        {
+          gtk_flow_box_remove (GTK_FLOW_BOX (self->custom_tiles), child);
+          break;
+        }
+    }
+
+  if (!self->selected_uri || !*self->selected_uri)
+    return;
+  path = g_filename_from_uri (self->selected_uri, NULL, NULL);
+  if (!path || g_str_has_prefix (path, "/usr/share/backgrounds/"))
+    return;
+
+  {
+    g_autofree char *name = g_path_get_basename (path);
+    GtkWidget *tile =
+      scenery_make_tile (self, name, path, self->selected_pixbuf);
+
+    g_object_set_data (G_OBJECT (tile), "custom-tile", GINT_TO_POINTER (1));
+    gtk_flow_box_insert (GTK_FLOW_BOX (self->custom_tiles), tile, 0);
+  }
+}
+
 static void
 scenery_refresh_selection (OozeSceneryWindow *self)
 {
@@ -479,8 +589,10 @@ scenery_refresh_selection (OozeSceneryWindow *self)
   g_clear_pointer (&self->selected_uri, g_free);
   self->selected_uri = g_strdup (uri);
   scenery_load_selected_pixbuf (self, uri);
+  scenery_refresh_custom_tile (self);
   scenery_refresh_selection_in_box (self->wallpaper_tiles, uri);
   scenery_refresh_selection_in_box (self->ubuntu_tiles, uri);
+  scenery_refresh_selection_in_box (self->custom_tiles, uri);
 }
 
 static void
@@ -503,7 +615,10 @@ scenery_refresh_mode_selection (OozeSceneryWindow *self)
        child;
        child = gtk_widget_get_next_sibling (child))
     {
-      const char *child_mode = g_object_get_data (G_OBJECT (child), "mode");
+      GtkWidget *tile = gtk_flow_box_child_get_child (
+        GTK_FLOW_BOX_CHILD (child));
+      const char *child_mode = tile
+        ? g_object_get_data (G_OBJECT (tile), "mode") : NULL;
       gtk_widget_set_state_flags (
         child, g_strcmp0 (mode, child_mode) == 0
           ? GTK_STATE_FLAG_CHECKED : 0, TRUE);
@@ -520,6 +635,7 @@ on_screensaver_mode_clicked (GtkButton *button,
   g_settings_set_string (self->scenery_settings, "screensaver-mode", mode);
   scenery_refresh_mode_selection (self);
   scenery_refresh_preview (self);
+  ooze_feedback_show (GTK_WINDOW (self), "Screensaver updated");
 }
 
 static void
@@ -539,6 +655,7 @@ on_start_after_changed (GtkSpinButton *spin,
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
   g_settings_set_uint (self->session_settings, "idle-delay",
                        gtk_spin_button_get_value_as_int (spin));
+  ooze_feedback_show (GTK_WINDOW (self), "Start delay saved");
 }
 
 static void
@@ -555,6 +672,7 @@ on_lock_after_changed (GtkSpinButton *spin,
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
   g_settings_set_uint (self->screensaver_settings, "lock-delay",
                        gtk_spin_button_get_value_as_int (spin));
+  ooze_feedback_show (GTK_WINDOW (self), "Lock delay saved");
 }
 
 static void
@@ -564,6 +682,7 @@ on_lock_enabled_changed (GtkCheckButton *button,
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
   g_settings_set_boolean (self->screensaver_settings, "lock-enabled",
                           gtk_check_button_get_active (button));
+  ooze_feedback_show (GTK_WINDOW (self), "Lock setting saved");
 }
 
 static gboolean
@@ -595,10 +714,12 @@ scenery_build_wallpaper_page (OozeSceneryWindow *self)
   GtkWidget *content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 8);
   GtkWidget *group;
 
+  gtk_widget_add_css_class (page, "scenery-page");
   self->wallpaper_preview = preview;
   gtk_widget_add_css_class (preview, "scenery-preview");
-  gtk_widget_set_size_request (preview, -1, 170);
-  gtk_widget_set_hexpand (preview, TRUE);
+  gtk_widget_set_size_request (preview, 320, 170);
+  gtk_widget_set_hexpand (preview, FALSE);
+  gtk_widget_set_halign (preview, GTK_ALIGN_CENTER);
   gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (preview),
                                   scenery_draw_wallpaper, self, NULL);
   gtk_box_append (GTK_BOX (page), preview);
@@ -612,7 +733,8 @@ scenery_build_wallpaper_page (OozeSceneryWindow *self)
   gtk_box_append (GTK_BOX (content), scenery_section_label ("Ooze Aqua"));
   self->wallpaper_tiles = gtk_flow_box_new ();
   gtk_widget_add_css_class (self->wallpaper_tiles, "scenery-grid");
-  gtk_widget_set_hexpand (self->wallpaper_tiles, TRUE);
+  gtk_widget_set_halign (self->wallpaper_tiles, GTK_ALIGN_START);
+  gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (self->wallpaper_tiles), TRUE);
   gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (self->wallpaper_tiles), 12);
   gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (self->wallpaper_tiles), 12);
   gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (self->wallpaper_tiles), 2);
@@ -628,7 +750,8 @@ scenery_build_wallpaper_page (OozeSceneryWindow *self)
   gtk_box_append (GTK_BOX (content), scenery_section_label ("Ubuntu"));
   self->ubuntu_tiles = gtk_flow_box_new ();
   gtk_widget_add_css_class (self->ubuntu_tiles, "scenery-grid");
-  gtk_widget_set_hexpand (self->ubuntu_tiles, TRUE);
+  gtk_widget_set_halign (self->ubuntu_tiles, GTK_ALIGN_START);
+  gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (self->ubuntu_tiles), TRUE);
   gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (self->ubuntu_tiles), 12);
   gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (self->ubuntu_tiles), 12);
   gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (self->ubuntu_tiles), 2);
@@ -639,8 +762,10 @@ scenery_build_wallpaper_page (OozeSceneryWindow *self)
 
   gtk_box_append (GTK_BOX (content), scenery_section_label ("Your images"));
   group = gtk_flow_box_new ();
+  self->custom_tiles = group;
   gtk_widget_add_css_class (group, "scenery-grid");
-  gtk_widget_set_hexpand (group, TRUE);
+  gtk_widget_set_halign (group, GTK_ALIGN_START);
+  gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (group), TRUE);
   gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (group), 12);
   gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (group), 12);
   gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (group), 2);
@@ -713,21 +838,27 @@ scenery_mode_tile (OozeSceneryWindow *self,
                    const char        *label,
                    const char        *mode)
 {
-  GtkWidget *button = gtk_button_new ();
-  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 3);
+  GtkWidget *button = ooze_button_new (OOZE_BUTTON_TOOLBAR);
+  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+  GtkWidget *preview = gtk_drawing_area_new ();
   GtkWidget *title = gtk_label_new (label);
-  GtkWidget *description = gtk_label_new (
-    g_strcmp0 (mode, "flow") == 0
-      ? "Animated Ooze gel" : "Use the desktop wallpaper");
 
-  gtk_widget_add_css_class (button, "scenery-mode-tile");
-  gtk_widget_add_css_class (title, "scenery-mode-title");
-  gtk_widget_add_css_class (description, "scenery-mode-description");
-  gtk_label_set_xalign (GTK_LABEL (title), 0);
-  gtk_label_set_xalign (GTK_LABEL (description), 0);
+  gtk_widget_set_size_request (preview, 128, 82);
+  g_object_set_data (G_OBJECT (preview), "mode", (gpointer) mode);
+  gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (preview),
+                                  scenery_mode_tile_draw, self, NULL);
+  gtk_widget_add_css_class (box, "spot-grid-cell");
+  gtk_widget_add_css_class (title, "spot-grid-label");
+  gtk_label_set_xalign (GTK_LABEL (title), 0.5);
+  gtk_label_set_ellipsize (GTK_LABEL (title), PANGO_ELLIPSIZE_END);
+  gtk_label_set_lines (GTK_LABEL (title), 2);
+  gtk_label_set_wrap (GTK_LABEL (title), TRUE);
+  gtk_label_set_wrap_mode (GTK_LABEL (title), PANGO_WRAP_WORD_CHAR);
+  gtk_box_append (GTK_BOX (box), preview);
   gtk_box_append (GTK_BOX (box), title);
-  gtk_box_append (GTK_BOX (box), description);
   gtk_button_set_child (GTK_BUTTON (button), box);
+  gtk_widget_add_css_class (button, "scenery-tile");
+  gtk_widget_set_tooltip_text (button, label);
   g_object_set_data (G_OBJECT (button), "mode", (gpointer) mode);
   g_signal_connect (button, "clicked",
                     G_CALLBACK (on_screensaver_mode_clicked), self);
@@ -745,10 +876,12 @@ scenery_build_screensaver_page (OozeSceneryWindow *self)
   GtkWidget *settings = gtk_grid_new ();
   GtkWidget *label;
 
+  gtk_widget_add_css_class (page, "scenery-page");
   self->screensaver_preview = preview;
   gtk_widget_add_css_class (preview, "scenery-preview");
-  gtk_widget_set_size_request (preview, -1, 220);
-  gtk_widget_set_hexpand (preview, TRUE);
+  gtk_widget_set_size_request (preview, 380, 210);
+  gtk_widget_set_hexpand (preview, FALSE);
+  gtk_widget_set_halign (preview, GTK_ALIGN_CENTER);
   gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (preview),
                                   scenery_draw_screensaver, self, NULL);
   gtk_box_append (GTK_BOX (page), preview);
@@ -761,7 +894,8 @@ scenery_build_screensaver_page (OozeSceneryWindow *self)
   gtk_box_append (GTK_BOX (content), scenery_section_label ("Screensaver mode"));
   self->screensaver_mode_tiles = modes;
   gtk_widget_add_css_class (modes, "scenery-grid");
-  gtk_widget_set_hexpand (modes, TRUE);
+  gtk_widget_set_halign (modes, GTK_ALIGN_START);
+  gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (modes), TRUE);
   gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (modes), 12);
   gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (modes), 12);
   gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (modes), 2);
@@ -788,6 +922,10 @@ scenery_build_screensaver_page (OozeSceneryWindow *self)
   gtk_grid_attach (GTK_GRID (settings), label, 0, 0, 1, 1);
   gtk_grid_attach (GTK_GRID (settings), self->start_after, 1, 0, 1, 1);
   gtk_widget_set_hexpand (self->start_after, FALSE);
+  label = gtk_label_new ("seconds");
+  gtk_widget_add_css_class (label, "scenery-unit");
+  gtk_label_set_xalign (GTK_LABEL (label), 0);
+  gtk_grid_attach (GTK_GRID (settings), label, 2, 0, 1, 1);
   self->lock_enabled = gtk_check_button_new_with_label ("Lock screen");
   gtk_check_button_set_active (
     GTK_CHECK_BUTTON (self->lock_enabled),
@@ -801,6 +939,10 @@ scenery_build_screensaver_page (OozeSceneryWindow *self)
   gtk_label_set_xalign (GTK_LABEL (label), 0);
   gtk_grid_attach (GTK_GRID (settings), label, 0, 2, 1, 1);
   gtk_grid_attach (GTK_GRID (settings), self->lock_after, 1, 2, 1, 1);
+  label = gtk_label_new ("seconds");
+  gtk_widget_add_css_class (label, "scenery-unit");
+  gtk_label_set_xalign (GTK_LABEL (label), 0);
+  gtk_grid_attach (GTK_GRID (settings), label, 2, 2, 1, 1);
   gtk_box_append (GTK_BOX (content), settings);
   g_signal_connect (self->start_after, "value-changed",
                     G_CALLBACK (on_start_after_changed), self);
@@ -816,34 +958,33 @@ scenery_build_screensaver_page (OozeSceneryWindow *self)
 }
 
 static void
-on_sidebar_row_selected (GtkListBox    *list G_GNUC_UNUSED,
-                         GtkListBoxRow *row,
-                         gpointer       user_data)
+scenery_show_page (OozeSceneryWindow *self,
+                   SceneryPage        page)
 {
-  OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
-  const char *page;
-
-  if (!row)
-    return;
-  page = g_object_get_data (G_OBJECT (row), "page");
-  self->page = g_strcmp0 (page, "screensaver") == 0
-    ? SCENERY_PAGE_SCREENSAVER : SCENERY_PAGE_WALLPAPER;
-  gtk_stack_set_visible_child_name (GTK_STACK (self->stack), page);
+  self->page = page;
+  gtk_stack_set_visible_child_name (
+    GTK_STACK (self->stack),
+    page == SCENERY_PAGE_SCREENSAVER ? "screensaver" : "wallpaper");
+  ooze_button_set_toggled (self->nav_wallpaper,
+                           page == SCENERY_PAGE_WALLPAPER);
+  ooze_button_set_toggled (self->nav_screensaver,
+                           page == SCENERY_PAGE_SCREENSAVER);
 }
 
-static GtkWidget *
-scenery_sidebar_row (const char *label,
-                     const char *page)
+static void
+on_nav_wallpaper_clicked (GtkButton *button G_GNUC_UNUSED,
+                          gpointer   user_data)
 {
-  GtkWidget *row = gtk_list_box_row_new ();
-  GtkWidget *text = gtk_label_new (label);
+  scenery_show_page (OOZE_SCENERY_WINDOW (user_data),
+                     SCENERY_PAGE_WALLPAPER);
+}
 
-  gtk_widget_add_css_class (text, "scenery-sidebar-label");
-  gtk_label_set_xalign (GTK_LABEL (text), 0);
-  gtk_widget_set_tooltip_text (row, label);
-  gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), text);
-  g_object_set_data (G_OBJECT (row), "page", (gpointer) page);
-  return row;
+static void
+on_nav_screensaver_clicked (GtkButton *button G_GNUC_UNUSED,
+                            gpointer   user_data)
+{
+  scenery_show_page (OOZE_SCENERY_WINDOW (user_data),
+                     SCENERY_PAGE_SCREENSAVER);
 }
 
 static void
@@ -883,13 +1024,21 @@ static void
 ooze_scenery_window_constructed (GObject *object)
 {
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (object);
+  static const char * const wallpaper_icons[] = {
+    "preferences-desktop-wallpaper", "image-x-generic",
+    "folder-pictures", NULL
+  };
+  static const char * const screensaver_icons[] = {
+    "preferences-desktop-screensaver", "video-display", NULL
+  };
+  static const char * const choose_icons[] = {
+    "folder-open", "document-open", NULL
+  };
   GtkWidget *shell;
+  GtkWidget *shell_overlay;
   GtkWidget *toolbar;
   GtkWidget *toolbar_group;
-  GtkWidget *paned;
-  GtkWidget *sidebar_surface;
-  GtkWidget *sidebar_scroll;
-  GtkWidget *sidebar_list;
+  GtkWidget *choose_button;
   GMenu *help;
   GSimpleAction *about;
 
@@ -905,7 +1054,7 @@ ooze_scenery_window_constructed (GObject *object)
   self->screensaver_settings = g_settings_new ("org.gnome.desktop.screensaver");
   self->page = SCENERY_PAGE_WALLPAPER;
 
-  gtk_window_set_default_size (GTK_WINDOW (self), 860, 560);
+  gtk_window_set_default_size (GTK_WINDOW (self), 880, 640);
   gtk_window_set_icon_name (GTK_WINDOW (self), "org.ooze.Scenery");
   ooze_application_window_set_title (OOZE_APPLICATION_WINDOW (self),
                                       "Ooze Scenery");
@@ -913,45 +1062,26 @@ ooze_scenery_window_constructed (GObject *object)
   shell = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   toolbar = ooze_toolbar_new ();
   toolbar_group = ooze_toolbar_add_group (toolbar);
-  {
-    GtkWidget *title = gtk_label_new ("Scenery");
-    gtk_widget_add_css_class (title, "scenery-toolbar-title");
-    gtk_box_append (GTK_BOX (toolbar_group), title);
-  }
+  self->nav_wallpaper =
+    ooze_button_new_toolbar (wallpaper_icons, "Wallpaper", "Wallpaper");
+  g_signal_connect (self->nav_wallpaper, "clicked",
+                    G_CALLBACK (on_nav_wallpaper_clicked), self);
+  gtk_box_append (GTK_BOX (toolbar_group), self->nav_wallpaper);
+  self->nav_screensaver =
+    ooze_button_new_toolbar (screensaver_icons, "Screensaver", "Screensaver");
+  g_signal_connect (self->nav_screensaver, "clicked",
+                    G_CALLBACK (on_nav_screensaver_clicked), self);
+  gtk_box_append (GTK_BOX (toolbar_group), self->nav_screensaver);
   ooze_toolbar_add_separator (toolbar);
+  toolbar_group = ooze_toolbar_add_group (toolbar);
+  choose_button =
+    ooze_button_new_toolbar (choose_icons, "Choose…",
+                             "Choose an image from your files");
+  g_signal_connect (choose_button, "clicked",
+                    G_CALLBACK (on_choose_clicked), self);
+  gtk_box_append (GTK_BOX (toolbar_group), choose_button);
   ooze_toolbar_add_spacer (toolbar);
   gtk_box_append (GTK_BOX (shell), toolbar);
-
-  paned = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
-  gtk_paned_set_resize_start_child (GTK_PANED (paned), FALSE);
-  gtk_paned_set_shrink_start_child (GTK_PANED (paned), FALSE);
-  gtk_paned_set_resize_end_child (GTK_PANED (paned), TRUE);
-  gtk_paned_set_shrink_end_child (GTK_PANED (paned), FALSE);
-  gtk_widget_set_hexpand (paned, TRUE);
-  gtk_widget_set_vexpand (paned, TRUE);
-
-  sidebar_surface =
-    ooze_surface_new (OOZE_SURFACE_SIDEBAR, GTK_ORIENTATION_VERTICAL);
-  gtk_widget_set_size_request (sidebar_surface, 140, -1);
-  sidebar_scroll = ooze_scrolled_window_new ();
-  gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (sidebar_scroll),
-                                  GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-  gtk_widget_set_hexpand (sidebar_scroll, TRUE);
-  gtk_widget_set_vexpand (sidebar_scroll, TRUE);
-  sidebar_list = gtk_list_box_new ();
-  gtk_list_box_set_selection_mode (GTK_LIST_BOX (sidebar_list),
-                                   GTK_SELECTION_SINGLE);
-  gtk_widget_add_css_class (sidebar_list, "scenery-sidebar-list");
-  gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (sidebar_scroll),
-                                 sidebar_list);
-  gtk_box_append (GTK_BOX (sidebar_surface), sidebar_scroll);
-  gtk_list_box_append (GTK_LIST_BOX (sidebar_list),
-                       scenery_sidebar_row ("Wallpaper", "wallpaper"));
-  gtk_list_box_append (GTK_LIST_BOX (sidebar_list),
-                       scenery_sidebar_row ("Screensaver", "screensaver"));
-  g_signal_connect (sidebar_list, "row-selected",
-                    G_CALLBACK (on_sidebar_row_selected), self);
-  self->sidebar = sidebar_surface;
 
   self->stack = gtk_stack_new ();
   gtk_stack_set_transition_type (GTK_STACK (self->stack),
@@ -962,13 +1092,12 @@ ooze_scenery_window_constructed (GObject *object)
                        scenery_build_wallpaper_page (self), "wallpaper");
   gtk_stack_add_named (GTK_STACK (self->stack),
                        scenery_build_screensaver_page (self), "screensaver");
-  gtk_paned_set_start_child (GTK_PANED (paned), sidebar_surface);
-  gtk_paned_set_end_child (GTK_PANED (paned), self->stack);
-  gtk_box_append (GTK_BOX (shell), paned);
-  ooze_application_window_set_content (OOZE_APPLICATION_WINDOW (self), shell);
-  gtk_list_box_select_row (GTK_LIST_BOX (sidebar_list),
-                           gtk_list_box_get_row_at_index (
-                             GTK_LIST_BOX (sidebar_list), 0));
+  gtk_box_append (GTK_BOX (shell), self->stack);
+  shell_overlay = gtk_overlay_new ();
+  gtk_overlay_set_child (GTK_OVERLAY (shell_overlay), shell);
+  ooze_application_window_set_content (OOZE_APPLICATION_WINDOW (self),
+                                       shell_overlay);
+  scenery_show_page (self, SCENERY_PAGE_WALLPAPER);
   scenery_add_ubuntu_images (self);
   scenery_refresh_selection (self);
   scenery_refresh_mode_selection (self);

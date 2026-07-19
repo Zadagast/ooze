@@ -2021,8 +2021,14 @@ spot_grid_append_info (SpotGridEnumeration *enumeration,
     return;
 
   loading = gtk_widget_get_first_child (self->grid_flow);
-  if (loading && g_object_get_data (G_OBJECT (loading), "spot-loading"))
-    gtk_flow_box_remove (GTK_FLOW_BOX (self->grid_flow), loading);
+  if (GTK_IS_FLOW_BOX_CHILD (loading))
+    {
+      GtkWidget *inner =
+        gtk_flow_box_child_get_child (GTK_FLOW_BOX_CHILD (loading));
+
+      if (inner && g_object_get_data (G_OBJECT (inner), "spot-loading"))
+        gtk_flow_box_remove (GTK_FLOW_BOX (self->grid_flow), loading);
+    }
 
   child = g_file_get_child (enumeration->directory,
                             g_file_info_get_name (info));
