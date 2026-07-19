@@ -1,0 +1,15 @@
+#!/bin/sh
+# Undo the FileManager1 diversion added in preinst so Nautilus regains its
+# own activation file when Ooze is removed.
+set -e
+
+FILE=/usr/share/dbus-1/services/org.freedesktop.FileManager1.service
+DIVERT="${FILE}.distrib"
+
+case "$1" in
+  remove|purge)
+    dpkg-divert --package ooze --remove --rename --divert "$DIVERT" "$FILE"
+    ;;
+esac
+
+exit 0

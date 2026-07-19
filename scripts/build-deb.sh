@@ -128,6 +128,13 @@ sed "s/@VERSION@/${VERSION}/g" "$ROOT/packaging/deb/control.in" > "$STAGE/DEBIAN
 INSTALLED_SIZE="$(du -sk --exclude=DEBIAN "$STAGE" | awk '{print $1}')"
 printf 'Installed-Size: %s\n' "$INSTALLED_SIZE" >> "$STAGE/DEBIAN/control"
 
+# Maintainer scripts (e.g. dpkg-divert the FileManager1 service vs Nautilus).
+for script in preinst postrm; do
+  if [[ -f "$ROOT/packaging/deb/$script" ]]; then
+    install -m 0755 "$ROOT/packaging/deb/$script" "$STAGE/DEBIAN/$script"
+  fi
+done
+
 mkdir -p "$DIST_DIR"
 echo "==> Building $OUTPUT"
 rm -f "$OUTPUT"
