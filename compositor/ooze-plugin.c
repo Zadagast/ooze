@@ -38,6 +38,7 @@
 #include <meta/meta-background-group.h>
 #include <meta/meta-background.h>
 #include <meta/meta-context.h>
+#include <meta/meta-cursor-tracker.h>
 #include <meta/meta-monitor-manager.h>
 #include <meta/meta-window-actor.h>
 #include <meta/meta-workspace-manager.h>
@@ -345,6 +346,46 @@ ooze_plugin_get_primary_monitor_geometry (MetaDisplay  *display,
     primary = 0;
 
   meta_display_get_monitor_geometry (display, primary, rect_out);
+}
+
+void
+ooze_plugin_get_active_monitor_geometry (MetaDisplay  *display,
+                                         MtkRectangle *rect_out)
+{
+  MetaBackend *backend;
+  MetaCursorTracker *cursor_tracker;
+  graphene_point_t pointer;
+  MtkRectangle monitor;
+  int n_monitors;
+  int i;
+
+  g_return_if_fail (META_IS_DISPLAY (display));
+  g_return_if_fail (rect_out != NULL);
+
+  ooze_plugin_get_primary_monitor_geometry (display, rect_out);
+
+  n_monitors = meta_display_get_n_monitors (display);
+  if (n_monitors < 1)
+    return;
+
+  backend = meta_context_get_backend (meta_display_get_context (display));
+  cursor_tracker = backend ? meta_backend_get_cursor_tracker (backend) : NULL;
+  if (!cursor_tracker)
+    return;
+
+  meta_cursor_tracker_get_pointer (cursor_tracker, &pointer, NULL);
+  for (i = 0; i < n_monitors; i++)
+    {
+      meta_display_get_monitor_geometry (display, i, &monitor);
+      if (pointer.x >= monitor.x &&
+          pointer.x < monitor.x + monitor.width &&
+          pointer.y >= monitor.y &&
+          pointer.y < monitor.y + monitor.height)
+        {
+          *rect_out = monitor;
+          return;
+        }
+    }
 }
 
 static void

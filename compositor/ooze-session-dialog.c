@@ -356,6 +356,7 @@ ooze_session_dialog_build (void)
   g_autoptr (ClutterContent) confirm_content = NULL;
   g_autoptr (ClutterContent) cancel_content = NULL;
   CoglColor scrub;
+  MtkRectangle monitor;
   int stage_w = 0;
   int stage_h = 0;
   gfloat card_x;
@@ -369,6 +370,7 @@ ooze_session_dialog_build (void)
   backend = meta_context_get_backend (meta_display_get_context (display));
   stage = CLUTTER_ACTOR (meta_backend_get_stage (backend));
   meta_display_get_size (display, &stage_w, &stage_h);
+  ooze_plugin_get_active_monitor_geometry (display, &monitor);
 
   cogl_color_init_from_4f (&scrub, 0.0f, 0.0f, 0.0f, 0.45f);
 
@@ -434,8 +436,8 @@ ooze_session_dialog_build (void)
   g_signal_connect (confirm_btn, "button-press-event",
                     G_CALLBACK (ooze_session_on_confirm_clicked), NULL);
 
-  card_x = ((gfloat) stage_w - OOZE_SESSION_CARD_W) / 2.0f;
-  card_y = ((gfloat) stage_h - OOZE_SESSION_CARD_H) / 2.0f;
+  card_x = monitor.x + ((gfloat) monitor.width - OOZE_SESSION_CARD_W) / 2.0f;
+  card_y = monitor.y + ((gfloat) monitor.height - OOZE_SESSION_CARD_H) / 2.0f;
   clutter_actor_set_position (card, card_x, card_y);
   clutter_actor_set_position (title,
                               (OOZE_SESSION_CARD_W -

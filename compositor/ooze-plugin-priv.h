@@ -108,4 +108,7 @@ struct _OozePlugin
   guint         tray_appearance_idle;
 };
 
+void ooze_plugin_get_active_monitor_geometry (MetaDisplay  *display,
+                                               MtkRectangle *rect_out);
+
 void ooze_plugin_begin_shutdown (OozePlugin *plugin);
