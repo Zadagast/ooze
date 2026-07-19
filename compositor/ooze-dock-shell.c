@@ -124,6 +124,7 @@ static MetaWindow *ooze_dock_get_most_recent_window (GList *windows);
 static gboolean  ooze_dock_window_matches_app   (MetaWindow *window, GDesktopAppInfo *app_info);
 static gboolean  ooze_dock_window_matches_app_id (MetaWindow *window, const char *app_id);
 static void      ooze_dock_attach_indicator     (ClutterActor *launcher, float launcher_w);
+static void      ooze_dock_stop_launch_bounce    (ClutterActor *launcher);
 
 typedef void (*OozeDockLaunchFn) (MetaContext *context);
 static void      ooze_dock_wire_app_launcher    (ClutterActor  *button,
@@ -1340,6 +1341,10 @@ ooze_dock_refresh_running_state (MetaDisplay  *display,
         }
 
       clutter_actor_set_opacity (indicator, running ? 255 : 0);
+
+      /* App is up — stop any launch bounce still running on this icon. */
+      if (running)
+        ooze_dock_stop_launch_bounce (child);
     }
 
   ooze_dock_update_icon_geometries (display, container);
@@ -2471,6 +2476,59 @@ on_app_launcher_motion (ClutterActor *actor,
   return CLUTTER_EVENT_STOP;
 }
 
+/* ── Launch feedback (mac-style bouncing dock icon) ─────────────────────── */
+
+#define DOCK_LAUNCH_BOUNCE_MS 260
+#define DOCK_LAUNCH_BOUNCE_PX 14.0f
+
+static void
+ooze_dock_stop_launch_bounce (ClutterActor *launcher)
+{
+  if (!launcher ||
+      !g_object_get_data (G_OBJECT (launcher), "launch-bouncing"))
+    return;
+
+  clutter_actor_remove_transition (launcher, "launch-bounce");
+  clutter_actor_set_translation (launcher, 0.f, 0.f, 0.f);
+  g_object_set_data (G_OBJECT (launcher), "launch-bouncing", NULL);
+}
+
+static void
+ooze_dock_launch_bounce_stopped (ClutterTimeline *timeline G_GNUC_UNUSED,
+                                 gboolean         is_finished G_GNUC_UNUSED,
+                                 gpointer         user_data)
+{
+  ooze_dock_stop_launch_bounce (CLUTTER_ACTOR (user_data));
+}
+
+static void
+ooze_dock_start_launch_bounce (ClutterActor *launcher)
+{
+  ClutterTransition *t;
+
+  if (!launcher ||
+      g_object_get_data (G_OBJECT (launcher), "launch-bouncing"))
+    return;
+
+  clutter_actor_set_translation (launcher, 0.f, 0.f, 0.f);
+
+  t = clutter_property_transition_new ("translation-y");
+  clutter_transition_set_from (t, G_TYPE_FLOAT, 0.0f);
+  clutter_transition_set_to (t, G_TYPE_FLOAT, -DOCK_LAUNCH_BOUNCE_PX);
+  clutter_timeline_set_duration (CLUTTER_TIMELINE (t), DOCK_LAUNCH_BOUNCE_MS);
+  clutter_timeline_set_progress_mode (CLUTTER_TIMELINE (t),
+                                      CLUTTER_EASE_OUT_QUAD);
+  clutter_timeline_set_auto_reverse (CLUTTER_TIMELINE (t), TRUE);
+  clutter_timeline_set_repeat_count (CLUTTER_TIMELINE (t), 5); /* ~3 hops */
+  g_signal_connect (t, "stopped",
+                    G_CALLBACK (ooze_dock_launch_bounce_stopped), launcher);
+  clutter_actor_add_transition (launcher, "launch-bounce", t);
+  g_object_unref (t);
+
+  g_object_set_data (G_OBJECT (launcher), "launch-bouncing",
+                     GINT_TO_POINTER (1));
+}
+
 static gboolean
 on_app_launcher_released (ClutterActor *actor,
                           ClutterEvent *event,
@@ -2523,6 +2581,15 @@ on_app_launcher_released (ClutterActor *actor,
   app_info = g_object_get_data (G_OBJECT (actor), "app-info");
   if (!display || !context || !app_id)
     return CLUTTER_EVENT_STOP;
+
+  {
+    gboolean running = ooze_dock_check_by_id (display, app_id);
+
+    if (!running && app_info)
+      running = ooze_dock_check_by_info (display, app_info);
+    if (!running)
+      ooze_dock_start_launch_bounce (actor);
+  }
 
   if (app_info && !launch)
     ooze_dock_handle_desktop_click (display, app_info);

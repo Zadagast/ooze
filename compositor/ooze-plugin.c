@@ -1277,11 +1277,35 @@ ooze_plugin_unminimize (MetaPlugin *plugin, MetaWindowActor *actor)
   ooze_plugin_run_magic_lamp (plugin, actor, TRUE);
 }
 
+/* Window-open transition: a subtle scale-up + fade-in, in the spirit of the
+ * GNOME/Mutter default plugin's _mapWindow and macOS's window-open ease
+ * (scale from ~92% + opacity), instead of the window popping in instantly. */
+#define OOZE_MAP_MS     180
+#define OOZE_MAP_SCALE  0.92
+
+static void
+ooze_plugin_map_effect_done (ClutterActor *window_actor,
+                             gpointer      user_data)
+{
+  MetaPlugin *plugin = META_PLUGIN (user_data);
+
+  g_signal_handlers_disconnect_by_func (window_actor,
+                                        G_CALLBACK (ooze_plugin_map_effect_done),
+                                        plugin);
+
+  clutter_actor_set_scale (window_actor, 1.0, 1.0);
+  clutter_actor_set_opacity (window_actor, 255);
+
+  meta_plugin_map_completed (plugin, META_WINDOW_ACTOR (window_actor));
+}
+
 static void
 ooze_plugin_map (MetaPlugin *plugin, MetaWindowActor *actor)
 {
   MetaWindow *window;
   ClutterActor *window_actor;
+  MetaWindowType wtype;
+  gboolean animate;
 
   if (OOZE_PLUGIN (plugin)->shutting_down)
     {
@@ -1307,7 +1331,32 @@ ooze_plugin_map (MetaPlugin *plugin, MetaWindowActor *actor)
       meta_window_get_window_type (window) != META_WINDOW_DESKTOP)
     meta_window_focus (window, clutter_get_current_event_time ());
 
-  meta_plugin_map_completed (plugin, actor);
+  wtype = window ? meta_window_get_window_type (window) : META_WINDOW_OVERRIDE_OTHER;
+  animate = window &&
+            !meta_window_is_override_redirect (window) &&
+            (wtype == META_WINDOW_NORMAL ||
+             wtype == META_WINDOW_DIALOG ||
+             wtype == META_WINDOW_MODAL_DIALOG);
+
+  if (!animate)
+    {
+      meta_plugin_map_completed (plugin, actor);
+      return;
+    }
+
+  clutter_actor_set_pivot_point (window_actor, 0.5f, 0.5f);
+  clutter_actor_set_scale (window_actor, OOZE_MAP_SCALE, OOZE_MAP_SCALE);
+  clutter_actor_set_opacity (window_actor, 0);
+
+  g_signal_connect (window_actor, "transitions-completed",
+                    G_CALLBACK (ooze_plugin_map_effect_done), plugin);
+
+  clutter_actor_save_easing_state (window_actor);
+  clutter_actor_set_easing_mode (window_actor, CLUTTER_EASE_OUT_QUAD);
+  clutter_actor_set_easing_duration (window_actor, OOZE_MAP_MS);
+  clutter_actor_set_scale (window_actor, 1.0, 1.0);
+  clutter_actor_set_opacity (window_actor, 255);
+  clutter_actor_restore_easing_state (window_actor);
 }
 
 static void
