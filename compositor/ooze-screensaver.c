@@ -536,13 +536,22 @@ ooze_screensaver_activate (OozePlugin *plugin)
   clutter_actor_remove_all_transitions (plugin->screensaver_overlay);
   clutter_actor_show (plugin->screensaver_overlay);
   clutter_actor_set_opacity (plugin->screensaver_overlay, 0);
-  clutter_actor_save_easing_state (plugin->screensaver_overlay);
-  clutter_actor_set_easing_mode (plugin->screensaver_overlay,
-                                 CLUTTER_EASE_IN_OUT_SINE);
-  clutter_actor_set_easing_duration (plugin->screensaver_overlay,
-                                     OOZE_SCREENSAVER_FADE_IN_MS);
-  clutter_actor_set_opacity (plugin->screensaver_overlay, 255);
-  clutter_actor_restore_easing_state (plugin->screensaver_overlay);
+
+  /* Explicit transition: implicit easing is skipped when the overlay
+   * is not yet mapped, which made the saver pop on instead of fading. */
+  {
+    ClutterTransition *fade = clutter_property_transition_new ("opacity");
+
+    clutter_transition_set_from (fade, G_TYPE_UINT, 0u);
+    clutter_transition_set_to (fade, G_TYPE_UINT, 255u);
+    clutter_timeline_set_duration (CLUTTER_TIMELINE (fade),
+                                   OOZE_SCREENSAVER_FADE_IN_MS);
+    clutter_timeline_set_progress_mode (CLUTTER_TIMELINE (fade),
+                                        CLUTTER_EASE_IN_OUT_SINE);
+    clutter_actor_add_transition (plugin->screensaver_overlay,
+                                  "saver-fade", fade);
+    g_object_unref (fade);
+  }
 
   ooze_screensaver_mode.start (plugin);
   clutter_timeline_rewind (plugin->screensaver_timeline);
@@ -653,14 +662,22 @@ ooze_screensaver_dismiss (OozePlugin *plugin)
 
   if (plugin->screensaver_overlay)
     {
+      ClutterTransition *fade;
+
       clutter_actor_remove_all_transitions (plugin->screensaver_overlay);
-      clutter_actor_save_easing_state (plugin->screensaver_overlay);
-      clutter_actor_set_easing_mode (plugin->screensaver_overlay,
-                                     CLUTTER_EASE_IN_OUT_SINE);
-      clutter_actor_set_easing_duration (plugin->screensaver_overlay,
-                                         OOZE_SCREENSAVER_FADE_OUT_MS);
-      clutter_actor_set_opacity (plugin->screensaver_overlay, 0);
-      clutter_actor_restore_easing_state (plugin->screensaver_overlay);
+
+      fade = clutter_property_transition_new ("opacity");
+      clutter_transition_set_from (fade, G_TYPE_UINT,
+                                   (guint) clutter_actor_get_opacity (
+                                     plugin->screensaver_overlay));
+      clutter_transition_set_to (fade, G_TYPE_UINT, 0u);
+      clutter_timeline_set_duration (CLUTTER_TIMELINE (fade),
+                                     OOZE_SCREENSAVER_FADE_OUT_MS);
+      clutter_timeline_set_progress_mode (CLUTTER_TIMELINE (fade),
+                                          CLUTTER_EASE_IN_OUT_SINE);
+      clutter_actor_add_transition (plugin->screensaver_overlay,
+                                    "saver-fade", fade);
+      g_object_unref (fade);
 
       if (plugin->screensaver_fade_id)
         g_source_remove (plugin->screensaver_fade_id);
