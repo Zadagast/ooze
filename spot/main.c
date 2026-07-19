@@ -3,6 +3,29 @@
 #include "ooze-application.h"
 #include "ooze-shared-appmenu.h"
 
+static const char file_manager_introspection_xml[] =
+  "<node>"
+  "  <interface name='org.freedesktop.FileManager1'>"
+  "    <method name='ShowItems'>"
+  "      <arg name='uris' type='as' direction='in'/>"
+  "      <arg name='startup_id' type='s' direction='in'/>"
+  "    </method>"
+  "    <method name='ShowFolders'>"
+  "      <arg name='uris' type='as' direction='in'/>"
+  "      <arg name='startup_id' type='s' direction='in'/>"
+  "    </method>"
+  "    <method name='ShowItemProperties'>"
+  "      <arg name='uris' type='as' direction='in'/>"
+  "      <arg name='startup_id' type='s' direction='in'/>"
+  "    </method>"
+  "  </interface>"
+  "</node>";
+
+static GDBusNodeInfo *file_manager_introspection;
+static guint file_manager_owner_id;
+static guint file_manager_registration_id;
+static GDBusConnection *file_manager_connection;
+
 static SpotWindow *
 spot_pick_window (AdwApplication *app)
 {
@@ -17,6 +40,71 @@ spot_pick_window (AdwApplication *app)
   if (windows && SPOT_IS_WINDOW (windows->data))
     return SPOT_WINDOW (windows->data);
   return NULL;
+}
+
+static SpotWindow *
+spot_ensure_window (AdwApplication *app)
+{
+  SpotWindow *window = spot_pick_window (app);
+
+  if (window)
+    {
+      gtk_window_present (GTK_WINDOW (window));
+      return window;
+    }
+
+  window = spot_window_new (GTK_APPLICATION (app));
+  gtk_application_add_window (GTK_APPLICATION (app), GTK_WINDOW (window));
+  gtk_window_present (GTK_WINDOW (window));
+  return window;
+}
+
+static void
+spot_file_manager_method_call (GDBusConnection       *connection G_GNUC_UNUSED,
+                                const char            *sender G_GNUC_UNUSED,
+                                const char            *object_path G_GNUC_UNUSED,
+                                const char            *interface_name G_GNUC_UNUSED,
+                                const char            *method_name G_GNUC_UNUSED,
+                                GVariant              *parameters,
+                                GDBusMethodInvocation *invocation,
+                                gpointer               user_data)
+{
+  AdwApplication *app = ADW_APPLICATION (user_data);
+  g_autofree char **uris = NULL;
+  const char *startup_id = NULL;
+  SpotWindow *window;
+
+  g_variant_get (parameters, "(^as&s)", &uris, &startup_id);
+  if (uris && uris[0])
+    {
+      window = spot_ensure_window (app);
+      spot_window_reveal_uri (window, uris[0]);
+    }
+
+  g_dbus_method_invocation_return_value (invocation, NULL);
+}
+
+static const GDBusInterfaceVTable file_manager_vtable = {
+  .method_call = spot_file_manager_method_call,
+};
+
+static void
+spot_file_manager_bus_acquired (GDBusConnection *connection,
+                                const char      *name G_GNUC_UNUSED,
+                                gpointer         user_data)
+{
+  g_autoptr (GError) error = NULL;
+
+  file_manager_registration_id =
+    g_dbus_connection_register_object (
+      connection, "/org/freedesktop/FileManager1",
+      file_manager_introspection->interfaces[0],
+      &file_manager_vtable, user_data, NULL, &error);
+  if (error || file_manager_registration_id == 0)
+    g_warning ("Spot: failed to register FileManager1: %s",
+               error ? error->message : "unknown error");
+  else
+    file_manager_connection = g_object_ref (connection);
 }
 
 static void
@@ -85,6 +173,31 @@ on_startup (AdwApplication *app,
 
   g_action_map_add_action_entries (G_ACTION_MAP (app), entries,
                                    G_N_ELEMENTS (entries), app);
+
+  file_manager_introspection =
+    g_dbus_node_info_new_for_xml (file_manager_introspection_xml, NULL);
+  file_manager_owner_id =
+    g_bus_own_name (G_BUS_TYPE_SESSION, "org.freedesktop.FileManager1",
+                    G_BUS_NAME_OWNER_FLAGS_NONE,
+                    spot_file_manager_bus_acquired, NULL, NULL,
+                    app, NULL);
+}
+
+static void
+on_shutdown (AdwApplication *app G_GNUC_UNUSED,
+             gpointer        user_data G_GNUC_UNUSED)
+{
+  if (file_manager_connection && file_manager_registration_id)
+    g_dbus_connection_unregister_object (file_manager_connection,
+                                         file_manager_registration_id);
+  g_clear_object (&file_manager_connection);
+  file_manager_registration_id = 0;
+
+  if (file_manager_owner_id)
+    g_bus_unown_name (file_manager_owner_id);
+  file_manager_owner_id = 0;
+
+  g_clear_pointer (&file_manager_introspection, g_dbus_node_info_unref);
 }
 
 static void
@@ -184,6 +297,7 @@ main (int argc, char **argv)
     "org.ooze.Spot",
     G_APPLICATION_DEFAULT_FLAGS | G_APPLICATION_HANDLES_OPEN);
   g_signal_connect (app, "startup", G_CALLBACK (on_startup), NULL);
+  g_signal_connect (app, "shutdown", G_CALLBACK (on_shutdown), NULL);
   g_signal_connect (app, "activate", G_CALLBACK (on_activate), NULL);
   g_signal_connect (app, "open", G_CALLBACK (on_open), NULL);
   g_object_set_data_full (G_OBJECT (app),

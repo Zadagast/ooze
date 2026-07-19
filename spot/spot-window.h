@@ -16,6 +16,9 @@ SpotWindow *spot_window_new_for_path (GtkApplication *app,
 void spot_window_open_path (SpotWindow *self,
                             const char *path);
 
+void spot_window_reveal_uri (SpotWindow   *self,
+                             const char   *uri);
+
 /* Receive files into the window's current folder (D-Bus / shell bridge). */
 void spot_window_receive_paths (SpotWindow         *self,
                                 const char * const *paths,

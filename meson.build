@@ -422,6 +422,13 @@ if gtk4_dep.found() and adw_dep.found()
   install_data('data/org.ooze.Spot.desktop',
     install_dir: get_option('datadir') / 'applications',
   )
+  install_data(configure_file(
+    input: 'data/org.freedesktop.FileManager1.service',
+    output: 'org.freedesktop.FileManager1.service',
+    configuration: {
+      'bindir': join_paths(get_option('prefix'), get_option('bindir')),
+    },
+  ), install_dir: get_option('datadir') / 'dbus-1' / 'services')
 
   executable('ooze-pak',
     'ooze-pak/main.c',
