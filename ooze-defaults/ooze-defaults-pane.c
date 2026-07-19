@@ -107,13 +107,43 @@ find_app (GList    *apps,
 }
 
 static void
+append_apps_for_type (GList      **apps,
+                      const char  *type)
+{
+  GList *type_apps;
+
+  type_apps = g_app_info_get_all_for_type (type);
+  for (GList *link = type_apps; link; link = link->next)
+    {
+      gboolean duplicate = FALSE;
+
+      for (GList *existing = *apps; existing; existing = existing->next)
+        {
+          if (g_app_info_equal (G_APP_INFO (existing->data),
+                                G_APP_INFO (link->data)))
+            {
+              duplicate = TRUE;
+              break;
+            }
+        }
+
+      if (duplicate)
+        g_object_unref (link->data);
+      else
+        *apps = g_list_prepend (*apps, link->data);
+    }
+  g_list_free (type_apps);
+}
+
+static void
 set_category_model (DefaultCategory *category)
 {
   GtkStringList *model;
-  GAppInfo *default_app;
+  g_autoptr (GAppInfo) default_app = NULL;
   guint selected = GTK_INVALID_LIST_POSITION;
 
-  category->apps = g_app_info_get_all_for_type (category->types[0]);
+  for (guint i = 0; category->types[i]; i++)
+    append_apps_for_type (&category->apps, category->types[i]);
   category->apps = g_list_sort (category->apps, compare_app_info);
 
   model = gtk_string_list_new (NULL);
@@ -132,11 +162,17 @@ set_category_model (DefaultCategory *category)
     }
   else
     {
-      default_app =
-        g_app_info_get_default_for_type (category->types[0], FALSE);
-      if (default_app)
-        selected = find_app (category->apps, default_app);
-      g_clear_object (&default_app);
+      /* Prefer the category's primary type, but recover if only a
+       * secondary association has a persisted default. */
+      for (guint i = 0; category->types[i] &&
+           selected == GTK_INVALID_LIST_POSITION; i++)
+        {
+          default_app =
+            g_app_info_get_default_for_type (category->types[i], FALSE);
+          if (default_app)
+            selected = find_app (category->apps, default_app);
+          g_clear_object (&default_app);
+        }
     }
 
   gtk_drop_down_set_model (GTK_DROP_DOWN (category->dropdown),
@@ -173,6 +209,17 @@ on_category_changed (GtkDropDown    *dropdown,
                      category->types[i],
                      error ? error->message : "unknown error");
         }
+    }
+
+  for (guint i = 0; category->types[i]; i++)
+    {
+      g_autoptr (GAppInfo) persisted =
+        g_app_info_get_default_for_type (category->types[i], FALSE);
+
+      if (!persisted || !g_app_info_equal (persisted, app))
+        g_warning ("Ooze Defaults: %s was not persisted for %s",
+                   g_app_info_get_display_name (app),
+                   category->types[i]);
     }
 }
 
