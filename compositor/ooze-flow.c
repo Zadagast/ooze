@@ -144,10 +144,13 @@ ooze_flow_render_with_color (cairo_surface_t *surface,
               gdouble highlight_y;
               gdouble highlight_distance;
 
+              gdouble stretch = 1.0 + 0.24 * sin (phase * flow_blobs[i].speed *
+                                                  0.7 + flow_blobs[i].phase);
+
               dx = (normalized_x - blob_x) * aspect;
-              dy = normalized_y - blob_y;
+              dy = (normalized_y - blob_y) / stretch;
               distance = (dx * dx + dy * dy) / (radius * radius);
-              field += 0.18 / (distance + 0.045);
+              field += 0.21 / (distance + 0.05);
 
               highlight_x = blob_x - radius * 0.34;
               highlight_y = blob_y - radius * 0.38;
@@ -160,12 +163,12 @@ ooze_flow_render_with_color (cairo_surface_t *surface,
                                (radius * radius * 0.16));
             }
 
-          alpha = flow_smoothstep (0.55, 1.55, field);
+          alpha = flow_smoothstep (0.44, 1.45, field);
           if (alpha <= 0.001)
             continue;
 
-          rim = flow_smoothstep (0.42, 0.90, field) -
-                flow_smoothstep (1.15, 1.85, field);
+          rim = flow_smoothstep (0.36, 0.82, field) -
+                flow_smoothstep (1.08, 1.80, field);
           glass = CLAMP (flow_smoothstep (0.55, 1.35, field) * 0.35 +
                          rim * 0.55, 0.0, 0.78);
           alpha *= dark ? 0.50 : 0.56;
