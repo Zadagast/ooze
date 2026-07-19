@@ -15,21 +15,27 @@ typedef struct
   gdouble y_scale;
 } OozeFlowBlob;
 
+/* x, y_center, radius, speed, phase, x_sway, y_amplitude.
+ * Lava lamp: fat blobs travelling slowly up/down with a gentle sway. */
 static const OozeFlowBlob flow_blobs[] = {
-  { 0.16, 0.25, 0.14, 0.72, 0.10, 0.14, 0.11 },
-  { 0.30, 0.20, 0.11, 0.51, 1.80, 0.11, 0.15 },
-  { 0.47, 0.25, 0.15, 0.63, 3.25, 0.15, 0.10 },
-  { 0.64, 0.19, 0.10, 0.43, 4.40, 0.10, 0.13 },
-  { 0.82, 0.28, 0.13, 0.57, 5.10, 0.13, 0.12 },
-  { 0.22, 0.52, 0.12, 0.46, 2.55, 0.12, 0.10 },
-  { 0.40, 0.66, 0.16, 0.68, 0.90, 0.15, 0.14 },
-  { 0.58, 0.50, 0.10, 0.37, 5.70, 0.10, 0.12 },
-  { 0.77, 0.49, 0.14, 0.59, 2.10, 0.13, 0.11 },
-  { 0.90, 0.68, 0.11, 0.78, 3.90, 0.11, 0.14 },
-  { 0.12, 0.80, 0.10, 0.48, 1.30, 0.10, 0.12 },
-  { 0.34, 0.88, 0.13, 0.66, 4.80, 0.12, 0.10 },
-  { 0.63, 0.82, 0.11, 0.54, 0.35, 0.11, 0.13 },
-  { 0.84, 0.88, 0.13, 0.41, 2.90, 0.12, 0.10 },
+  { 0.10, 0.50, 0.20, 0.62, 0.10, 0.05, 0.40 },
+  { 0.22, 0.46, 0.17, 0.50, 1.80, 0.04, 0.44 },
+  { 0.34, 0.53, 0.23, 0.72, 3.25, 0.06, 0.36 },
+  { 0.46, 0.48, 0.18, 0.55, 4.40, 0.04, 0.42 },
+  { 0.58, 0.52, 0.21, 0.64, 5.10, 0.05, 0.38 },
+  { 0.70, 0.47, 0.17, 0.50, 2.55, 0.04, 0.45 },
+  { 0.82, 0.53, 0.22, 0.58, 0.90, 0.05, 0.34 },
+  { 0.92, 0.49, 0.16, 0.44, 5.70, 0.04, 0.43 },
+  { 0.16, 0.54, 0.22, 0.68, 2.10, 0.06, 0.37 },
+  { 0.28, 0.49, 0.17, 0.52, 3.90, 0.04, 0.46 },
+  { 0.40, 0.45, 0.20, 0.60, 1.30, 0.05, 0.39 },
+  { 0.52, 0.54, 0.18, 0.66, 0.35, 0.04, 0.41 },
+  { 0.64, 0.50, 0.21, 0.40, 2.90, 0.05, 0.35 },
+  { 0.76, 0.46, 0.17, 0.56, 4.10, 0.05, 0.44 },
+  { 0.88, 0.52, 0.19, 0.63, 0.60, 0.05, 0.40 },
+  { 0.06, 0.48, 0.18, 0.47, 3.50, 0.04, 0.36 },
+  { 0.50, 0.47, 0.23, 0.71, 1.10, 0.06, 0.38 },
+  { 0.72, 0.54, 0.19, 0.53, 5.30, 0.05, 0.43 },
 };
 
 static gdouble
@@ -52,14 +58,13 @@ flow_blob_position (const OozeFlowBlob *blob,
                     gdouble            *x_out,
                     gdouble            *y_out)
 {
-  gdouble angle = phase * blob->speed + blob->phase;
+  gdouble t = phase * blob->speed + blob->phase;
 
+  /* Lava lamp: slow vertical rise/sink, only a gentle horizontal sway. */
+  *y_out = blob->y + blob->y_scale * sin (t);
   *x_out = blob->x +
-           blob->x_scale * sin (angle) +
-           blob->x_scale * 0.35 * sin (angle * 0.47 + blob->phase);
-  *y_out = blob->y +
-           blob->y_scale * cos (angle * 0.83) +
-           blob->y_scale * 0.30 * cos (angle * 0.39 + blob->phase);
+           blob->x_scale * (sin (t * 0.53 + blob->phase) +
+                            0.5 * sin (t * 0.27 + blob->phase * 1.7));
 }
 
 void
@@ -142,7 +147,7 @@ ooze_flow_render_with_color (cairo_surface_t *surface,
               dx = (normalized_x - blob_x) * aspect;
               dy = normalized_y - blob_y;
               distance = (dx * dx + dy * dy) / (radius * radius);
-              field += 0.20 / (distance + 0.045);
+              field += 0.18 / (distance + 0.045);
 
               highlight_x = blob_x - radius * 0.34;
               highlight_y = blob_y - radius * 0.38;
@@ -155,15 +160,15 @@ ooze_flow_render_with_color (cairo_surface_t *surface,
                                (radius * radius * 0.16));
             }
 
-          alpha = flow_smoothstep (0.48, 1.45, field);
+          alpha = flow_smoothstep (0.55, 1.55, field);
           if (alpha <= 0.001)
             continue;
 
-          rim = flow_smoothstep (0.38, 0.82, field) -
-                flow_smoothstep (1.05, 1.70, field);
+          rim = flow_smoothstep (0.42, 0.90, field) -
+                flow_smoothstep (1.15, 1.85, field);
           glass = CLAMP (flow_smoothstep (0.55, 1.35, field) * 0.35 +
                          rim * 0.55, 0.0, 0.78);
-          alpha *= dark ? 0.48 : 0.38;
+          alpha *= dark ? 0.50 : 0.56;
           specular = CLAMP (specular * 0.34, 0.0, 0.58);
 
           red = base_red + glass * 0.16 + specular;

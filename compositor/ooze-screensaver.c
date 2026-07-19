@@ -196,8 +196,10 @@ ooze_screensaver_mode_step (OozePlugin *plugin G_GNUC_UNUSED,
   now = g_get_monotonic_time ();
   if (flow->phase_start_us == 0)
     flow->phase_start_us = now;
+  /* ~17s per base cycle; per-blob speeds stretch this to a slow, lava-lamp
+   * rise/sink of roughly 24-42s per blob. */
   flow->phase = (now - flow->phase_start_us) *
-                (G_PI * 2.0 / 10000000.0);
+                (G_PI * 2.0 / 17000000.0);
   ooze_screensaver_flow_render (plugin, FALSE);
 }
 
