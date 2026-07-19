@@ -367,6 +367,9 @@ static void spot_grid_enumerate_next_cb (GObject      *source,
 static void spot_grid_enumerate_children_cb (GObject      *source,
                                              GAsyncResult *result,
                                              gpointer      user_data);
+static gint spot_grid_sort_func (GtkFlowBoxChild *child_a,
+                                 GtkFlowBoxChild *child_b,
+                                 gpointer         user_data);
 
 static void
 spot_set_context_target (SpotWindow *self,
@@ -2024,6 +2027,8 @@ spot_grid_append_info (SpotGridEnumeration *enumeration,
   child = g_file_get_child (enumeration->directory,
                             g_file_info_get_name (info));
   cell = spot_create_grid_cell (self, info, child);
+  g_object_set_data_full (G_OBJECT (cell), "spot-info",
+                          g_object_ref (info), g_object_unref);
   gtk_flow_box_append (GTK_FLOW_BOX (self->grid_flow), cell);
 
   fbc = gtk_widget_get_parent (cell);
@@ -2038,6 +2043,39 @@ spot_grid_append_info (SpotGridEnumeration *enumeration,
 
   if (self->reveal_target)
     spot_select_file_widget (self, self->grid_flow, self->reveal_target);
+}
+
+static gint
+spot_grid_sort_func (GtkFlowBoxChild *child_a,
+                     GtkFlowBoxChild *child_b,
+                     gpointer         user_data G_GNUC_UNUSED)
+{
+  GtkWidget *widget_a;
+  GtkWidget *widget_b;
+  GFileInfo *info_a;
+  GFileInfo *info_b;
+  gboolean loading_a;
+  gboolean loading_b;
+
+  widget_a = gtk_flow_box_child_get_child (child_a);
+  widget_b = gtk_flow_box_child_get_child (child_b);
+  loading_a = widget_a &&
+              g_object_get_data (G_OBJECT (widget_a), "spot-loading");
+  loading_b = widget_b &&
+              g_object_get_data (G_OBJECT (widget_b), "spot-loading");
+
+  if (loading_a != loading_b)
+    return loading_a ? -1 : 1;
+
+  if (loading_a)
+    return 0;
+
+  info_a = widget_a ? g_object_get_data (G_OBJECT (widget_a), "spot-info") : NULL;
+  info_b = widget_b ? g_object_get_data (G_OBJECT (widget_b), "spot-info") : NULL;
+  if (!info_a || !info_b)
+    return 0;
+
+  return spot_compare_file_info (info_a, info_b);
 }
 
 static void
@@ -3361,6 +3399,8 @@ spot_window_constructed (GObject *object)
   gtk_flow_box_set_activate_on_single_click (GTK_FLOW_BOX (self->grid_flow), FALSE);
   /* homogeneous = FALSE: rows are only as tall as their tallest cell */
   gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (self->grid_flow), FALSE);
+  gtk_flow_box_set_sort_func (GTK_FLOW_BOX (self->grid_flow),
+                              spot_grid_sort_func, self, NULL);
   gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (self->grid_flow), 2);
   gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (self->grid_flow), 20);
   gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (self->grid_flow), 2);

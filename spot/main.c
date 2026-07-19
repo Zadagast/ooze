@@ -70,7 +70,7 @@ spot_file_manager_method_call (GDBusConnection       *connection G_GNUC_UNUSED,
                                 gpointer               user_data)
 {
   AdwApplication *app = ADW_APPLICATION (user_data);
-  g_autofree char **uris = NULL;
+  g_auto (GStrv) uris = NULL;
   const char *startup_id = NULL;
   SpotWindow *window;
 
