@@ -1,8 +1,8 @@
 #include "ooze-scenery-window.h"
 
 #include "ooze-about.h"
+#include "ooze-action-bar.h"
 #include "ooze-button.h"
-#include "ooze-feedback.h"
 #include "ooze-flow.h"
 #include "ooze-shared-appmenu.h"
 #include "ooze-scroll.h"
@@ -46,8 +46,16 @@ struct _OozeSceneryWindow
   GtkWidget *nav_wallpaper;
   GtkWidget *nav_screensaver;
   GtkWidget *custom_tiles;
+  GtkWidget *action_bar;
   GdkPixbuf *selected_pixbuf;
-  char *selected_uri;
+  /* Staged (uncommitted) edits — written to GSettings only on Apply. */
+  char *pending_wallpaper;   /* "aqua", "aqua-dark", or an absolute path */
+  char *pending_mode;        /* "flow" or "none" */
+  guint pending_idle;
+  guint pending_lock_delay;
+  gboolean pending_lock_enabled;
+  gboolean dirty;
+  gboolean loading;
   cairo_surface_t *flow_surface;
   int flow_width;
   int flow_height;
@@ -62,8 +70,25 @@ G_DEFINE_FINAL_TYPE (OozeSceneryWindow, ooze_scenery_window,
 
 static void scenery_refresh_selection (OozeSceneryWindow *self);
 static void scenery_refresh_preview (OozeSceneryWindow *self);
+static void scenery_refresh_mode_selection (OozeSceneryWindow *self);
 static void on_choose_clicked (GtkButton *button,
                                gpointer   user_data);
+
+static void
+scenery_set_dirty (OozeSceneryWindow *self,
+                   gboolean           dirty)
+{
+  self->dirty = dirty;
+  if (self->action_bar)
+    ooze_action_bar_set_dirty (self->action_bar, dirty);
+}
+
+static void
+scenery_mark_dirty (OozeSceneryWindow *self)
+{
+  if (!self->loading)
+    scenery_set_dirty (self, TRUE);
+}
 
 static void
 scenery_ensure_css (void)
@@ -170,19 +195,50 @@ scenery_ensure_css (void)
   loaded = TRUE;
 }
 
-static void
-scenery_load_selected_pixbuf (OozeSceneryWindow *self,
-                              const char        *uri)
+static gboolean
+scenery_pending_is_aqua (OozeSceneryWindow *self)
 {
-  g_autofree char *path = NULL;
+  return !self->pending_wallpaper ||
+         g_strcmp0 (self->pending_wallpaper, "aqua") == 0 ||
+         g_strcmp0 (self->pending_wallpaper, "aqua-dark") == 0;
+}
 
+static void
+scenery_load_pending_pixbuf (OozeSceneryWindow *self)
+{
   g_clear_object (&self->selected_pixbuf);
-  if (!uri || !*uri)
+  if (scenery_pending_is_aqua (self))
     return;
-  path = g_filename_from_uri (uri, NULL, NULL);
-  if (path)
-    self->selected_pixbuf =
-      gdk_pixbuf_new_from_file_at_scale (path, 640, 400, TRUE, NULL);
+  self->selected_pixbuf =
+    gdk_pixbuf_new_from_file_at_scale (self->pending_wallpaper, 640, 400,
+                                       TRUE, NULL);
+}
+
+static void
+scenery_load_pending (OozeSceneryWindow *self)
+{
+  g_autofree char *uri =
+    g_settings_get_string (self->background_settings, "picture-uri");
+
+  g_clear_pointer (&self->pending_wallpaper, g_free);
+  if (!uri || !*uri)
+    self->pending_wallpaper = g_strdup ("aqua");
+  else
+    {
+      g_autofree char *path = g_filename_from_uri (uri, NULL, NULL);
+      self->pending_wallpaper = path ? g_steal_pointer (&path)
+                                     : g_strdup ("aqua");
+    }
+
+  g_clear_pointer (&self->pending_mode, g_free);
+  self->pending_mode =
+    g_settings_get_string (self->scenery_settings, "screensaver-mode");
+  self->pending_idle =
+    g_settings_get_uint (self->session_settings, "idle-delay");
+  self->pending_lock_enabled =
+    g_settings_get_boolean (self->screensaver_settings, "lock-enabled");
+  self->pending_lock_delay =
+    g_settings_get_uint (self->screensaver_settings, "lock-delay");
 }
 
 static void
@@ -244,7 +300,9 @@ scenery_draw_wallpaper (GtkDrawingArea *area,
       cairo_restore (cr);
     }
   else
-    scenery_draw_aqua (cr, width, height, ooze_theme_is_dark ());
+    scenery_draw_aqua (cr, width, height,
+                       g_strcmp0 (self->pending_wallpaper, "aqua-dark") == 0
+                         ? TRUE : ooze_theme_is_dark ());
 
   (void) area;
 }
@@ -257,9 +315,7 @@ scenery_draw_screensaver (GtkDrawingArea *area,
                           gpointer        user_data)
 {
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
-  g_autofree char *mode =
-    g_settings_get_string (self->scenery_settings, "screensaver-mode");
-  gboolean flow = g_strcmp0 (mode, "flow") == 0;
+  gboolean flow = g_strcmp0 (self->pending_mode, "flow") == 0;
 
   scenery_draw_wallpaper (NULL, cr, width, height, self);
   if (flow && self->flow_surface)
@@ -327,11 +383,8 @@ scenery_flow_tick (GtkWidget     *widget,
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
   gint64 now = gdk_frame_clock_get_frame_time (clock);
 
-  g_autofree char *mode =
-    g_settings_get_string (self->scenery_settings, "screensaver-mode");
-
   if (self->page != SCENERY_PAGE_SCREENSAVER ||
-      g_strcmp0 (mode, "flow") != 0)
+      g_strcmp0 (self->pending_mode, "flow") != 0)
     return G_SOURCE_CONTINUE;
 
   scenery_flow_resize (self,
@@ -364,38 +417,12 @@ static void
 scenery_set_wallpaper (OozeSceneryWindow *self,
                        const char        *uri)
 {
-  if (!uri || g_strcmp0 (uri, "aqua") == 0 ||
-      g_strcmp0 (uri, "aqua-dark") == 0)
-    {
-      g_settings_set_string (self->background_settings, "picture-uri", "");
-      g_settings_set_string (self->background_settings, "picture-uri-dark", "");
-      g_clear_pointer (&self->selected_uri, g_free);
-      g_clear_object (&self->selected_pixbuf);
-    }
-  else
-    {
-      g_autofree char *uri_value = NULL;
-
-      uri_value = g_filename_to_uri (uri, NULL, NULL);
-      if (!uri_value)
-        return;
-      g_settings_set_string (self->background_settings, "picture-uri",
-                             uri_value);
-      g_settings_set_string (self->background_settings,
-                             "picture-uri-dark", uri_value);
-      g_settings_set_string (self->background_settings,
-                             "picture-options", "zoom");
-      g_free (self->selected_uri);
-      self->selected_uri = g_strdup (uri);
-      g_clear_object (&self->selected_pixbuf);
-      g_set_object (&self->selected_pixbuf,
-                    gdk_pixbuf_new_from_file_at_scale (uri, 640, 400,
-                                                       TRUE, NULL));
-    }
-
+  g_clear_pointer (&self->pending_wallpaper, g_free);
+  self->pending_wallpaper = g_strdup (uri ? uri : "aqua");
+  scenery_load_pending_pixbuf (self);
   scenery_refresh_selection (self);
   scenery_refresh_preview (self);
-  ooze_feedback_show (GTK_WINDOW (self), "Wallpaper updated");
+  scenery_mark_dirty (self);
 }
 
 static void
@@ -513,7 +540,7 @@ scenery_make_choose_tile (OozeSceneryWindow *self)
 
 static void
 scenery_refresh_selection_in_box (GtkWidget   *box,
-                                  const char  *uri)
+                                  const char  *pending)
 {
   GtkWidget *child;
 
@@ -525,15 +552,8 @@ scenery_refresh_selection_in_box (GtkWidget   *box,
         GTK_FLOW_BOX_CHILD (child));
       const char *tile_uri = tile
         ? g_object_get_data (G_OBJECT (tile), "uri") : NULL;
-      gboolean selected = (!uri || !*uri) && g_strcmp0 (tile_uri, "aqua") == 0;
+      gboolean selected = tile_uri && g_strcmp0 (tile_uri, pending) == 0;
 
-      if (uri && *uri && tile_uri)
-        {
-          g_autofree char *tile_uri_value = NULL;
-
-          tile_uri_value = g_filename_to_uri (tile_uri, NULL, NULL);
-          selected = g_strcmp0 (uri, tile_uri_value) == 0;
-        }
       gtk_widget_set_state_flags (child, selected ? GTK_STATE_FLAG_CHECKED : 0,
                                   TRUE);
     }
@@ -545,7 +565,6 @@ static void
 scenery_refresh_custom_tile (OozeSceneryWindow *self)
 {
   GtkWidget *child;
-  g_autofree char *path = NULL;
 
   if (!self->custom_tiles)
     return;
@@ -564,16 +583,14 @@ scenery_refresh_custom_tile (OozeSceneryWindow *self)
         }
     }
 
-  if (!self->selected_uri || !*self->selected_uri)
-    return;
-  path = g_filename_from_uri (self->selected_uri, NULL, NULL);
-  if (!path || g_str_has_prefix (path, "/usr/share/backgrounds/"))
+  if (scenery_pending_is_aqua (self) ||
+      g_str_has_prefix (self->pending_wallpaper, "/usr/share/backgrounds/"))
     return;
 
   {
-    g_autofree char *name = g_path_get_basename (path);
-    GtkWidget *tile =
-      scenery_make_tile (self, name, path, self->selected_pixbuf);
+    g_autofree char *name = g_path_get_basename (self->pending_wallpaper);
+    GtkWidget *tile = scenery_make_tile (self, name, self->pending_wallpaper,
+                                         self->selected_pixbuf);
 
     g_object_set_data (G_OBJECT (tile), "custom-tile", GINT_TO_POINTER (1));
     gtk_flow_box_insert (GTK_FLOW_BOX (self->custom_tiles), tile, 0);
@@ -583,16 +600,13 @@ scenery_refresh_custom_tile (OozeSceneryWindow *self)
 static void
 scenery_refresh_selection (OozeSceneryWindow *self)
 {
-  g_autofree char *uri =
-    g_settings_get_string (self->background_settings, "picture-uri");
-
-  g_clear_pointer (&self->selected_uri, g_free);
-  self->selected_uri = g_strdup (uri);
-  scenery_load_selected_pixbuf (self, uri);
   scenery_refresh_custom_tile (self);
-  scenery_refresh_selection_in_box (self->wallpaper_tiles, uri);
-  scenery_refresh_selection_in_box (self->ubuntu_tiles, uri);
-  scenery_refresh_selection_in_box (self->custom_tiles, uri);
+  scenery_refresh_selection_in_box (self->wallpaper_tiles,
+                                    self->pending_wallpaper);
+  scenery_refresh_selection_in_box (self->ubuntu_tiles,
+                                    self->pending_wallpaper);
+  scenery_refresh_selection_in_box (self->custom_tiles,
+                                    self->pending_wallpaper);
 }
 
 static void
@@ -607,8 +621,6 @@ scenery_refresh_preview (OozeSceneryWindow *self)
 static void
 scenery_refresh_mode_selection (OozeSceneryWindow *self)
 {
-  g_autofree char *mode =
-    g_settings_get_string (self->scenery_settings, "screensaver-mode");
   GtkWidget *child;
 
   for (child = gtk_widget_get_first_child (self->screensaver_mode_tiles);
@@ -620,7 +632,7 @@ scenery_refresh_mode_selection (OozeSceneryWindow *self)
       const char *child_mode = tile
         ? g_object_get_data (G_OBJECT (tile), "mode") : NULL;
       gtk_widget_set_state_flags (
-        child, g_strcmp0 (mode, child_mode) == 0
+        child, g_strcmp0 (self->pending_mode, child_mode) == 0
           ? GTK_STATE_FLAG_CHECKED : 0, TRUE);
     }
 }
@@ -632,10 +644,85 @@ on_screensaver_mode_clicked (GtkButton *button,
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
   const char *mode = g_object_get_data (G_OBJECT (button), "mode");
 
-  g_settings_set_string (self->scenery_settings, "screensaver-mode", mode);
+  g_clear_pointer (&self->pending_mode, g_free);
+  self->pending_mode = g_strdup (mode);
   scenery_refresh_mode_selection (self);
   scenery_refresh_preview (self);
-  ooze_feedback_show (GTK_WINDOW (self), "Screensaver updated");
+  scenery_mark_dirty (self);
+}
+
+static void
+scenery_reload (OozeSceneryWindow *self)
+{
+  self->loading = TRUE;
+  scenery_load_pending (self);
+  scenery_load_pending_pixbuf (self);
+  gtk_spin_button_set_value (GTK_SPIN_BUTTON (self->start_after),
+                             self->pending_idle);
+  gtk_check_button_set_active (GTK_CHECK_BUTTON (self->lock_enabled),
+                               self->pending_lock_enabled);
+  gtk_spin_button_set_value (GTK_SPIN_BUTTON (self->lock_after),
+                             self->pending_lock_delay);
+  scenery_refresh_selection (self);
+  scenery_refresh_mode_selection (self);
+  scenery_refresh_preview (self);
+  self->loading = FALSE;
+  scenery_set_dirty (self, FALSE);
+}
+
+static void
+scenery_apply (OozeSceneryWindow *self)
+{
+  gtk_spin_button_update (GTK_SPIN_BUTTON (self->start_after));
+  gtk_spin_button_update (GTK_SPIN_BUTTON (self->lock_after));
+  self->pending_idle =
+    gtk_spin_button_get_value_as_int (GTK_SPIN_BUTTON (self->start_after));
+  self->pending_lock_delay =
+    gtk_spin_button_get_value_as_int (GTK_SPIN_BUTTON (self->lock_after));
+
+  if (scenery_pending_is_aqua (self))
+    {
+      g_settings_set_string (self->background_settings, "picture-uri", "");
+      g_settings_set_string (self->background_settings, "picture-uri-dark", "");
+    }
+  else
+    {
+      g_autofree char *uri =
+        g_filename_to_uri (self->pending_wallpaper, NULL, NULL);
+
+      if (uri)
+        {
+          g_settings_set_string (self->background_settings, "picture-uri", uri);
+          g_settings_set_string (self->background_settings,
+                                 "picture-uri-dark", uri);
+          g_settings_set_string (self->background_settings,
+                                 "picture-options", "zoom");
+        }
+    }
+
+  g_settings_set_string (self->scenery_settings, "screensaver-mode",
+                         self->pending_mode);
+  g_settings_set_uint (self->session_settings, "idle-delay",
+                       self->pending_idle);
+  g_settings_set_boolean (self->screensaver_settings, "lock-enabled",
+                          self->pending_lock_enabled);
+  g_settings_set_uint (self->screensaver_settings, "lock-delay",
+                       self->pending_lock_delay);
+  scenery_set_dirty (self, FALSE);
+}
+
+static void
+on_apply_clicked (GtkButton *button G_GNUC_UNUSED,
+                  gpointer   user_data)
+{
+  scenery_apply (OOZE_SCENERY_WINDOW (user_data));
+}
+
+static void
+on_cancel_clicked (GtkButton *button G_GNUC_UNUSED,
+                   gpointer   user_data)
+{
+  scenery_reload (OOZE_SCENERY_WINDOW (user_data));
 }
 
 static void
@@ -643,9 +730,12 @@ on_setting_changed (GSettings  *settings G_GNUC_UNUSED,
                     const char *key G_GNUC_UNUSED,
                     gpointer    user_data)
 {
-  scenery_refresh_selection (OOZE_SCENERY_WINDOW (user_data));
-  scenery_refresh_mode_selection (OOZE_SCENERY_WINDOW (user_data));
-  scenery_refresh_preview (OOZE_SCENERY_WINDOW (user_data));
+  OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
+
+  /* Ignore external changes while the user has unsaved staged edits. */
+  if (self->dirty || self->loading)
+    return;
+  scenery_reload (self);
 }
 
 static void
@@ -653,9 +743,9 @@ on_start_after_changed (GtkSpinButton *spin,
                         gpointer       user_data)
 {
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
-  g_settings_set_uint (self->session_settings, "idle-delay",
-                       gtk_spin_button_get_value_as_int (spin));
-  ooze_feedback_show (GTK_WINDOW (self), "Start delay saved");
+
+  self->pending_idle = gtk_spin_button_get_value_as_int (spin);
+  scenery_mark_dirty (self);
 }
 
 static void
@@ -670,9 +760,9 @@ on_lock_after_changed (GtkSpinButton *spin,
                        gpointer       user_data)
 {
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
-  g_settings_set_uint (self->screensaver_settings, "lock-delay",
-                       gtk_spin_button_get_value_as_int (spin));
-  ooze_feedback_show (GTK_WINDOW (self), "Lock delay saved");
+
+  self->pending_lock_delay = gtk_spin_button_get_value_as_int (spin);
+  scenery_mark_dirty (self);
 }
 
 static void
@@ -680,20 +770,9 @@ on_lock_enabled_changed (GtkCheckButton *button,
                          gpointer        user_data)
 {
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
-  g_settings_set_boolean (self->screensaver_settings, "lock-enabled",
-                          gtk_check_button_get_active (button));
-  ooze_feedback_show (GTK_WINDOW (self), "Lock setting saved");
-}
 
-static gboolean
-on_close_request (GtkWindow *window G_GNUC_UNUSED,
-                  gpointer   user_data)
-{
-  OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
-
-  gtk_spin_button_update (GTK_SPIN_BUTTON (self->start_after));
-  gtk_spin_button_update (GTK_SPIN_BUTTON (self->lock_after));
-  return FALSE;
+  self->pending_lock_enabled = gtk_check_button_get_active (button);
+  scenery_mark_dirty (self);
 }
 
 static GtkWidget *
@@ -1012,7 +1091,8 @@ ooze_scenery_window_dispose (GObject *object)
     }
   g_clear_pointer (&self->flow_surface, cairo_surface_destroy);
   g_clear_object (&self->selected_pixbuf);
-  g_clear_pointer (&self->selected_uri, g_free);
+  g_clear_pointer (&self->pending_wallpaper, g_free);
+  g_clear_pointer (&self->pending_mode, g_free);
   g_clear_object (&self->background_settings);
   g_clear_object (&self->scenery_settings);
   g_clear_object (&self->session_settings);
@@ -1039,20 +1119,22 @@ ooze_scenery_window_constructed (GObject *object)
   GtkWidget *toolbar;
   GtkWidget *toolbar_group;
   GtkWidget *choose_button;
+  GtkWidget *apply_button;
+  GtkWidget *cancel_button;
   GMenu *help;
   GSimpleAction *about;
 
   G_OBJECT_CLASS (ooze_scenery_window_parent_class)->constructed (object);
-  g_signal_connect (self, "close-request",
-                    G_CALLBACK (on_close_request), self);
   ooze_toolbar_ensure_css ();
   ooze_scroll_ensure_css ();
+  ooze_action_bar_ensure_css ();
   scenery_ensure_css ();
   self->background_settings = g_settings_new ("org.gnome.desktop.background");
   self->scenery_settings = g_settings_new ("org.ooze.scenery");
   self->session_settings = g_settings_new ("org.gnome.desktop.session");
   self->screensaver_settings = g_settings_new ("org.gnome.desktop.screensaver");
   self->page = SCENERY_PAGE_WALLPAPER;
+  scenery_load_pending (self);
 
   gtk_window_set_default_size (GTK_WINDOW (self), 880, 640);
   gtk_window_set_icon_name (GTK_WINDOW (self), "org.ooze.Scenery");
@@ -1093,6 +1175,14 @@ ooze_scenery_window_constructed (GObject *object)
   gtk_stack_add_named (GTK_STACK (self->stack),
                        scenery_build_screensaver_page (self), "screensaver");
   gtk_box_append (GTK_BOX (shell), self->stack);
+
+  self->action_bar = ooze_action_bar_new (&cancel_button, &apply_button);
+  g_signal_connect (cancel_button, "clicked",
+                    G_CALLBACK (on_cancel_clicked), self);
+  g_signal_connect (apply_button, "clicked",
+                    G_CALLBACK (on_apply_clicked), self);
+  gtk_box_append (GTK_BOX (shell), self->action_bar);
+
   shell_overlay = gtk_overlay_new ();
   gtk_overlay_set_child (GTK_OVERLAY (shell_overlay), shell);
   ooze_application_window_set_content (OOZE_APPLICATION_WINDOW (self),
@@ -1102,6 +1192,7 @@ ooze_scenery_window_constructed (GObject *object)
   scenery_refresh_selection (self);
   scenery_refresh_mode_selection (self);
   scenery_refresh_preview (self);
+  scenery_set_dirty (self, FALSE);
 
   self->flow_tick_id =
     gtk_widget_add_tick_callback (self->screensaver_preview,
