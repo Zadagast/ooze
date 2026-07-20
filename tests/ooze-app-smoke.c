@@ -136,6 +136,39 @@ assert_palette_resolves (GtkWidget *widget)
 }
 
 static void
+on_after_paint (GdkFrameClock *clock G_GNUC_UNUSED,
+                gpointer       user_data)
+{
+  *(gboolean *) user_data = TRUE;
+}
+
+/* Snapshotting before the first real frame races widget layout: overlays
+ * deep in the Gel chrome may not have an allocation yet, and GTK's
+ * "snapshot without allocation" warning is fatal under g_test. Wait for
+ * the frame clock to complete a paint so the whole tree is laid out. */
+static void
+wait_for_first_frame (GtkWindow *window)
+{
+  GdkFrameClock *clock;
+  gboolean painted = FALSE;
+  gulong handler;
+  gint64 deadline;
+
+  clock = gtk_widget_get_frame_clock (GTK_WIDGET (window));
+  g_assert_nonnull (clock);
+
+  handler = g_signal_connect (clock, "after-paint",
+                              G_CALLBACK (on_after_paint), &painted);
+  gdk_frame_clock_request_phase (clock, GDK_FRAME_CLOCK_PHASE_PAINT);
+
+  deadline = g_get_monotonic_time () + 10 * G_USEC_PER_SEC;
+  while (!painted && g_get_monotonic_time () < deadline)
+    g_main_context_iteration (NULL, FALSE);
+  g_signal_handler_disconnect (clock, handler);
+  g_assert_true (painted);
+}
+
+static void
 assert_window_renders (GtkApplication         *app,
                        AppWindowConstructor    constructor,
                        const char             *name)
@@ -161,6 +194,7 @@ assert_window_renders (GtkApplication         *app,
     g_main_context_iteration (NULL, FALSE);
 
   g_assert_true (gtk_widget_get_realized (GTK_WIDGET (window)));
+  wait_for_first_frame (window);
   child = gtk_window_get_child (window);
   g_assert_nonnull (child);
   g_assert_cmpint (gtk_widget_get_width (child), >, 0);

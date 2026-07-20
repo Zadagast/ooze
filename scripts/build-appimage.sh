@@ -84,9 +84,13 @@ cp -a "$BUILD_DIR"/libooze-kit.so* "$APPDIR/usr/lib/"
 # Runtime data (icons, logos, desktop files consumed via OOZE_DATA_DIR).
 cp -a "$ROOT/data/." "$APPDIR/usr/share/ooze/"
 
-# Host-facing desktop entry + icon for the AppImage itself.
-install -m644 "$ROOT/packaging/appimage/ooze.desktop" "$APPDIR/ooze.desktop"
-install -m644 "$ROOT/packaging/appimage/ooze.desktop" \
+# Host-facing desktop entry + icon for the AppImage itself. The version is
+# stamped from meson.build so the desktop file never drifts.
+MESON_VERSION="$(sed -n "s/.*version: '\\([^']*\\)'.*/\\1/p" "$ROOT/meson.build" | head -1)"
+sed "s/^X-AppImage-Version=.*/X-AppImage-Version=${MESON_VERSION:-unknown}/" \
+  "$ROOT/packaging/appimage/ooze.desktop" > "$APPDIR/ooze.desktop"
+chmod 644 "$APPDIR/ooze.desktop"
+install -m644 "$APPDIR/ooze.desktop" \
   "$APPDIR/usr/share/applications/ooze.desktop"
 
 # Prefer SVG as AppImage icon; also place under hicolor.
