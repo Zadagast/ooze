@@ -320,10 +320,8 @@ spot_ensure_css (void)
                                      /* ── Status bar ──
                                       * Surface is edge-flush; OozeKit insets only the label
                                       * (.ooze-surface-statusbar > *) for CSD corner clearance. */
-                                     ".spot-statusbar {"
-                                     "  background: none;"
-                                     "  color: @window_fg_color;"
-                                     "  opacity: 0.65;"
+                                     ".spot-status-count {"
+                                     "  color: alpha(@window_fg_color, 0.65);"
                                      "}"
 
                                      /* Content views share one flat plane under the toolbar. */
@@ -4099,13 +4097,7 @@ spot_window_constructed (GObject *object)
 
   gtk_paned_set_end_child (GTK_PANED (content_paned), self->content_stack);
 
-  statusbar = ooze_surface_new (OOZE_SURFACE_STATUSBAR, GTK_ORIENTATION_HORIZONTAL);
-  gtk_widget_add_css_class (statusbar, "spot-statusbar");
-  self->status_label = gtk_label_new ("");
-  gtk_label_set_xalign (GTK_LABEL (self->status_label), 0.0);
-  gtk_box_append (GTK_BOX (statusbar), self->status_label);
-
-  /* ── Path bar (Finder style, above the status bar) ── */
+  /* ── Bottom bar: breadcrumbs left, item count right, one strip ── */
   {
     GtkWidget *pathbar_surface;
     GtkWidget *pathbar_scroll;
@@ -4128,7 +4120,16 @@ spot_window_constructed (GObject *object)
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (pathbar_scroll),
                                    self->pathbar);
     gtk_box_append (GTK_BOX (pathbar_surface), pathbar_scroll);
+
+    self->status_label = gtk_label_new ("");
+    gtk_label_set_xalign (GTK_LABEL (self->status_label), 1.0);
+    gtk_widget_set_halign (self->status_label, GTK_ALIGN_END);
+    gtk_widget_set_margin_start (self->status_label, 12);
+    gtk_widget_add_css_class (self->status_label, "spot-status-count");
+    gtk_box_append (GTK_BOX (pathbar_surface), self->status_label);
+
     self->pathbar_surface = pathbar_surface;
+    statusbar = pathbar_surface;
   }
 
   /* Keep the toolbar in a horizontal scroller so its natural width
@@ -4153,7 +4154,6 @@ spot_window_constructed (GObject *object)
     gtk_box_append (GTK_BOX (shell), toolbar_scroll);
   }
   gtk_box_append (GTK_BOX (shell), content_paned);
-  gtk_box_append (GTK_BOX (shell), self->pathbar_surface);
   gtk_box_append (GTK_BOX (shell), statusbar);
 
   /* Set content directly – no OozeShadowBin grid wrapper needed. */
