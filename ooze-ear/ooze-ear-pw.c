@@ -231,11 +231,13 @@ on_node_info (void                      *data,
     desc = spa_dict_lookup (info->props, PW_KEY_NODE_NICK);
   if (!desc)
     desc = spa_dict_lookup (info->props, PW_KEY_NODE_NAME);
-  if (!desc)
-    desc = "Audio";
 
-  g_free (node->name);
-  node->name = g_strdup (desc);
+  /* Info events can carry partial props; never clobber a good name. */
+  if (desc && *desc)
+    {
+      g_free (node->name);
+      node->name = g_strdup (desc);
+    }
 
   {
     const char *nn = spa_dict_lookup (info->props, PW_KEY_NODE_NAME);
@@ -268,15 +270,16 @@ on_node_info (void                      *data,
 
   app = spa_dict_lookup (info->props, PW_KEY_APP_NAME);
   media = spa_dict_lookup (info->props, PW_KEY_MEDIA_NAME);
-  g_free (node->detail);
-  if (app && media)
-    node->detail = g_strdup_printf ("%s — %s", app, media);
-  else if (app)
-    node->detail = g_strdup (app);
-  else if (media)
-    node->detail = g_strdup (media);
-  else
-    node->detail = NULL;
+  if (app || media)
+    {
+      g_free (node->detail);
+      if (app && media)
+        node->detail = g_strdup_printf ("%s — %s", app, media);
+      else if (app)
+        node->detail = g_strdup (app);
+      else
+        node->detail = g_strdup (media);
+    }
 
   if (info->change_mask & PW_NODE_CHANGE_MASK_PARAMS)
     {
@@ -372,6 +375,8 @@ registry_global (void                  *data,
   node->mute = FALSE;
 
   desc = spa_dict_lookup (props, PW_KEY_NODE_DESCRIPTION);
+  if (!desc)
+    desc = spa_dict_lookup (props, PW_KEY_NODE_NICK);
   if (!desc)
     desc = spa_dict_lookup (props, PW_KEY_NODE_NAME);
   node->name = g_strdup (desc ? desc : "Audio");
@@ -857,6 +862,31 @@ ooze_ear_pw_set_default (OozeEarPw *self, uint32_t id)
                             PW_ID_CORE, key_configured, "Spa:String:JSON", json);
   pw_metadata_set_property ((struct pw_metadata *) self->metadata,
                             PW_ID_CORE, key_current, "Spa:String:JSON", json);
+
+  /* Choosing a device routes everything there: clear explicit per-stream
+   * pins so streams follow the new default instead of a stale target. */
+  {
+    GHashTableIter iter;
+    gpointer key, value;
+    OozeEarNodeKind stream_kind = (n->kind == OOZE_EAR_NODE_SINK)
+                                    ? OOZE_EAR_NODE_PLAYBACK
+                                    : OOZE_EAR_NODE_RECORD;
+
+    g_hash_table_iter_init (&iter, self->nodes);
+    while (g_hash_table_iter_next (&iter, &key, &value))
+      {
+        EarNode *stream = value;
+
+        if (stream->kind != stream_kind || !stream->target)
+          continue;
+
+        pw_metadata_set_property ((struct pw_metadata *) self->metadata,
+                                  stream->id, "target.object", NULL, NULL);
+        pw_metadata_set_property ((struct pw_metadata *) self->metadata,
+                                  stream->id, "target.node", NULL, NULL);
+        g_clear_pointer (&stream->target, g_free);
+      }
+  }
 
   if (n->kind == OOZE_EAR_NODE_SINK)
     {

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Mouse
+GenericName=Mouse Settings
+Comment=Pointer speed, acceleration, and scrolling
+Exec=ooze-mouse
+Icon=input-mouse
+Terminal=false
+Type=Application
+Categories=Settings;GTK;
+StartupWMClass=org.ooze.Mouse
