@@ -153,9 +153,14 @@ ooze_segment_group_init (OozeSegmentGroup *self)
   self->segments = g_ptr_array_new ();
   self->active = -1;
 
+  /* Even margins center the track on the MAIN BAR glyph line
+   * (OOZE_ICON_SIZE_TOOLBAR), so the caption below lands on the same
+   * baseline as the icon-over-caption toolbar tiles beside it. */
   self->track = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   gtk_widget_add_css_class (self->track, "ooze-segment-track");
   gtk_widget_set_halign (self->track, GTK_ALIGN_CENTER);
+  gtk_widget_set_margin_top (self->track, (OOZE_ICON_SIZE_TOOLBAR - 26) / 2);
+  gtk_widget_set_margin_bottom (self->track, (OOZE_ICON_SIZE_TOOLBAR - 26) / 2);
   gtk_box_append (GTK_BOX (self), self->track);
 
   self->caption = gtk_label_new ("");

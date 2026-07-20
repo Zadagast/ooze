@@ -2640,6 +2640,9 @@ static const char * const spot_icon_view_list[] = {
 static const char * const spot_icon_view_column[] = {
   "view-column", "view-dual", "view-column-symbolic", "view-dual-symbolic", NULL
 };
+static const char * const spot_icon_computer[] = {
+  "computer", "computer-symbolic", "drive-harddisk", NULL
+};
 static const char * const spot_icon_home[] = {
   "user-home", "go-home", NULL
 };
@@ -4005,16 +4008,39 @@ spot_create_toolbar (SpotWindow *self)
 
   ooze_toolbar_add_separator (toolbar);
 
-  /* Center flow, Cheetah Finder style: segmented View control sits in the
-   * middle of the strip between two expanding spacers. */
-  ooze_toolbar_add_spacer (toolbar);
-
+  /* Cheetah Finder flow: everything runs from the left on one glyph line —
+   * Back/Forward · View · place shortcuts — captions on a shared baseline. */
   view = ooze_toolbar_add_group (toolbar);
   self->view_segment = ooze_segment_group_new ("View");
   ooze_segment_group_add (self->view_segment, spot_icon_view_grid, "Grid view");
   ooze_segment_group_add (self->view_segment, spot_icon_view_list, "List view");
   ooze_segment_group_add (self->view_segment, spot_icon_view_column, "Columns view");
   gtk_box_append (GTK_BOX (view), self->view_segment);
+
+  ooze_toolbar_add_separator (toolbar);
+
+  {
+    GtkWidget *places = ooze_toolbar_add_group (toolbar);
+    GtkWidget *computer;
+    GtkWidget *home;
+    GtkWidget *apps;
+
+    computer = spot_create_toolbar_button (spot_icon_computer, "Computer",
+                                           "Computer", FALSE, FALSE);
+    gtk_actionable_set_action_name (GTK_ACTIONABLE (computer),
+                                    "win.go-computer");
+    home = spot_create_toolbar_button (spot_icon_home, "Home",
+                                       "Home folder", FALSE, FALSE);
+    gtk_actionable_set_action_name (GTK_ACTIONABLE (home), "win.go-home");
+    apps = spot_create_toolbar_button (spot_icon_applications, "Applications",
+                                       "Installed applications", FALSE, FALSE);
+    gtk_actionable_set_action_name (GTK_ACTIONABLE (apps),
+                                    "win.go-applications");
+
+    gtk_box_append (GTK_BOX (places), computer);
+    gtk_box_append (GTK_BOX (places), home);
+    gtk_box_append (GTK_BOX (places), apps);
+  }
 
   ooze_toolbar_add_spacer (toolbar);
 
