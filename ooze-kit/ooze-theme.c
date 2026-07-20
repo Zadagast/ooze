@@ -68,27 +68,30 @@ ooze_theme_connect_dark_notify_idle (gpointer user_data)
 {
   OozeThemeNotify *notify = user_data;
 
-  if (style_manager_ready)
-    {
-      if (notify->target)
-        g_signal_connect_object (style_manager,
-                                 "notify::dark",
-                                 notify->callback,
-                                 notify->target,
-                                 notify->swapped ? G_CONNECT_SWAPPED : 0);
-      else
-        g_signal_connect (style_manager, "notify::dark",
-                          notify->callback, NULL);
+  /* The style manager itself initializes from an idle; if it has not run
+   * yet, try again on a later pass instead of dropping the subscription. */
+  if (!style_manager_ready)
+    return G_SOURCE_CONTINUE;
 
-      if (notify->swapped)
-        ((void (*) (gpointer)) notify->callback) (notify->target);
-      else if (notify->target)
-        ((void (*) (gpointer, GParamSpec *, gpointer)) notify->callback)
-          (style_manager, NULL, notify->target);
-      else
-        ((void (*) (gpointer, GParamSpec *)) notify->callback)
-          (style_manager, NULL);
-    }
+  if (notify->target)
+    g_signal_connect_object (style_manager,
+                             "notify::dark",
+                             notify->callback,
+                             notify->target,
+                             notify->swapped ? G_CONNECT_SWAPPED : 0);
+  else
+    g_signal_connect (style_manager, "notify::dark",
+                      notify->callback, NULL);
+
+  if (notify->swapped)
+    ((void (*) (gpointer)) notify->callback) (notify->target);
+  else if (notify->target)
+    ((void (*) (gpointer, GParamSpec *, gpointer)) notify->callback)
+      (style_manager, NULL, notify->target);
+  else
+    ((void (*) (gpointer, GParamSpec *)) notify->callback)
+      (style_manager, NULL);
+
   ooze_theme_notify_free (notify);
   return G_SOURCE_REMOVE;
 }
@@ -185,19 +188,21 @@ ooze_theme_ensure (void)
     GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 10);
   g_object_unref (p);
 
-  /* Aqua sliding-window scrollbars (always-visible proportional thumbs). */
-  ooze_scroll_ensure_css ();
-
   /* Let GtkPopoverMenu grow to monitor height; scroll only when needed. */
   map_signal = g_signal_lookup ("map", GTK_TYPE_POPOVER_MENU);
   if (map_signal != 0)
     g_signal_add_emission_hook (map_signal, 0,
                                 ooze_theme_popover_map_hook, NULL, NULL);
 
+  /* Schedule the style-manager init BEFORE any dark-notify subscriber so
+   * the ready flag is set by the time their (FIFO) idles run. */
   g_idle_add_full (G_PRIORITY_LOW,
                    ooze_theme_style_manager_init_idle,
                    NULL,
                    NULL);
+
+  /* Aqua sliding-window scrollbars (always-visible proportional thumbs). */
+  ooze_scroll_ensure_css ();
   loaded = TRUE;
 }
 
