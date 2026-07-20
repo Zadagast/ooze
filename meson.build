@@ -1,5 +1,5 @@
 project('ooze', 'c', 'cpp',
-  version: '0.4.2',
+  version: '0.4.3',
   meson_version: '>= 1.0.0',
   default_options: [
     'c_std=c11',
