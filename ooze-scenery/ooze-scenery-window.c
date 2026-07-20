@@ -42,6 +42,7 @@ struct _OozeSceneryWindow
   GtkWidget *nav_screenlock;
   GtkWidget *custom_tiles;
   GtkWidget *action_bar;
+  GtkWidget *choose_button;
   GdkPixbuf *selected_pixbuf;
   /* Staged (uncommitted) wallpaper edit — written to GSettings on Apply.
    * Screen Lock settings are instant-apply via g_settings_bind. */
@@ -172,7 +173,27 @@ scenery_ensure_css (void)
     "  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);"
     "}"
     ".scenery-settings-card label { margin-right: 12px; }"
-    ".scenery-unit { color: alpha(currentColor, 0.55); }");
+    ".scenery-unit { color: alpha(currentColor, 0.55); }"
+    ".scenery-rows {"
+    "  background: alpha(@card_bg_color, 0.72);"
+    "  border-radius: 8px;"
+    "  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10);"
+    "  padding: 0;"
+    "}"
+    ".scenery-rows > row {"
+    "  padding: 10px 14px;"
+    "  background: none;"
+    "  border-radius: 0;"
+    "}"
+    ".scenery-rows > row:not(:last-child) {"
+    "  border-bottom: 1px solid alpha(currentColor, 0.10);"
+    "}"
+    ".scenery-rows > row:first-child { border-radius: 8px 8px 0 0; }"
+    ".scenery-rows > row:last-child { border-radius: 0 0 8px 8px; }"
+    ".scenery-hint {"
+    "  color: alpha(currentColor, 0.55);"
+    "  font-size: 0.88em;"
+    "}");
   gtk_style_context_add_provider_for_display (
     display, GTK_STYLE_PROVIDER (provider),
     GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -825,12 +846,42 @@ on_choose_clicked (GtkButton *button G_GNUC_UNUSED,
 }
 
 static GtkWidget *
+scenery_settings_row (const char *title,
+                      const char *subtitle,
+                      GtkWidget  *control)
+{
+  GtkWidget *row = gtk_list_box_row_new ();
+  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+  GtkWidget *text = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
+  GtkWidget *label = gtk_label_new (title);
+
+  gtk_label_set_xalign (GTK_LABEL (label), 0);
+  gtk_box_append (GTK_BOX (text), label);
+  if (subtitle)
+    {
+      GtkWidget *sub = gtk_label_new (subtitle);
+      gtk_label_set_xalign (GTK_LABEL (sub), 0);
+      gtk_label_set_wrap (GTK_LABEL (sub), TRUE);
+      gtk_widget_add_css_class (sub, "scenery-hint");
+      gtk_box_append (GTK_BOX (text), sub);
+    }
+  gtk_widget_set_hexpand (text, TRUE);
+  gtk_widget_set_valign (text, GTK_ALIGN_CENTER);
+  gtk_widget_set_valign (control, GTK_ALIGN_CENTER);
+  gtk_box_append (GTK_BOX (box), text);
+  gtk_box_append (GTK_BOX (box), control);
+  gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), box);
+  gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (row), FALSE);
+  return row;
+}
+
+static GtkWidget *
 scenery_build_screenlock_page (OozeSceneryWindow *self)
 {
   GtkWidget *page = gtk_box_new (GTK_ORIENTATION_VERTICAL, 12);
   GtkWidget *scroll = gtk_scrolled_window_new ();
   GtkWidget *content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
-  GtkWidget *settings = gtk_grid_new ();
+  GtkWidget *rows;
   GtkWidget *label;
   GtkWidget *hint;
 
@@ -842,43 +893,56 @@ scenery_build_screenlock_page (OozeSceneryWindow *self)
   gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), content);
   gtk_box_append (GTK_BOX (page), scroll);
 
-  hint = gtk_label_new ("When the session is idle the desktop fades to "
-                        "black, then locks. Display power saving turns "
-                        "the screen off. Choose Never to disable the "
-                        "fade. Changes take effect immediately.");
-  gtk_label_set_wrap (GTK_LABEL (hint), TRUE);
-  gtk_label_set_xalign (GTK_LABEL (hint), 0);
-  gtk_box_append (GTK_BOX (content), hint);
+  gtk_widget_set_halign (content, GTK_ALIGN_CENTER);
+  gtk_widget_set_size_request (content, 520, -1);
 
-  label = scenery_section_label ("Timings");
+  label = scenery_section_label ("When the computer is idle");
   gtk_box_append (GTK_BOX (content), label);
-  gtk_widget_add_css_class (settings, "scenery-settings-card");
-  gtk_grid_set_row_spacing (GTK_GRID (settings), 8);
-  gtk_grid_set_column_spacing (GTK_GRID (settings), 14);
-  gtk_widget_set_hexpand (settings, TRUE);
+
+  rows = gtk_list_box_new ();
+  gtk_list_box_set_selection_mode (GTK_LIST_BOX (rows),
+                                   GTK_SELECTION_NONE);
+  gtk_widget_add_css_class (rows, "scenery-rows");
+
   self->start_after =
     scenery_duration_dropdown_new (self->session_settings, "idle-delay",
                                    scenery_fade_choices,
                                    G_N_ELEMENTS (scenery_fade_choices));
-  label = gtk_label_new ("Fade to black after");
-  gtk_label_set_xalign (GTK_LABEL (label), 0);
-  gtk_grid_attach (GTK_GRID (settings), label, 0, 0, 1, 1);
-  gtk_grid_attach (GTK_GRID (settings), self->start_after, 1, 0, 1, 1);
-  gtk_widget_set_hexpand (self->start_after, FALSE);
-  self->lock_enabled = gtk_check_button_new_with_label ("Lock screen");
+  gtk_list_box_append (GTK_LIST_BOX (rows),
+                       scenery_settings_row ("Fade to black after",
+                                             "Choose Never to keep the "
+                                             "desktop always on",
+                                             self->start_after));
+
+  self->lock_enabled = gtk_switch_new ();
   g_settings_bind (self->screensaver_settings, "lock-enabled",
                    self->lock_enabled, "active",
                    G_SETTINGS_BIND_DEFAULT);
-  gtk_grid_attach (GTK_GRID (settings), self->lock_enabled, 0, 1, 2, 1);
+  gtk_list_box_append (GTK_LIST_BOX (rows),
+                       scenery_settings_row ("Lock screen",
+                                             "Require your password after "
+                                             "the fade",
+                                             self->lock_enabled));
+
   self->lock_after =
     scenery_duration_dropdown_new (self->screensaver_settings, "lock-delay",
                                    scenery_lock_choices,
                                    G_N_ELEMENTS (scenery_lock_choices));
-  label = gtk_label_new ("Lock after");
-  gtk_label_set_xalign (GTK_LABEL (label), 0);
-  gtk_grid_attach (GTK_GRID (settings), label, 0, 2, 1, 1);
-  gtk_grid_attach (GTK_GRID (settings), self->lock_after, 1, 2, 1, 1);
-  gtk_box_append (GTK_BOX (content), settings);
+  g_object_bind_property (self->lock_enabled, "active",
+                          self->lock_after, "sensitive",
+                          G_BINDING_SYNC_CREATE);
+  gtk_list_box_append (GTK_LIST_BOX (rows),
+                       scenery_settings_row ("Lock after the fade",
+                                             NULL, self->lock_after));
+
+  gtk_box_append (GTK_BOX (content), rows);
+
+  hint = gtk_label_new ("Changes take effect immediately. Display power "
+                        "saving turns the screen off separately.");
+  gtk_label_set_wrap (GTK_LABEL (hint), TRUE);
+  gtk_label_set_xalign (GTK_LABEL (hint), 0);
+  gtk_widget_add_css_class (hint, "scenery-hint");
+  gtk_box_append (GTK_BOX (content), hint);
   return page;
 }
 
@@ -890,6 +954,13 @@ scenery_show_page (OozeSceneryWindow *self,
   gtk_stack_set_visible_child_name (
     GTK_STACK (self->stack),
     page == SCENERY_PAGE_SCREENLOCK ? "screenlock" : "wallpaper");
+  /* Wallpaper is staged Apply/Cancel; Screen Lock applies instantly. */
+  if (self->action_bar)
+    gtk_widget_set_visible (self->action_bar,
+                            page == SCENERY_PAGE_WALLPAPER);
+  if (self->choose_button)
+    gtk_widget_set_visible (self->choose_button,
+                            page == SCENERY_PAGE_WALLPAPER);
   ooze_button_set_toggled (self->nav_wallpaper,
                            page == SCENERY_PAGE_WALLPAPER);
   ooze_button_set_toggled (self->nav_screenlock,
@@ -956,7 +1027,6 @@ ooze_scenery_window_constructed (GObject *object)
   GtkWidget *shell_overlay;
   GtkWidget *toolbar;
   GtkWidget *toolbar_group;
-  GtkWidget *choose_button;
   GtkWidget *apply_button;
   GtkWidget *cancel_button;
   GMenu *help;
@@ -993,12 +1063,12 @@ ooze_scenery_window_constructed (GObject *object)
   gtk_box_append (GTK_BOX (toolbar_group), self->nav_screenlock);
   ooze_toolbar_add_separator (toolbar);
   toolbar_group = ooze_toolbar_add_group (toolbar);
-  choose_button =
+  self->choose_button =
     ooze_button_new_toolbar (choose_icons, "Choose…",
                              "Choose an image from your files");
-  g_signal_connect (choose_button, "clicked",
+  g_signal_connect (self->choose_button, "clicked",
                     G_CALLBACK (on_choose_clicked), self);
-  gtk_box_append (GTK_BOX (toolbar_group), choose_button);
+  gtk_box_append (GTK_BOX (toolbar_group), self->choose_button);
   ooze_toolbar_add_spacer (toolbar);
   gtk_box_append (GTK_BOX (shell), toolbar);
 
