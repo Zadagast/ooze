@@ -813,6 +813,37 @@ ooze_screensaver_curtain_fade (OozePlugin *plugin,
   g_object_unref (fade);
 }
 
+/* While the opaque curtain fully obscures the desktop, Mutter stops
+ * painting the windows behind it. Force them to repaint as the curtain
+ * lifts so apps fade back in with the curtain instead of popping in once
+ * it is gone. */
+static void
+ooze_screensaver_repaint_desktop (OozePlugin *plugin)
+{
+  MetaDisplay *display;
+  MetaCompositor *compositor;
+  ClutterActor *window_group;
+  ClutterActor *child;
+
+  display = meta_plugin_get_display (META_PLUGIN (plugin));
+  if (!display)
+    return;
+
+  compositor = meta_display_get_compositor (display);
+  if (!compositor)
+    return;
+
+  window_group = meta_compositor_get_window_group (compositor);
+  if (!window_group)
+    return;
+
+  clutter_actor_queue_redraw (window_group);
+  for (child = clutter_actor_get_first_child (window_group);
+       child != NULL;
+       child = clutter_actor_get_next_sibling (child))
+    clutter_actor_queue_redraw (child);
+}
+
 static gboolean
 ooze_screensaver_reveal_saver (gpointer user_data)
 {
@@ -843,6 +874,7 @@ ooze_screensaver_finish_dismiss (gpointer user_data)
       clutter_actor_set_opacity (plugin->screensaver_overlay, 0);
     }
 
+  ooze_screensaver_repaint_desktop (plugin);
   ooze_screensaver_curtain_fade (plugin, 255u, 0u);
   if (plugin->screensaver_fade_id)
     g_source_remove (plugin->screensaver_fade_id);

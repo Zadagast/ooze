@@ -1020,45 +1020,81 @@ scenery_mode_tile (OozeSceneryWindow *self,
   return button;
 }
 
+/* Curated set of XScreenSaver modules Ooze offers, with display labels.
+ * Binary names are matched against what is actually installed. */
+typedef struct
+{
+  const char *bin;
+  const char *label;
+} OozeCuratedHack;
+
+static const OozeCuratedHack ooze_curated_hacks[] = {
+  { "glmatrix",     "GLMatrix" },
+  { "galaxy",       "Galaxy" },
+  { "bsod",         "BSOD" },
+  { "atlantis",     "Atlantis" },
+  { "flurry",       "Flurry" },
+  { "apple2",       "Apple ][" },
+  { "xanalogtv",    "XAnalogTV" },
+  { "starwars",     "Star Wars" },
+  { "phosphor",     "Phosphor" },
+  { "sonar",        "Sonar" },
+  { "deluxe",       "Deluxe" },
+  { "anemone",      "Anemone" },
+  { "distort",      "Distort" },
+  { "interference", "Interference" },
+  { "deco",         "Deco" },
+  { "crackberg",    "Crackberg" },
+  { "endgame",      "Endgame" },
+  { "hyphae",       "Hyphae" },
+  { "jigsaw",       "Jigsaw" },
+  { "lavalite",     "Lavalite" },
+};
+
+static const char *ooze_hack_dirs[] = {
+  "/usr/libexec/xscreensaver",
+  "/usr/lib/xscreensaver",
+  "/usr/lib/misc/xscreensaver",
+};
+
+static gboolean
+scenery_hack_installed (const char *bin)
+{
+  gsize i;
+
+  for (i = 0; i < G_N_ELEMENTS (ooze_hack_dirs); i++)
+    {
+      g_autofree char *path =
+        g_build_filename (ooze_hack_dirs[i], bin, NULL);
+
+      if (g_file_test (path, G_FILE_TEST_IS_EXECUTABLE))
+        return TRUE;
+    }
+  return FALSE;
+}
+
+static const char *
+scenery_hack_label (const char *bin)
+{
+  gsize i;
+
+  for (i = 0; i < G_N_ELEMENTS (ooze_curated_hacks); i++)
+    if (g_strcmp0 (ooze_curated_hacks[i].bin, bin) == 0)
+      return ooze_curated_hacks[i].label;
+  return bin;
+}
+
+/* Returns the curated modules that are installed, in curated order. */
 static GStrv
 scenery_list_hacks (void)
 {
-  static const char *dirs[] = {
-    "/usr/libexec/xscreensaver",
-    "/usr/lib/xscreensaver",
-    "/usr/lib/misc/xscreensaver",
-  };
   g_autoptr (GStrvBuilder) builder = g_strv_builder_new ();
-  g_autoptr (GPtrArray) names =
-    g_ptr_array_new_with_free_func (g_free);
   gsize i;
-  guint j;
 
-  for (i = 0; i < G_N_ELEMENTS (dirs); i++)
-    {
-      g_autoptr (GDir) dir = g_dir_open (dirs[i], 0, NULL);
-      const char *entry;
+  for (i = 0; i < G_N_ELEMENTS (ooze_curated_hacks); i++)
+    if (scenery_hack_installed (ooze_curated_hacks[i].bin))
+      g_strv_builder_add (builder, ooze_curated_hacks[i].bin);
 
-      if (!dir)
-        continue;
-      while ((entry = g_dir_read_name (dir)) != NULL)
-        {
-          g_autofree char *path = g_build_filename (dirs[i], entry, NULL);
-          guint k;
-          gboolean seen = FALSE;
-
-          if (!g_file_test (path, G_FILE_TEST_IS_EXECUTABLE))
-            continue;
-          for (k = 0; k < names->len && !seen; k++)
-            seen = g_strcmp0 (g_ptr_array_index (names, k), entry) == 0;
-          if (!seen)
-            g_ptr_array_add (names, g_strdup (entry));
-        }
-    }
-
-  g_ptr_array_sort_values (names, (GCompareFunc) g_strcmp0);
-  for (j = 0; j < names->len; j++)
-    g_strv_builder_add (builder, g_ptr_array_index (names, j));
   return g_strv_builder_end (builder);
 }
 
@@ -1117,8 +1153,15 @@ scenery_build_hack_row (OozeSceneryWindow *self)
   gtk_box_append (GTK_BOX (row), hint);
 
   self->hack_names = gtk_string_list_new ((const char * const *) hacks);
-  self->hack_dropdown =
-    gtk_drop_down_new (G_LIST_MODEL (self->hack_names), NULL);
+  {
+    GtkStringList *labels = gtk_string_list_new (NULL);
+    guint i;
+
+    for (i = 0; hacks[i] != NULL; i++)
+      gtk_string_list_append (labels, scenery_hack_label (hacks[i]));
+    self->hack_dropdown =
+      gtk_drop_down_new (G_LIST_MODEL (labels), NULL);
+  }
   gtk_drop_down_set_enable_search (GTK_DROP_DOWN (self->hack_dropdown),
                                    TRUE);
   gtk_drop_down_set_selected (GTK_DROP_DOWN (self->hack_dropdown),

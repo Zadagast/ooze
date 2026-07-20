@@ -7,7 +7,7 @@ Architecture: amd64
 Maintainer: Ooze Desktop <ooze@localhost>
 Homepage: https://github.com/Zadagast/ooze
 Depends: mutter, libmutter-18-0, xwayland, dbus-user-session, libc6, xdg-desktop-portal, xdg-desktop-portal-gtk, libgtk-4-1, libadwaita-1-0, libvte-2.91-gtk4-0, libgtop-2.0-11, libudisks2-0, libpipewire-0.3-0t64, pipewire, wireplumber, libgdk-pixbuf-2.0-0, libcairo2, libpango-1.0-0, libpangocairo-1.0-0, libx11-6, libwayland-server0, libglib2.0-0t64, libpam0g, polkitd, libpolkit-agent-1-0, libpolkit-gobject-1-0, libb64-0d, libcurl4t64, libdeflate0, libevent-2.1-7t64, libgcc-s1, libminiupnpc21, libnatpmp1t64, libpsl5t64, libssl3t64, libstdc++6
-Recommends: elementary-xfce-icon-theme, ubuntu-wallpapers, qt6-gtk-platformtheme, qt5-gtk-platformtheme, gnome-keyring, appmenu-gtk3-module, appmenu-gtk-module-common, appmenu-registrar, libayatana-appindicator3-1, inotify-tools, x11-xserver-utils, xscreensaver-data, xscreensaver-data-extra
+Recommends: elementary-xfce-icon-theme, ubuntu-wallpapers, qt6-gtk-platformtheme, qt5-gtk-platformtheme, gnome-keyring, appmenu-gtk3-module, appmenu-gtk-module-common, appmenu-registrar, libayatana-appindicator3-1, inotify-tools, x11-xserver-utils, xscreensaver-data, xscreensaver-data-extra, xscreensaver-gl, xscreensaver-gl-extra
 Suggests: xsettingsd
 Description: Ooze Wayland desktop (Mutter 18)
  Ooze is a Mutter-based desktop shell with Spot, Command, King, and related
