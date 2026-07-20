@@ -2870,6 +2870,9 @@ spot_create_column_list (SpotWindow *self,
   gtk_widget_add_css_class (scrolled, "spot-column");
   /* Flush gutter: only the candy thumb shows, so columns sit snug. */
   gtk_widget_add_css_class (scrolled, "ooze-scroll-flush");
+  /* Overlay: the thumb floats on the column's right edge instead of
+   * reserving a lane, so the next column kisses this one. */
+  gtk_scrolled_window_set_overlay_scrolling (GTK_SCROLLED_WINDOW (scrolled), TRUE);
 
   list = gtk_list_box_new ();
   gtk_list_box_set_selection_mode (GTK_LIST_BOX (list), GTK_SELECTION_SINGLE);
