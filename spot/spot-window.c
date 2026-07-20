@@ -14,6 +14,7 @@
 #include "ooze-pinline.h"
 #include "ooze-scroll.h"
 #include "ooze-popover.h"
+#include "ooze-segment.h"
 
 #include <adwaita.h>
 #include <string.h>
@@ -84,9 +85,9 @@ struct _SpotWindow
   GtkWidget *pathbar_surface;
   GtkWidget *back_button;
   GtkWidget *forward_button;
-  GtkWidget *grid_view_button;
-  GtkWidget *list_view_button;
-  GtkWidget *column_view_button;
+  GtkWidget *view_segment;
+  char      *search_text;
+  GtkFilter *list_filter;
   GtkWidget *new_folder_popover;
   GtkWidget *new_folder_entry;
   GtkWidget *context_menu;
@@ -392,6 +393,7 @@ static void spot_navigate_to_path_string (SpotWindow *self,
 static void spot_navigate_to (SpotWindow *self, GFile *dir, gboolean push_history);
 static void spot_open_file (GFile *file);
 static void spot_rebuild_columns (SpotWindow *self);
+static gboolean spot_list_filter_func (gpointer item, gpointer user_data);
 static gint spot_compare_file_info (gconstpointer a, gconstpointer b);
 static void spot_update_action_states (SpotWindow *self);
 static void spot_install_actions (SpotWindow *self);
@@ -2535,9 +2537,18 @@ spot_create_list_view (SpotWindow *self)
   gtk_column_view_append_column (GTK_COLUMN_VIEW (self->list_view), column);
   g_object_unref (column);
 
-  sort_model = gtk_sort_list_model_new (
-    G_LIST_MODEL (g_object_ref (self->list_store)),
-    g_object_ref (gtk_column_view_get_sorter (GTK_COLUMN_VIEW (self->list_view))));
+  {
+    GtkFilterListModel *filter_model;
+
+    self->list_filter =
+      GTK_FILTER (gtk_custom_filter_new (spot_list_filter_func, self, NULL));
+    filter_model = gtk_filter_list_model_new (
+      G_LIST_MODEL (g_object_ref (self->list_store)),
+      g_object_ref (self->list_filter));
+    sort_model = gtk_sort_list_model_new (
+      G_LIST_MODEL (filter_model),
+      g_object_ref (gtk_column_view_get_sorter (GTK_COLUMN_VIEW (self->list_view))));
+  }
   selection = gtk_single_selection_new (G_LIST_MODEL (sort_model));
   gtk_single_selection_set_autoselect (selection, FALSE);
   gtk_column_view_set_model (GTK_COLUMN_VIEW (self->list_view),
@@ -2567,15 +2578,11 @@ spot_create_list_view (SpotWindow *self)
 static void
 spot_set_view_mode (SpotWindow *self, SpotViewMode mode)
 {
-  GtkWidget *peers[3];
   const char *page;
   int active;
 
   self->view_mode = mode;
 
-  peers[0] = self->grid_view_button;
-  peers[1] = self->list_view_button;
-  peers[2] = self->column_view_button;
   switch (mode)
     {
     case SPOT_VIEW_LIST:    active = 1; page = "list";    break;
@@ -2583,7 +2590,8 @@ spot_set_view_mode (SpotWindow *self, SpotViewMode mode)
     case SPOT_VIEW_GRID:
     default:                active = 0; page = "grid";    break;
     }
-  ooze_button_set_exclusive (peers, 3, active);
+  if (self->view_segment)
+    ooze_segment_group_set_active (self->view_segment, active);
 
   gtk_stack_set_visible_child_name (
       GTK_STACK (self->content_stack), page);
@@ -2597,21 +2605,16 @@ spot_set_view_mode (SpotWindow *self, SpotViewMode mode)
 }
 
 static void
-on_grid_view_clicked (GtkButton *btn G_GNUC_UNUSED, SpotWindow *self)
+on_view_segment_changed (GtkWidget  *segment G_GNUC_UNUSED,
+                         int         index,
+                         SpotWindow *self)
 {
-  spot_set_view_mode (self, SPOT_VIEW_GRID);
-}
+  static const SpotViewMode modes[] = {
+    SPOT_VIEW_GRID, SPOT_VIEW_LIST, SPOT_VIEW_COLUMNS
+  };
 
-static void
-on_list_view_clicked (GtkButton *btn G_GNUC_UNUSED, SpotWindow *self)
-{
-  spot_set_view_mode (self, SPOT_VIEW_LIST);
-}
-
-static void
-on_column_view_clicked (GtkButton *btn G_GNUC_UNUSED, SpotWindow *self)
-{
-  spot_set_view_mode (self, SPOT_VIEW_COLUMNS);
+  if (index >= 0 && index < (int) G_N_ELEMENTS (modes))
+    spot_set_view_mode (self, modes[index]);
 }
 
 static GtkWidget *
@@ -3725,6 +3728,10 @@ spot_navigate_to (SpotWindow *self,
   else
     spot_set_current_dir (self, g_object_ref (dir));
 
+  /* Search is scoped to the folder being viewed — leaving it resets it. */
+  if (self->search_entry && self->search_text && self->search_text[0])
+    gtk_editable_set_text (GTK_EDITABLE (self->search_entry), "");
+
   spot_refresh (self);
 }
 
@@ -3925,6 +3932,58 @@ spot_create_sidebar (SpotWindow *self)
   return bin;
 }
 
+/* ── Folder-scoped search (filters the current views in place) ──────── */
+
+static gboolean
+spot_search_visible (SpotWindow *self,
+                     GFileInfo  *info)
+{
+  g_autofree char *hay = NULL;
+  g_autofree char *needle = NULL;
+
+  if (!self->search_text || !self->search_text[0] || !info)
+    return TRUE;
+
+  hay = g_utf8_casefold (g_file_info_get_display_name (info), -1);
+  needle = g_utf8_casefold (self->search_text, -1);
+  return strstr (hay, needle) != NULL;
+}
+
+static gboolean
+spot_grid_filter_func (GtkFlowBoxChild *child,
+                       gpointer         user_data)
+{
+  SpotWindow *self = user_data;
+  GtkWidget  *inner = gtk_flow_box_child_get_child (child);
+
+  if (!inner || g_object_get_data (G_OBJECT (inner), "spot-loading"))
+    return TRUE;
+
+  return spot_search_visible (self,
+                              g_object_get_data (G_OBJECT (inner),
+                                                 "spot-info"));
+}
+
+static gboolean
+spot_list_filter_func (gpointer item,
+                       gpointer user_data)
+{
+  return spot_search_visible (user_data, G_FILE_INFO (item));
+}
+
+static void
+on_search_changed (GtkEditable *editable,
+                   SpotWindow  *self)
+{
+  g_free (self->search_text);
+  self->search_text = g_strdup (gtk_editable_get_text (editable));
+
+  if (self->grid_flow)
+    gtk_flow_box_invalidate_filter (GTK_FLOW_BOX (self->grid_flow));
+  if (self->list_filter)
+    gtk_filter_changed (self->list_filter, GTK_FILTER_CHANGE_DIFFERENT);
+}
+
 static GtkWidget *
 spot_create_toolbar (SpotWindow *self)
 {
@@ -3946,21 +4005,22 @@ spot_create_toolbar (SpotWindow *self)
 
   ooze_toolbar_add_separator (toolbar);
 
+  /* Center flow, Cheetah Finder style: segmented View control sits in the
+   * middle of the strip between two expanding spacers. */
+  ooze_toolbar_add_spacer (toolbar);
+
   view = ooze_toolbar_add_group (toolbar);
-  self->grid_view_button =
-    spot_create_toolbar_button (spot_icon_view_grid, "Grid", "Grid view", TRUE, TRUE);
-  self->list_view_button =
-    spot_create_toolbar_button (spot_icon_view_list, "List", "List view", TRUE, FALSE);
-  self->column_view_button =
-    spot_create_toolbar_button (spot_icon_view_column, "Columns", "Columns view", TRUE, FALSE);
-  gtk_box_append (GTK_BOX (view), self->grid_view_button);
-  gtk_box_append (GTK_BOX (view), self->list_view_button);
-  gtk_box_append (GTK_BOX (view), self->column_view_button);
+  self->view_segment = ooze_segment_group_new ("View");
+  ooze_segment_group_add (self->view_segment, spot_icon_view_grid, "Grid view");
+  ooze_segment_group_add (self->view_segment, spot_icon_view_list, "List view");
+  ooze_segment_group_add (self->view_segment, spot_icon_view_column, "Columns view");
+  gtk_box_append (GTK_BOX (view), self->view_segment);
 
   ooze_toolbar_add_spacer (toolbar);
 
   self->search_entry = gtk_entry_new ();
-  gtk_entry_set_placeholder_text (GTK_ENTRY (self->search_entry), "Search");
+  gtk_entry_set_placeholder_text (GTK_ENTRY (self->search_entry),
+                                  "Search this folder");
   gtk_widget_add_css_class (self->search_entry, "ooze-toolbar-search");
   gtk_widget_add_css_class (self->search_entry, "spot-search");
   gtk_widget_set_valign (self->search_entry, GTK_ALIGN_CENTER);
@@ -3970,9 +4030,10 @@ spot_create_toolbar (SpotWindow *self)
 
   g_signal_connect (self->back_button, "clicked", G_CALLBACK (on_back_clicked), self);
   g_signal_connect (self->forward_button, "clicked", G_CALLBACK (on_forward_clicked), self);
-  g_signal_connect (self->grid_view_button, "clicked", G_CALLBACK (on_grid_view_clicked), self);
-  g_signal_connect (self->list_view_button, "clicked", G_CALLBACK (on_list_view_clicked), self);
-  g_signal_connect (self->column_view_button, "clicked", G_CALLBACK (on_column_view_clicked), self);
+  g_signal_connect (self->view_segment, "changed",
+                    G_CALLBACK (on_view_segment_changed), self);
+  g_signal_connect (self->search_entry, "changed",
+                    G_CALLBACK (on_search_changed), self);
 
   return toolbar;
 }
@@ -4044,6 +4105,8 @@ spot_window_constructed (GObject *object)
   gtk_widget_set_vexpand (self->grid_scrolled, TRUE);
 
   self->grid_flow = gtk_flow_box_new ();
+  gtk_flow_box_set_filter_func (GTK_FLOW_BOX (self->grid_flow),
+                                spot_grid_filter_func, self, NULL);
   gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (self->grid_flow),
                                    GTK_SELECTION_SINGLE);
   gtk_flow_box_set_activate_on_single_click (GTK_FLOW_BOX (self->grid_flow), FALSE);
@@ -4184,6 +4247,8 @@ spot_window_dispose (GObject *object)
 
   spot_spring_cancel (self);
   spot_grid_enumeration_cancel (self);
+  g_clear_pointer (&self->search_text, g_free);
+  g_clear_object (&self->list_filter);
   spot_window_shell_drag_leave (self);
   g_clear_object (&self->current_dir);
   g_clear_object (&self->context_target);
