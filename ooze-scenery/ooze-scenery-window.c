@@ -12,6 +12,7 @@
 
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <math.h>
+#include <signal.h>
 #include <string.h>
 
 typedef enum
@@ -64,6 +65,8 @@ struct _OozeSceneryWindow
   gint64 flow_last_frame_us;
   gdouble flow_phase;
   guint flow_tick_id;
+  GPid preview_pid;          /* running XScreenSaver preview window */
+  guint preview_watch_id;
   SceneryPage page;
 };
 
@@ -1108,6 +1111,107 @@ scenery_list_hacks (void)
 }
 
 static void
+scenery_preview_stop (OozeSceneryWindow *self)
+{
+  if (self->preview_watch_id)
+    {
+      g_source_remove (self->preview_watch_id);
+      self->preview_watch_id = 0;
+    }
+  if (self->preview_pid)
+    {
+      kill (self->preview_pid, SIGTERM);
+      g_spawn_close_pid (self->preview_pid);
+      self->preview_pid = 0;
+    }
+}
+
+static void
+scenery_preview_exited (GPid     pid,
+                        gint     status G_GNUC_UNUSED,
+                        gpointer user_data)
+{
+  OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
+
+  self->preview_watch_id = 0;
+  if (self->preview_pid == pid)
+    {
+      g_spawn_close_pid (pid);
+      self->preview_pid = 0;
+    }
+}
+
+static char *
+scenery_hack_binary (const char *hack)
+{
+  gsize i;
+
+  if (hack == NULL || *hack == '\0')
+    return NULL;
+
+  for (i = 0; hack[i] != '\0'; i++)
+    if (!g_ascii_isalnum (hack[i]) && hack[i] != '-' && hack[i] != '_')
+      return NULL;
+
+  for (i = 0; i < G_N_ELEMENTS (ooze_hack_dirs); i++)
+    {
+      char *path = g_build_filename (ooze_hack_dirs[i], hack, NULL);
+
+      if (g_file_test (path, G_FILE_TEST_IS_EXECUTABLE))
+        return path;
+      g_free (path);
+    }
+
+  return NULL;
+}
+
+/* Runs the selected module in its own window for a live look; GTK on
+ * Wayland cannot embed the X11 module into this window. */
+static void
+on_preview_clicked (GtkButton *button G_GNUC_UNUSED,
+                    gpointer   user_data)
+{
+  OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
+  g_autofree char *binary = NULL;
+  g_autoptr (GError) error = NULL;
+  const char *hack = NULL;
+  char *argv[3];
+  GPid pid = 0;
+  guint selected;
+
+  if (!self->hack_names || !self->hack_dropdown)
+    return;
+
+  selected = gtk_drop_down_get_selected (GTK_DROP_DOWN (self->hack_dropdown));
+  if (selected != GTK_INVALID_LIST_POSITION)
+    hack = gtk_string_list_get_string (self->hack_names, selected);
+  if (!hack)
+    return;
+
+  binary = scenery_hack_binary (hack);
+  if (!binary)
+    return;
+
+  scenery_preview_stop (self);
+
+  argv[0] = binary;
+  argv[1] = (char *) "--window";
+  argv[2] = NULL;
+  if (!g_spawn_async (NULL, argv, NULL,
+                      G_SPAWN_DO_NOT_REAP_CHILD,
+                      NULL, NULL, &pid, &error))
+    {
+      g_warning ("Scenery: unable to preview %s: %s",
+                 binary, error->message);
+      return;
+    }
+
+  self->preview_pid = pid;
+  self->preview_watch_id =
+    g_child_watch_add (pid, scenery_preview_exited, self);
+}
+
+static void
 on_hack_selected (GObject    *dropdown,
                   GParamSpec *pspec G_GNUC_UNUSED,
                   gpointer    user_data)
@@ -1178,7 +1282,19 @@ scenery_build_hack_row (OozeSceneryWindow *self)
   gtk_widget_set_halign (self->hack_dropdown, GTK_ALIGN_START);
   g_signal_connect (self->hack_dropdown, "notify::selected",
                     G_CALLBACK (on_hack_selected), self);
-  gtk_box_append (GTK_BOX (row), self->hack_dropdown);
+  {
+    GtkWidget *hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *preview_btn = ooze_button_new (OOZE_BUTTON_TOOLBAR);
+
+    gtk_button_set_label (GTK_BUTTON (preview_btn), "Preview");
+    gtk_widget_set_tooltip_text (preview_btn,
+                                 "Open the selected module in a window");
+    g_signal_connect (preview_btn, "clicked",
+                      G_CALLBACK (on_preview_clicked), self);
+    gtk_box_append (GTK_BOX (hbox), self->hack_dropdown);
+    gtk_box_append (GTK_BOX (hbox), preview_btn);
+    gtk_box_append (GTK_BOX (row), hbox);
+  }
 
   return row;
 }
@@ -1319,11 +1435,14 @@ scenery_action_about (GSimpleAction *action G_GNUC_UNUSED,
                       OOZE_VERSION);
 }
 
+static void scenery_preview_stop (OozeSceneryWindow *self);
+
 static void
 ooze_scenery_window_dispose (GObject *object)
 {
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (object);
 
+  scenery_preview_stop (self);
   if (self->flow_tick_id)
     {
       gtk_widget_remove_tick_callback (self->screensaver_preview,
