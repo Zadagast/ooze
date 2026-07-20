@@ -1068,6 +1068,21 @@ ooze_panel_on_global_menu_changed (gpointer user_data)
       g_timeout_add (50, panel_retry_pending_menu, plugin);
 }
 
+/* Get out of the way of fullscreen content (video, games): the panel sits
+ * above the window group, so hide it while the primary monitor hosts a
+ * fullscreen window. */
+static void
+on_in_fullscreen_changed (ClutterActor *panel,
+                          MetaDisplay  *display)
+{
+  int primary = meta_display_get_primary_monitor (display);
+
+  if (meta_display_get_monitor_in_fullscreen (display, primary))
+    clutter_actor_hide (panel);
+  else
+    clutter_actor_show (panel);
+}
+
 void
 ooze_panel_setup (OozePlugin       *plugin,
                   MetaDisplay    *display,
@@ -1139,6 +1154,10 @@ ooze_panel_setup (OozePlugin       *plugin,
 
   clutter_actor_add_child (stage, plugin->panel);
   clutter_actor_show (plugin->panel);
+
+  g_signal_connect_object (display, "in-fullscreen-changed",
+                           G_CALLBACK (on_in_fullscreen_changed),
+                           plugin->panel, G_CONNECT_SWAPPED);
 }
 
 void
