@@ -16,7 +16,10 @@ ARCH="${ARCH:-amd64}"
 # configured build dir can hold a stale project version until ninja
 # reconfigures it, so introspecting it here would mislabel the package.
 VERSION="${VERSION:-$(sed -n "s/.*version: '\\([^']*\\)'.*/\\1/p" meson.build | head -1)}"
-VERSION="${VERSION:-0.4.2}"
+if [[ -z "$VERSION" ]]; then
+  echo "ERROR: could not read version from meson.build" >&2
+  exit 1
+fi
 DEB_NAME="ooze_${VERSION}_${ARCH}.deb"
 OUTPUT="${OUTPUT:-$DIST_DIR/$DEB_NAME}"
 
@@ -38,12 +41,16 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 DESTDIR="$STAGE" ninja -C "$BUILD_DIR" install
 
+# WhiteSur is a nice-to-have (foreign-app theming); a broken clone/sassc on a
+# fresh machine must not abort the whole .deb build.
 if [[ "${SKIP_WHITESUR:-0}" == 1 ]]; then
   echo "==> Skipping WhiteSur bundling (SKIP_WHITESUR=1)"
+elif OOZE_THEMES_DEST="$STAGE/usr/share/ooze/themes" \
+    "$ROOT/scripts/install-whitesur-theme.sh"; then
+  echo "==> Bundled WhiteSur foreign GTK themes"
 else
-  echo "==> Bundling WhiteSur foreign GTK themes"
-  OOZE_THEMES_DEST="$STAGE/usr/share/ooze/themes" \
-    "$ROOT/scripts/install-whitesur-theme.sh"
+  echo "WARNING: WhiteSur bundling failed; continuing without foreign themes" >&2
+  rm -rf "$STAGE/usr/share/ooze/themes"
 fi
 
 # Expose WhiteSur on the standard freedesktop theme path so foreign apps
