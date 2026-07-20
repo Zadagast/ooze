@@ -119,8 +119,6 @@ executable('ooze',
   'compositor/ooze-stall.c',
   'compositor/ooze-lock.c',
   'compositor/ooze-screensaver.c',
-  'compositor/ooze-flow.c',
-  'compositor/ooze-flow-gpu.c',
   'compositor/ooze-wallpaper.c',
   'compositor/ooze-wallpaper-source.c',
   'compositor/ooze-sni.c',
@@ -191,24 +189,6 @@ executable('ooze-pam-helper',
 install_data('data/pam/ooze-lock',
   install_dir: get_option('sysconfdir') / 'pam.d',
   rename: 'ooze-lock',
-)
-
-schema_files = files('data/org.ooze.Scenery.gschema.xml')
-glib_compile_schemas = find_program('glib-compile-schemas')
-compiled_schemas = custom_target('gschemas.compiled',
-  input: schema_files,
-  output: 'gschemas.compiled',
-  command: [
-    glib_compile_schemas,
-    '--strict',
-    '--targetdir', '@OUTDIR@',
-    meson.project_source_root() / 'data',
-  ],
-  build_by_default: true,
-  install: false,
-)
-install_data(schema_files,
-  install_dir: get_option('datadir') / 'glib-2.0' / 'schemas',
 )
 
 install_data('data/wayland-sessions/ooze.desktop',
@@ -559,7 +539,6 @@ if gtk4_dep.found() and adw_dep.found()
   executable('ooze-scenery',
     'ooze-scenery/main.c',
     'ooze-scenery/ooze-scenery-window.c',
-    'compositor/ooze-flow.c',
     ooze_shared_sources,
     include_directories: ooze_app_inc + [include_directories('ooze-scenery'),
                                          inc_compositor],

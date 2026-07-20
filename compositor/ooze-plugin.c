@@ -1318,12 +1318,6 @@ ooze_plugin_map (MetaPlugin *plugin, MetaWindowActor *actor)
 
   clutter_actor_show (window_actor);
 
-  if (ooze_screensaver_adopt_hack_window (OOZE_PLUGIN (plugin), actor))
-    {
-      meta_plugin_map_completed (plugin, actor);
-      return;
-    }
-
   ooze_window_chrome_apply (actor, plugin);
   ooze_foreign_gel_maybe_attach (OOZE_PLUGIN (plugin), actor);
 
@@ -1981,9 +1975,7 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->session_settings = NULL;
   plugin->screensaver_settings = NULL;
   plugin->background_settings = NULL;
-  plugin->scenery_settings = NULL;
   plugin->screensaver_active = FALSE;
-  plugin->screensaver_black = FALSE;
   plugin->screensaver_overlay = NULL;
   plugin->screensaver_idle_watch_id = 0;
   plugin->screensaver_user_active_watch_id = 0;
@@ -1991,5 +1983,4 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->screensaver_fade_id = 0;
   plugin->screensaver_stage_capture_id = 0;
   plugin->screensaver_input_armed = FALSE;
-  plugin->screensaver_phase_id = 0;
 }
