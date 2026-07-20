@@ -99,6 +99,13 @@ struct _OozePlugin
   gpointer      screensaver_flow;
   ClutterActor *screensaver_flow_actor;
 
+  /* XScreenSaver hack backdrop (X11 hack adopted into the overlay) */
+  GPid          saver_hack_pid;
+  guint         saver_hack_child_watch_id;
+  guint         saver_hack_kill_id;
+  ClutterActor *saver_hack_clone;
+  gpointer      saver_hack_window; /* MetaWindow* */
+
   /* StatusNotifier tray (AppIndicator host) */
   ClutterActor *tray_box;
   GPtrArray    *tray_icons; /* OozeTrayIcon* */

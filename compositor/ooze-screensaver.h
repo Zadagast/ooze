@@ -3,6 +3,7 @@
 #include "ooze-plugin.h"
 
 #include <glib.h>
+#include <meta/meta-window-actor.h>
 
 G_BEGIN_DECLS
 
@@ -16,5 +17,7 @@ void     ooze_screensaver_unlock_backdrop (OozePlugin *plugin);
 void     ooze_screensaver_refresh_wallpaper (OozePlugin *plugin);
 void     ooze_screensaver_mode_changed (OozePlugin *plugin);
 gboolean ooze_screensaver_is_active (OozePlugin *plugin);
+gboolean ooze_screensaver_adopt_hack_window (OozePlugin      *plugin,
+                                             MetaWindowActor *actor);
 
 G_END_DECLS

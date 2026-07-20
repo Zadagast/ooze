@@ -1318,6 +1318,12 @@ ooze_plugin_map (MetaPlugin *plugin, MetaWindowActor *actor)
 
   clutter_actor_show (window_actor);
 
+  if (ooze_screensaver_adopt_hack_window (OOZE_PLUGIN (plugin), actor))
+    {
+      meta_plugin_map_completed (plugin, actor);
+      return;
+    }
+
   ooze_window_chrome_apply (actor, plugin);
   ooze_foreign_gel_maybe_attach (OOZE_PLUGIN (plugin), actor);
 

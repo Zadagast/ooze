@@ -18,10 +18,14 @@
 #include <meta/meta-backend.h>
 #include <meta/meta-context.h>
 #include <meta/meta-idle-monitor.h>
+#include <meta/window.h>
 #include <clutter/clutter.h>
 
 #include <glib.h>
 #include <cairo/cairo.h>
+#include <signal.h>
+#include <string.h>
+#include <sys/types.h>
 
 #define OOZE_SCREENSAVER_FADE_IN_MS   1600
 #define OOZE_SCREENSAVER_FADE_OUT_MS   1100
@@ -165,6 +169,204 @@ ooze_screensaver_flow_free (OozePlugin *plugin)
   plugin->screensaver_flow = NULL;
 }
 
+/* --- XScreenSaver hack backdrop ---------------------------------------
+ *
+ * Modes of the form "xscreensaver:<hack>" spawn the matching XScreenSaver
+ * hack (an X11 program running under Xwayland) in windowed mode.  When its
+ * window maps, the plugin map vfunc hands it to
+ * ooze_screensaver_adopt_hack_window(): the real window actor is hidden and
+ * a fullscreen ClutterClone of it is placed inside the saver overlay, so
+ * the existing fade/lock lifecycle keeps working.  Ooze Flow renders
+ * underneath until the hack's first frame arrives, and again if the hack
+ * dies.
+ */
+
+static const char *
+ooze_screensaver_scene_hack (const char *scene)
+{
+  if (scene == NULL || !g_str_has_prefix (scene, "xscreensaver:"))
+    return NULL;
+
+  return scene + strlen ("xscreensaver:");
+}
+
+static char *
+ooze_screensaver_hack_binary (const char *hack)
+{
+  static const char *dirs[] = {
+    "/usr/libexec/xscreensaver",
+    "/usr/lib/xscreensaver",
+    "/usr/lib/misc/xscreensaver",
+  };
+  gsize i;
+
+  if (hack == NULL || *hack == '\0')
+    return NULL;
+
+  /* Only plain program names: never let the setting name a path. */
+  for (i = 0; hack[i] != '\0'; i++)
+    if (!g_ascii_isalnum (hack[i]) && hack[i] != '-' && hack[i] != '_')
+      return NULL;
+
+  for (i = 0; i < G_N_ELEMENTS (dirs); i++)
+    {
+      char *path = g_build_filename (dirs[i], hack, NULL);
+
+      if (g_file_test (path, G_FILE_TEST_IS_EXECUTABLE))
+        return path;
+      g_free (path);
+    }
+
+  return NULL;
+}
+
+static void
+ooze_screensaver_hack_cleanup (OozePlugin *plugin,
+                               gboolean    kill_process)
+{
+  if (plugin->saver_hack_kill_id)
+    {
+      g_source_remove (plugin->saver_hack_kill_id);
+      plugin->saver_hack_kill_id = 0;
+    }
+  if (plugin->saver_hack_child_watch_id)
+    {
+      g_source_remove (plugin->saver_hack_child_watch_id);
+      plugin->saver_hack_child_watch_id = 0;
+    }
+  if (plugin->saver_hack_pid)
+    {
+      if (kill_process)
+        kill (plugin->saver_hack_pid, SIGTERM);
+      g_spawn_close_pid (plugin->saver_hack_pid);
+      plugin->saver_hack_pid = 0;
+    }
+  g_clear_pointer (&plugin->saver_hack_clone, clutter_actor_destroy);
+  plugin->saver_hack_window = NULL;
+  if (plugin->screensaver_flow_actor)
+    clutter_actor_show (plugin->screensaver_flow_actor);
+}
+
+static void
+ooze_screensaver_hack_child_exited (GPid     pid,
+                                    gint     status G_GNUC_UNUSED,
+                                    gpointer user_data)
+{
+  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+
+  plugin->saver_hack_child_watch_id = 0;
+  if (plugin->saver_hack_pid == pid)
+    {
+      g_spawn_close_pid (pid);
+      plugin->saver_hack_pid = 0;
+      /* Fall back to Flow underneath if the hack dies mid-saver. */
+      ooze_screensaver_hack_cleanup (plugin, FALSE);
+    }
+}
+
+static void
+ooze_screensaver_hack_start (OozePlugin *plugin,
+                             const char *scene)
+{
+  const char *hack = ooze_screensaver_scene_hack (scene);
+  g_autofree char *binary = NULL;
+  g_autoptr (GError) error = NULL;
+  char *argv[3];
+  GPid pid = 0;
+
+  ooze_screensaver_hack_cleanup (plugin, TRUE);
+
+  if (!hack)
+    return;
+
+  binary = ooze_screensaver_hack_binary (hack);
+  if (!binary)
+    {
+      g_warning ("Ooze screensaver: XScreenSaver hack '%s' not found "
+                 "(install xscreensaver-data/-extra); showing Ooze Flow",
+                 hack);
+      return;
+    }
+
+  argv[0] = binary;
+  argv[1] = (char *) "--window";
+  argv[2] = NULL;
+  if (!g_spawn_async (NULL, argv, NULL,
+                      G_SPAWN_DO_NOT_REAP_CHILD,
+                      NULL, NULL, &pid, &error))
+    {
+      g_warning ("Ooze screensaver: unable to launch %s: %s",
+                 binary, error->message);
+      return;
+    }
+
+  plugin->saver_hack_pid = pid;
+  plugin->saver_hack_child_watch_id =
+    g_child_watch_add (pid, ooze_screensaver_hack_child_exited, plugin);
+}
+
+static gboolean
+ooze_screensaver_hack_kill_after_fade (gpointer user_data)
+{
+  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+
+  plugin->saver_hack_kill_id = 0;
+  ooze_screensaver_hack_cleanup (plugin, TRUE);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+ooze_screensaver_hack_stop (OozePlugin *plugin)
+{
+  if (!plugin->saver_hack_pid && !plugin->saver_hack_clone)
+    return;
+
+  /* Keep the clone painting through the overlay fade-out. */
+  if (plugin->saver_hack_kill_id)
+    g_source_remove (plugin->saver_hack_kill_id);
+  plugin->saver_hack_kill_id =
+    g_timeout_add (OOZE_SCREENSAVER_FADE_OUT_MS + 60,
+                   ooze_screensaver_hack_kill_after_fade,
+                   plugin);
+}
+
+gboolean
+ooze_screensaver_adopt_hack_window (OozePlugin      *plugin,
+                                    MetaWindowActor *actor)
+{
+  MetaWindow *window;
+  ClutterActor *clone;
+  int width;
+  int height;
+
+  if (!plugin->saver_hack_pid || plugin->saver_hack_clone ||
+      !plugin->screensaver_overlay)
+    return FALSE;
+
+  window = meta_window_actor_get_meta_window (actor);
+  if (!window ||
+      meta_window_get_pid (window) != (pid_t) plugin->saver_hack_pid)
+    return FALSE;
+
+  width = (int) clutter_actor_get_width (plugin->screensaver_overlay);
+  height = (int) clutter_actor_get_height (plugin->screensaver_overlay);
+
+  meta_window_move_resize_frame (window, FALSE, 0, 0, width, height);
+  clutter_actor_hide (CLUTTER_ACTOR (actor));
+
+  clone = clutter_clone_new (CLUTTER_ACTOR (actor));
+  clutter_actor_set_position (clone, 0.0f, 0.0f);
+  clutter_actor_set_size (clone, (gfloat) width, (gfloat) height);
+  clutter_actor_add_child (plugin->screensaver_overlay, clone);
+  plugin->saver_hack_clone = clone;
+  plugin->saver_hack_window = window;
+
+  if (plugin->screensaver_flow_actor)
+    clutter_actor_hide (plugin->screensaver_flow_actor);
+
+  return TRUE;
+}
+
 static void
 ooze_screensaver_mode_start (OozePlugin *plugin G_GNUC_UNUSED)
 {
@@ -197,6 +399,8 @@ ooze_screensaver_mode_start (OozePlugin *plugin G_GNUC_UNUSED)
       flow->last_render_us = 0;
       ooze_screensaver_flow_render (plugin, TRUE);
     }
+
+  ooze_screensaver_hack_start (plugin, flow ? flow->scene : NULL);
 }
 
 static void
@@ -264,6 +468,7 @@ ooze_screensaver_mode_resize (OozePlugin *plugin,
 static void
 ooze_screensaver_mode_stop (OozePlugin *plugin G_GNUC_UNUSED)
 {
+  ooze_screensaver_hack_stop (plugin);
   ooze_screensaver_flow_free (plugin);
 }
 
@@ -743,6 +948,7 @@ ooze_screensaver_mode_changed (OozePlugin *plugin)
               flow->phase_start_us = g_get_monotonic_time ();
               ooze_screensaver_flow_render (plugin, TRUE);
             }
+          ooze_screensaver_hack_start (plugin, scene);
         }
     }
 
@@ -815,6 +1021,7 @@ ooze_screensaver_dispose (OozePlugin *plugin)
   plugin->screensaver_user_active_watch_id = 0;
 
   ooze_screensaver_mode.stop (plugin);
+  ooze_screensaver_hack_cleanup (plugin, TRUE);
 
   if (plugin->screensaver_stage_capture_id)
     {

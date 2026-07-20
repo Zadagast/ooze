@@ -40,6 +40,8 @@ struct _OozeSceneryWindow
   GtkWidget *wallpaper_tiles;
   GtkWidget *ubuntu_tiles;
   GtkWidget *screensaver_mode_tiles;
+  GtkWidget *hack_dropdown;
+  GtkStringList *hack_names;
   GtkWidget *start_after;
   GtkWidget *lock_enabled;
   GtkWidget *lock_after;
@@ -50,7 +52,7 @@ struct _OozeSceneryWindow
   GdkPixbuf *selected_pixbuf;
   /* Staged (uncommitted) edits — written to GSettings only on Apply. */
   char *pending_wallpaper;   /* "aqua", "aqua-dark", or an absolute path */
-  char *pending_mode;        /* "flow" or "none" */
+  char *pending_mode;        /* "flow", "none" or "xscreensaver:<hack>" */
   guint pending_idle;
   guint pending_lock_delay;
   gboolean pending_lock_enabled;
@@ -307,6 +309,47 @@ scenery_draw_wallpaper (GtkDrawingArea *area,
   (void) area;
 }
 
+static gboolean
+scenery_mode_is_hack (const char *mode)
+{
+  return mode != NULL && g_str_has_prefix (mode, "xscreensaver:");
+}
+
+static void
+scenery_draw_hack_placeholder (cairo_t    *cr,
+                               int         width,
+                               int         height,
+                               const char *mode)
+{
+  const char *hack = mode + strlen ("xscreensaver:");
+  cairo_text_extents_t extents;
+
+  cairo_save (cr);
+  cairo_set_source_rgba (cr, 0.02, 0.05, 0.12, 0.82);
+  cairo_paint (cr);
+
+  cairo_select_font_face (cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
+                          CAIRO_FONT_WEIGHT_BOLD);
+  cairo_set_font_size (cr, MAX (12.0, height * 0.10));
+  cairo_text_extents (cr, hack, &extents);
+  cairo_set_source_rgba (cr, 0.85, 0.90, 1.0, 0.95);
+  cairo_move_to (cr, (width - extents.width) / 2.0, height * 0.48);
+  cairo_show_text (cr, hack);
+
+  cairo_select_font_face (cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
+                          CAIRO_FONT_WEIGHT_NORMAL);
+  cairo_set_font_size (cr, MAX (9.0, height * 0.055));
+  {
+    const char *note = "XScreenSaver — plays when the saver starts";
+
+    cairo_text_extents (cr, note, &extents);
+    cairo_set_source_rgba (cr, 0.65, 0.72, 0.88, 0.9);
+    cairo_move_to (cr, (width - extents.width) / 2.0, height * 0.62);
+    cairo_show_text (cr, note);
+  }
+  cairo_restore (cr);
+}
+
 static void
 scenery_draw_screensaver (GtkDrawingArea *area,
                           cairo_t        *cr,
@@ -318,7 +361,9 @@ scenery_draw_screensaver (GtkDrawingArea *area,
   gboolean animated = g_strcmp0 (self->pending_mode, "none") != 0;
 
   scenery_draw_wallpaper (NULL, cr, width, height, self);
-  if (animated && self->flow_surface)
+  if (scenery_mode_is_hack (self->pending_mode))
+    scenery_draw_hack_placeholder (cr, width, height, self->pending_mode);
+  else if (animated && self->flow_surface)
     {
       cairo_save (cr);
       cairo_scale (cr,
@@ -385,7 +430,8 @@ scenery_flow_tick (GtkWidget     *widget,
   gint64 now = gdk_frame_clock_get_frame_time (clock);
 
   if (self->page != SCENERY_PAGE_SCREENSAVER ||
-      g_strcmp0 (self->pending_mode, "none") == 0)
+      g_strcmp0 (self->pending_mode, "none") == 0 ||
+      scenery_mode_is_hack (self->pending_mode))
     return G_SOURCE_CONTINUE;
 
   scenery_flow_resize (self,
@@ -636,6 +682,34 @@ scenery_refresh_mode_selection (OozeSceneryWindow *self)
       gtk_widget_set_state_flags (
         child, g_strcmp0 (self->pending_mode, child_mode) == 0
           ? GTK_STATE_FLAG_CHECKED : 0, TRUE);
+    }
+
+  if (self->hack_dropdown)
+    {
+      guint position = GTK_INVALID_LIST_POSITION;
+      gboolean was_loading = self->loading;
+
+      if (scenery_mode_is_hack (self->pending_mode))
+        {
+          const char *hack =
+            self->pending_mode + strlen ("xscreensaver:");
+          guint n = g_list_model_get_n_items (
+            G_LIST_MODEL (self->hack_names));
+          guint i;
+
+          for (i = 0; i < n; i++)
+            if (g_strcmp0 (gtk_string_list_get_string (self->hack_names, i),
+                           hack) == 0)
+              {
+                position = i;
+                break;
+              }
+        }
+
+      self->loading = TRUE;
+      gtk_drop_down_set_selected (GTK_DROP_DOWN (self->hack_dropdown),
+                                  position);
+      self->loading = was_loading;
     }
 }
 
@@ -946,6 +1020,117 @@ scenery_mode_tile (OozeSceneryWindow *self,
   return button;
 }
 
+static GStrv
+scenery_list_hacks (void)
+{
+  static const char *dirs[] = {
+    "/usr/libexec/xscreensaver",
+    "/usr/lib/xscreensaver",
+    "/usr/lib/misc/xscreensaver",
+  };
+  g_autoptr (GStrvBuilder) builder = g_strv_builder_new ();
+  g_autoptr (GPtrArray) names =
+    g_ptr_array_new_with_free_func (g_free);
+  gsize i;
+  guint j;
+
+  for (i = 0; i < G_N_ELEMENTS (dirs); i++)
+    {
+      g_autoptr (GDir) dir = g_dir_open (dirs[i], 0, NULL);
+      const char *entry;
+
+      if (!dir)
+        continue;
+      while ((entry = g_dir_read_name (dir)) != NULL)
+        {
+          g_autofree char *path = g_build_filename (dirs[i], entry, NULL);
+          guint k;
+          gboolean seen = FALSE;
+
+          if (!g_file_test (path, G_FILE_TEST_IS_EXECUTABLE))
+            continue;
+          for (k = 0; k < names->len && !seen; k++)
+            seen = g_strcmp0 (g_ptr_array_index (names, k), entry) == 0;
+          if (!seen)
+            g_ptr_array_add (names, g_strdup (entry));
+        }
+    }
+
+  g_ptr_array_sort_values (names, (GCompareFunc) g_strcmp0);
+  for (j = 0; j < names->len; j++)
+    g_strv_builder_add (builder, g_ptr_array_index (names, j));
+  return g_strv_builder_end (builder);
+}
+
+static void
+on_hack_selected (GObject    *dropdown,
+                  GParamSpec *pspec G_GNUC_UNUSED,
+                  gpointer    user_data)
+{
+  OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
+  guint selected;
+  const char *hack;
+
+  if (self->loading)
+    return;
+
+  selected = gtk_drop_down_get_selected (GTK_DROP_DOWN (dropdown));
+  if (selected == GTK_INVALID_LIST_POSITION)
+    return;
+
+  hack = gtk_string_list_get_string (self->hack_names, selected);
+  if (!hack)
+    return;
+
+  g_clear_pointer (&self->pending_mode, g_free);
+  self->pending_mode = g_strdup_printf ("xscreensaver:%s", hack);
+  scenery_refresh_mode_selection (self);
+  scenery_refresh_preview (self);
+  scenery_mark_dirty (self);
+}
+
+static GtkWidget *
+scenery_build_hack_row (OozeSceneryWindow *self)
+{
+  GtkWidget *row = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
+  g_auto (GStrv) hacks = scenery_list_hacks ();
+  GtkWidget *hint;
+
+  gtk_widget_add_css_class (row, "scenery-settings-card");
+
+  if (!hacks || !hacks[0])
+    {
+      hint = gtk_label_new ("No XScreenSaver modules found. Install the "
+                            "xscreensaver-data and xscreensaver-data-extra "
+                            "packages to unlock them.");
+      gtk_label_set_wrap (GTK_LABEL (hint), TRUE);
+      gtk_label_set_xalign (GTK_LABEL (hint), 0);
+      gtk_box_append (GTK_BOX (row), hint);
+      return row;
+    }
+
+  hint = gtk_label_new ("Pick a classic XScreenSaver module instead of an "
+                        "Ooze scene. It runs full screen when the "
+                        "screensaver starts.");
+  gtk_label_set_wrap (GTK_LABEL (hint), TRUE);
+  gtk_label_set_xalign (GTK_LABEL (hint), 0);
+  gtk_box_append (GTK_BOX (row), hint);
+
+  self->hack_names = gtk_string_list_new ((const char * const *) hacks);
+  self->hack_dropdown =
+    gtk_drop_down_new (G_LIST_MODEL (self->hack_names), NULL);
+  gtk_drop_down_set_enable_search (GTK_DROP_DOWN (self->hack_dropdown),
+                                   TRUE);
+  gtk_drop_down_set_selected (GTK_DROP_DOWN (self->hack_dropdown),
+                              GTK_INVALID_LIST_POSITION);
+  gtk_widget_set_halign (self->hack_dropdown, GTK_ALIGN_START);
+  g_signal_connect (self->hack_dropdown, "notify::selected",
+                    G_CALLBACK (on_hack_selected), self);
+  gtk_box_append (GTK_BOX (row), self->hack_dropdown);
+
+  return row;
+}
+
 static GtkWidget *
 scenery_build_screensaver_page (OozeSceneryWindow *self)
 {
@@ -985,14 +1170,12 @@ scenery_build_screensaver_page (OozeSceneryWindow *self)
   gtk_flow_box_append (GTK_FLOW_BOX (modes),
                        scenery_mode_tile (self, "Ooze Flow", "flow"));
   gtk_flow_box_append (GTK_FLOW_BOX (modes),
-                       scenery_mode_tile (self, "Aurora", "aurora"));
-  gtk_flow_box_append (GTK_FLOW_BOX (modes),
-                       scenery_mode_tile (self, "Nebula", "nebula"));
-  gtk_flow_box_append (GTK_FLOW_BOX (modes),
-                       scenery_mode_tile (self, "Plasma", "plasma"));
-  gtk_flow_box_append (GTK_FLOW_BOX (modes),
                        scenery_mode_tile (self, "None", "none"));
   gtk_box_append (GTK_BOX (content), modes);
+
+  gtk_box_append (GTK_BOX (content),
+                  scenery_section_label ("XScreenSaver"));
+  gtk_box_append (GTK_BOX (content), scenery_build_hack_row (self));
 
   label = scenery_section_label ("Timings");
   gtk_box_append (GTK_BOX (content), label);
