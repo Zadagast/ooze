@@ -20,7 +20,6 @@
 #include <oozekit/ooze-pinline.h>
 #include <oozekit/ooze-popover.h>
 #include <oozekit/ooze-scroll.h>
-#include <oozekit/ooze-grid-menu.h>
 #include <oozekit/ooze-segment.h>
 #include <oozekit/ooze-surface.h>
 #include <oozekit/ooze-theme.h>
@@ -43,7 +42,6 @@
 #include "ooze-pinline.h"
 #include "ooze-popover.h"
 #include "ooze-scroll.h"
-#include "ooze-grid-menu.h"
 #include "ooze-segment.h"
 #include "ooze-surface.h"
 #include "ooze-theme.h"

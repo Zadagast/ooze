@@ -2,7 +2,6 @@
 
 #include "ooze-about.h"
 #include "ooze-button.h"
-#include "ooze-grid-menu.h"
 #include "ooze-icons.h"
 #include "ooze-scroll.h"
 #include "ooze-shared-appmenu.h"
@@ -42,6 +41,7 @@ struct _OozeLaunchWindow
   GtkWidget *context_popover;
   GtkWidget *add_popover;
   GtkWidget *add_entry;
+  LaunchApp *context_app;
 };
 
 G_DEFINE_FINAL_TYPE (OozeLaunchWindow, ooze_launch_window,
@@ -51,18 +51,6 @@ static const char * const launch_generic_icons[] = {
   "application-x-executable",
   "application-x-generic",
   NULL,
-};
-
-static const char * const launch_add_icons[] = {
-  "list-add-symbolic", "list-add", NULL,
-};
-
-static const char * const launch_remove_icons[] = {
-  "list-remove-symbolic", "list-remove", NULL,
-};
-
-static const char * const launch_delete_icons[] = {
-  "edit-delete-symbolic", "edit-delete", "user-trash-symbolic", NULL,
 };
 
 static void launch_rebuild_groups_bar (OozeLaunchWindow *self);
@@ -533,36 +521,57 @@ launch_close_context_popover (OozeLaunchWindow *self)
   g_clear_object (&self->context_popover);
 }
 
-typedef struct
-{
-  OozeLaunchWindow *window;
-  LaunchApp        *app;
-  LaunchGroup      *group;
-  gboolean          remove;
-} LaunchAssignment;
-
 static void
-launch_assignment_free (gpointer data)
+launch_action_assign_group (GSimpleAction *action G_GNUC_UNUSED,
+                            GVariant      *parameter,
+                            gpointer       user_data)
 {
-  g_free (data);
-}
+  OozeLaunchWindow *self = user_data;
+  guint64 index;
+  LaunchGroup *group;
 
-static void
-launch_assign_clicked (gpointer user_data)
-{
-  LaunchAssignment *assignment = user_data;
-
-  if (assignment->remove)
-    launch_group_remove_app (assignment->group, assignment->app->id);
+  if (!self->context_app || !parameter)
+    return;
+  index = g_ascii_strtoull (g_variant_get_string (parameter, NULL), NULL, 10);
+  if (index >= self->groups->len)
+    return;
+  group = g_ptr_array_index (self->groups, index);
+  if (launch_group_contains (group, self->context_app->id))
+    launch_group_remove_app (group, self->context_app->id);
   else
-    launch_group_add_app (assignment->group, assignment->app->id);
-  launch_save_groups (assignment->window);
-  launch_refresh_grid (assignment->window);
-  launch_close_context_popover (assignment->window);
+    launch_group_add_app (group, self->context_app->id);
+  launch_save_groups (self);
+  launch_refresh_grid (self);
+  launch_close_context_popover (self);
 }
 
 static void
-launch_delete_group_clicked (gpointer user_data)
+launch_action_remove_group (GSimpleAction *action G_GNUC_UNUSED,
+                            GVariant      *parameter,
+                            gpointer       user_data)
+{
+  OozeLaunchWindow *self = user_data;
+  guint64 index;
+  LaunchGroup *group;
+
+  if (!self->context_app || !parameter)
+    return;
+  index = g_ascii_strtoull (g_variant_get_string (parameter, NULL), NULL, 10);
+  if (index >= self->groups->len)
+    return;
+  group = g_ptr_array_index (self->groups, index);
+  if (!group->custom)
+    return;
+  launch_group_remove_app (group, self->context_app->id);
+  launch_save_groups (self);
+  launch_refresh_grid (self);
+  launch_close_context_popover (self);
+}
+
+static void
+launch_action_delete_group (GSimpleAction *action G_GNUC_UNUSED,
+                            GVariant      *parameter G_GNUC_UNUSED,
+                            gpointer       user_data)
 {
   OozeLaunchWindow *self = user_data;
   LaunchGroup *group = self->active_group;
@@ -574,6 +583,21 @@ launch_delete_group_clicked (gpointer user_data)
   launch_save_groups (self);
   launch_rebuild_groups_bar (self);
   launch_refresh_grid (self);
+  launch_close_context_popover (self);
+}
+
+static void
+launch_menu_append_target (GMenu      *menu,
+                           const char *label,
+                           const char *action,
+                           gsize       index)
+{
+  g_autofree char *target = g_strdup_printf ("%" G_GSIZE_FORMAT, index);
+  g_autoptr (GMenuItem) item = g_menu_item_new (label, action);
+
+  g_menu_item_set_attribute_value (item, "target",
+                                   g_variant_new_string (target));
+  g_menu_append_item (menu, item);
 }
 
 static void
@@ -584,23 +608,22 @@ launch_show_context_menu (OozeLaunchWindow *self,
                           double            y)
 {
   GtkWidget *popover;
+  GMenu *menu;
+  GMenu *section;
   GdkRectangle rectangle;
   gsize i;
+  guint active_index = 0;
   gboolean have_items = FALSE;
 
   launch_close_context_popover (self);
-  popover = ooze_grid_menu_new ();
-  self->context_popover = g_object_ref_sink (popover);
-  gtk_widget_set_parent (popover, anchor);
-  rectangle = (GdkRectangle) { (int) x, (int) y, 1, 1 };
-  gtk_popover_set_pointing_to (GTK_POPOVER (popover), &rectangle);
+  self->context_app = app;
+  menu = g_menu_new ();
+  section = g_menu_new ();
 
   for (i = 0; i < self->groups->len; i++)
     {
       LaunchGroup *group = g_ptr_array_index (self->groups, i);
-      LaunchAssignment *assignment;
       g_autofree char *label = NULL;
-      OozeGridMenuItem item;
 
       if (!group->custom ||
           (group == self->active_group &&
@@ -610,62 +633,43 @@ launch_show_context_menu (OozeLaunchWindow *self,
         label = g_strdup ("Remove from group");
       else
         label = g_strdup_printf ("Add to %s", group->name);
-      assignment = g_new0 (LaunchAssignment, 1);
-      assignment->window = self;
-      assignment->app = app;
-      assignment->group = group;
-      assignment->remove = launch_group_contains (group, app->id);
-      item = (OozeGridMenuItem) {
-        .icon_names = assignment->remove ? launch_remove_icons : launch_add_icons,
-        .label = label,
-        .sensitive = TRUE,
-        .activate = launch_assign_clicked,
-        .user_data = assignment,
-        .user_data_destroy = launch_assignment_free,
-      };
-      ooze_grid_menu_append_item (popover, &item);
+      launch_menu_append_target (section, label, "win.assign-group", i);
       have_items = TRUE;
     }
+  g_ptr_array_find (self->groups, self->active_group, &active_index);
+  if (g_menu_model_get_n_items (G_MENU_MODEL (section)) > 0)
+    have_items = TRUE;
+  if (have_items)
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
+  g_object_unref (section);
 
   if (self->active_group && self->active_group->custom &&
       launch_group_contains (self->active_group, app->id))
     {
-      LaunchAssignment *assignment = g_new0 (LaunchAssignment, 1);
-      OozeGridMenuItem item;
-
-      assignment->window = self;
-      assignment->app = app;
-      assignment->group = self->active_group;
-      assignment->remove = TRUE;
-      if (have_items)
-        ooze_grid_menu_append_separator (popover);
-      item = (OozeGridMenuItem) {
-        .icon_names = launch_remove_icons,
-        .label = "Remove from this group",
-        .sensitive = TRUE,
-        .activate = launch_assign_clicked,
-        .user_data = assignment,
-        .user_data_destroy = launch_assignment_free,
-      };
-      ooze_grid_menu_append_item (popover, &item);
+      section = g_menu_new ();
+      launch_menu_append_target (
+        section, "Remove from this group", "win.remove-group",
+        active_index);
+      g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
+      g_object_unref (section);
       have_items = TRUE;
     }
 
   if (self->active_group && self->active_group->custom)
     {
-      OozeGridMenuItem item = {
-        .icon_names = launch_delete_icons,
-        .label = "Delete group",
-        .sensitive = TRUE,
-        .activate = launch_delete_group_clicked,
-        .user_data = self,
-      };
-
-      if (have_items)
-        ooze_grid_menu_append_separator (popover);
-      ooze_grid_menu_append_item (popover, &item);
+      section = g_menu_new ();
+      g_menu_append (section, "Delete group", "win.delete-group");
+      g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
+      g_object_unref (section);
     }
 
+  popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
+  g_object_unref (menu);
+  gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+  self->context_popover = g_object_ref_sink (popover);
+  gtk_widget_set_parent (popover, anchor);
+  rectangle = (GdkRectangle) { (int) x, (int) y, 1, 1 };
+  gtk_popover_set_pointing_to (GTK_POPOVER (popover), &rectangle);
   gtk_popover_popup (GTK_POPOVER (popover));
 }
 
@@ -900,6 +904,13 @@ launch_action_about (GSimpleAction *action G_GNUC_UNUSED,
 
 static const GActionEntry launch_actions[] = {
   { .name = "about", .activate = launch_action_about },
+  { .name = "assign-group",
+    .activate = launch_action_assign_group,
+    .parameter_type = "s" },
+  { .name = "remove-group",
+    .activate = launch_action_remove_group,
+    .parameter_type = "s" },
+  { .name = "delete-group", .activate = launch_action_delete_group },
 };
 
 static GtkWidget *

@@ -18,7 +18,6 @@
 /* OozeKit — shared surface + button widgets */
 #include "ooze-surface.h"
 #include "ooze-button.h"
-#include "ooze-grid-menu.h"
 #include "ooze-icons.h"
 #include "ooze-theme.h"
 #include "ooze-toolbar.h"
