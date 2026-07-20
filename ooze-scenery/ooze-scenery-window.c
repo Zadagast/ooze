@@ -43,11 +43,9 @@ struct _OozeSceneryWindow
   GtkWidget *custom_tiles;
   GtkWidget *action_bar;
   GdkPixbuf *selected_pixbuf;
-  /* Staged (uncommitted) edits — written to GSettings only on Apply. */
+  /* Staged (uncommitted) wallpaper edit — written to GSettings on Apply.
+   * Screen Lock settings are instant-apply via g_settings_bind. */
   char *pending_wallpaper;   /* "aqua", "aqua-dark", or an absolute path */
-  guint pending_idle;
-  guint pending_lock_delay;
-  gboolean pending_lock_enabled;
   gboolean dirty;
   gboolean loading;
   SceneryPage page;
@@ -216,13 +214,6 @@ scenery_load_pending (OozeSceneryWindow *self)
       self->pending_wallpaper = path ? g_steal_pointer (&path)
                                      : g_strdup ("aqua");
     }
-
-  self->pending_idle =
-    g_settings_get_uint (self->session_settings, "idle-delay");
-  self->pending_lock_enabled =
-    g_settings_get_boolean (self->screensaver_settings, "lock-enabled");
-  self->pending_lock_delay =
-    g_settings_get_uint (self->screensaver_settings, "lock-delay");
 }
 
 static void
@@ -500,12 +491,6 @@ scenery_reload (OozeSceneryWindow *self)
   self->loading = TRUE;
   scenery_load_pending (self);
   scenery_load_pending_pixbuf (self);
-  gtk_spin_button_set_value (GTK_SPIN_BUTTON (self->start_after),
-                             self->pending_idle);
-  gtk_check_button_set_active (GTK_CHECK_BUTTON (self->lock_enabled),
-                               self->pending_lock_enabled);
-  gtk_spin_button_set_value (GTK_SPIN_BUTTON (self->lock_after),
-                             self->pending_lock_delay);
   scenery_refresh_selection (self);
   scenery_refresh_preview (self);
   self->loading = FALSE;
@@ -515,13 +500,6 @@ scenery_reload (OozeSceneryWindow *self)
 static void
 scenery_apply (OozeSceneryWindow *self)
 {
-  gtk_spin_button_update (GTK_SPIN_BUTTON (self->start_after));
-  gtk_spin_button_update (GTK_SPIN_BUTTON (self->lock_after));
-  self->pending_idle =
-    gtk_spin_button_get_value_as_int (GTK_SPIN_BUTTON (self->start_after));
-  self->pending_lock_delay =
-    gtk_spin_button_get_value_as_int (GTK_SPIN_BUTTON (self->lock_after));
-
   if (scenery_pending_is_aqua (self))
     {
       g_settings_set_string (self->background_settings, "picture-uri", "");
@@ -542,12 +520,6 @@ scenery_apply (OozeSceneryWindow *self)
         }
     }
 
-  g_settings_set_uint (self->session_settings, "idle-delay",
-                       self->pending_idle);
-  g_settings_set_boolean (self->screensaver_settings, "lock-enabled",
-                          self->pending_lock_enabled);
-  g_settings_set_uint (self->screensaver_settings, "lock-delay",
-                       self->pending_lock_delay);
   scenery_set_dirty (self, FALSE);
 }
 
@@ -579,40 +551,42 @@ on_setting_changed (GSettings  *settings G_GNUC_UNUSED,
 }
 
 static void
-on_start_after_changed (GtkSpinButton *spin,
-                        gpointer       user_data)
-{
-  OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
-
-  self->pending_idle = gtk_spin_button_get_value_as_int (spin);
-  scenery_mark_dirty (self);
-}
-
-static void
 on_spin_activate (GtkSpinButton *spin,
                   gpointer       user_data G_GNUC_UNUSED)
 {
   gtk_spin_button_update (spin);
 }
 
-static void
-on_lock_after_changed (GtkSpinButton *spin,
-                       gpointer       user_data)
+/* GtkSpinButton only parses typed text on Enter/focus-out; commit it as
+ * soon as the digits change so instant-apply never misses a typed value. */
+static gboolean
+scenery_spin_commit_idle (gpointer user_data)
 {
-  OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
+  GtkSpinButton *spin = GTK_SPIN_BUTTON (user_data);
+  const char *text = gtk_editable_get_text (GTK_EDITABLE (spin));
 
-  self->pending_lock_delay = gtk_spin_button_get_value_as_int (spin);
-  scenery_mark_dirty (self);
+  g_object_set_data (G_OBJECT (spin), "scenery-commit-id", NULL);
+  if (text && *text)
+    gtk_spin_button_update (spin);
+  return G_SOURCE_REMOVE;
 }
 
 static void
-on_lock_enabled_changed (GtkCheckButton *button,
-                         gpointer        user_data)
+on_spin_text_changed (GtkEditable *editable,
+                      gpointer     user_data G_GNUC_UNUSED)
 {
-  OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
+  guint id;
 
-  self->pending_lock_enabled = gtk_check_button_get_active (button);
-  scenery_mark_dirty (self);
+  id = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (editable),
+                                            "scenery-commit-id"));
+  if (id)
+    g_source_remove (id);
+  id = g_timeout_add_seconds_full (G_PRIORITY_DEFAULT, 1,
+                                   scenery_spin_commit_idle,
+                                   g_object_ref (editable),
+                                   g_object_unref);
+  g_object_set_data (G_OBJECT (editable), "scenery-commit-id",
+                     GUINT_TO_POINTER (id));
 }
 
 static GtkWidget *
@@ -772,7 +746,8 @@ scenery_build_screenlock_page (OozeSceneryWindow *self)
 
   hint = gtk_label_new ("When the session is idle the desktop fades to "
                         "black, then locks. Display power saving turns "
-                        "the screen off.");
+                        "the screen off. Set 0 seconds to never fade. "
+                        "Changes take effect immediately.");
   gtk_label_set_wrap (GTK_LABEL (hint), TRUE);
   gtk_label_set_xalign (GTK_LABEL (hint), 0);
   gtk_box_append (GTK_BOX (content), hint);
@@ -784,9 +759,10 @@ scenery_build_screenlock_page (OozeSceneryWindow *self)
   gtk_grid_set_column_spacing (GTK_GRID (settings), 14);
   gtk_widget_set_hexpand (settings, TRUE);
   self->start_after = gtk_spin_button_new_with_range (0, 86400, 1);
-  gtk_spin_button_set_value (
-    GTK_SPIN_BUTTON (self->start_after),
-    g_settings_get_uint (self->session_settings, "idle-delay"));
+  g_settings_bind (self->session_settings, "idle-delay",
+                   gtk_spin_button_get_adjustment (
+                     GTK_SPIN_BUTTON (self->start_after)), "value",
+                   G_SETTINGS_BIND_DEFAULT);
   label = gtk_label_new ("Fade to black after");
   gtk_label_set_xalign (GTK_LABEL (label), 0);
   gtk_grid_attach (GTK_GRID (settings), label, 0, 0, 1, 1);
@@ -797,14 +773,15 @@ scenery_build_screenlock_page (OozeSceneryWindow *self)
   gtk_label_set_xalign (GTK_LABEL (label), 0);
   gtk_grid_attach (GTK_GRID (settings), label, 2, 0, 1, 1);
   self->lock_enabled = gtk_check_button_new_with_label ("Lock screen");
-  gtk_check_button_set_active (
-    GTK_CHECK_BUTTON (self->lock_enabled),
-    g_settings_get_boolean (self->screensaver_settings, "lock-enabled"));
+  g_settings_bind (self->screensaver_settings, "lock-enabled",
+                   self->lock_enabled, "active",
+                   G_SETTINGS_BIND_DEFAULT);
   gtk_grid_attach (GTK_GRID (settings), self->lock_enabled, 0, 1, 2, 1);
   self->lock_after = gtk_spin_button_new_with_range (0, 86400, 1);
-  gtk_spin_button_set_value (
-    GTK_SPIN_BUTTON (self->lock_after),
-    g_settings_get_uint (self->screensaver_settings, "lock-delay"));
+  g_settings_bind (self->screensaver_settings, "lock-delay",
+                   gtk_spin_button_get_adjustment (
+                     GTK_SPIN_BUTTON (self->lock_after)), "value",
+                   G_SETTINGS_BIND_DEFAULT);
   label = gtk_label_new ("Lock after");
   gtk_label_set_xalign (GTK_LABEL (label), 0);
   gtk_grid_attach (GTK_GRID (settings), label, 0, 2, 1, 1);
@@ -814,16 +791,14 @@ scenery_build_screenlock_page (OozeSceneryWindow *self)
   gtk_label_set_xalign (GTK_LABEL (label), 0);
   gtk_grid_attach (GTK_GRID (settings), label, 2, 2, 1, 1);
   gtk_box_append (GTK_BOX (content), settings);
-  g_signal_connect (self->start_after, "value-changed",
-                    G_CALLBACK (on_start_after_changed), self);
+  g_signal_connect (self->start_after, "changed",
+                    G_CALLBACK (on_spin_text_changed), NULL);
   g_signal_connect (self->start_after, "activate",
-                    G_CALLBACK (on_spin_activate), self);
-  g_signal_connect (self->lock_enabled, "toggled",
-                    G_CALLBACK (on_lock_enabled_changed), self);
-  g_signal_connect (self->lock_after, "value-changed",
-                    G_CALLBACK (on_lock_after_changed), self);
+                    G_CALLBACK (on_spin_activate), NULL);
+  g_signal_connect (self->lock_after, "changed",
+                    G_CALLBACK (on_spin_text_changed), NULL);
   g_signal_connect (self->lock_after, "activate",
-                    G_CALLBACK (on_spin_activate), self);
+                    G_CALLBACK (on_spin_activate), NULL);
   return page;
 }
 
