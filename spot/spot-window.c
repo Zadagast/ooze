@@ -53,6 +53,7 @@ static const char * const spot_context_refresh_icons[] = {
 typedef enum {
   SPOT_VIEW_GRID    = 0,  /* default */
   SPOT_VIEW_COLUMNS = 1,
+  SPOT_VIEW_LIST    = 2,
 } SpotViewMode;
 
 struct _SpotWindow
@@ -72,6 +73,11 @@ struct _SpotWindow
   GtkWidget *grid_scrolled;
   GtkWidget *grid_flow;       /* GtkFlowBox */
 
+  /* list view */
+  GtkWidget *list_scrolled;
+  GtkWidget *list_view;       /* GtkColumnView */
+  GListStore *list_store;     /* of GFileInfo (with "spot-file" data) */
+
   GtkWidget *sidebar;
   GtkWidget *status_label;
   GtkWidget *pathbar;
@@ -79,6 +85,7 @@ struct _SpotWindow
   GtkWidget *back_button;
   GtkWidget *forward_button;
   GtkWidget *grid_view_button;
+  GtkWidget *list_view_button;
   GtkWidget *column_view_button;
   GtkWidget *new_folder_popover;
   GtkWidget *new_folder_entry;
@@ -337,6 +344,11 @@ spot_ensure_css (void)
                                      "}"
                                      ".spot-grid-view > flowboxchild:hover:not(:selected) {"
                                      "  background: alpha(@accent_bg_color, 0.10);"
+                                     "}"
+
+                                     /* Muted hints and secondary list columns */
+                                     ".spot-empty-hint, .spot-list-dim {"
+                                     "  color: alpha(@window_fg_color, 0.55);"
                                      "}"
 
                                      /* Filename label — colour follows window fg, not view fg */
@@ -1367,6 +1379,14 @@ spot_action_view_grid (GSimpleAction *action G_GNUC_UNUSED,
 }
 
 static void
+spot_action_view_list (GSimpleAction *action G_GNUC_UNUSED,
+                       GVariant      *param G_GNUC_UNUSED,
+                       gpointer       user_data)
+{
+  spot_set_view_mode (SPOT_WINDOW (user_data), SPOT_VIEW_LIST);
+}
+
+static void
 spot_action_view_columns (GSimpleAction *action G_GNUC_UNUSED,
                           GVariant      *param G_GNUC_UNUSED,
                           gpointer       user_data)
@@ -1542,6 +1562,7 @@ spot_append_menus (SpotWindow *self)
 
   view = g_menu_new ();
   g_menu_append (view, "as Icons", "win.view-grid");
+  g_menu_append (view, "as List", "win.view-list");
   g_menu_append (view, "as Columns", "win.view-columns");
   g_menu_append (view, "Refresh", "win.refresh");
   ooze_application_window_append_menu_section (
@@ -1802,6 +1823,7 @@ spot_install_actions (SpotWindow *self)
     { "refresh",         spot_action_refresh,         NULL, NULL, NULL },
     { "close-window",    spot_action_close_window,    NULL, NULL, NULL },
     { "view-grid",       spot_action_view_grid,       NULL, NULL, NULL },
+    { "view-list",       spot_action_view_list,       NULL, NULL, NULL },
     { "view-columns",    spot_action_view_columns,    NULL, NULL, NULL },
     { "go-back",         spot_action_go_back,         NULL, NULL, NULL },
     { "go-forward",      spot_action_go_forward,      NULL, NULL, NULL },
@@ -2138,6 +2160,35 @@ spot_grid_enumerate_next_cb (GObject      *source,
     G_FILE_ENUMERATOR (source), result, &error);
   if (error || !infos)
     {
+      SpotWindow *self = enumeration->window;
+      GtkWidget *first = gtk_widget_get_first_child (self->grid_flow);
+
+      /* Enumeration is done — drop the loading placeholder, and give an
+       * empty folder an intentional hint instead of a blank pane. */
+      if (GTK_IS_FLOW_BOX_CHILD (first))
+        {
+          GtkWidget *inner =
+            gtk_flow_box_child_get_child (GTK_FLOW_BOX_CHILD (first));
+
+          if (inner && g_object_get_data (G_OBJECT (inner), "spot-loading"))
+            {
+              gtk_flow_box_remove (GTK_FLOW_BOX (self->grid_flow), first);
+              first = gtk_widget_get_first_child (self->grid_flow);
+            }
+        }
+
+      if (!first)
+        {
+          GtkWidget *hint = gtk_label_new ("Folder is empty");
+
+          gtk_widget_add_css_class (hint, "spot-empty-hint");
+          gtk_widget_set_margin_top (hint, 24);
+          gtk_widget_set_margin_start (hint, 24);
+          g_object_set_data (G_OBJECT (hint), "spot-loading",
+                             GINT_TO_POINTER (1));
+          gtk_flow_box_append (GTK_FLOW_BOX (self->grid_flow), hint);
+        }
+
       spot_grid_enumeration_free (enumeration);
       return;
     }
@@ -2238,26 +2289,311 @@ on_grid_child_activated (GtkFlowBox      *box G_GNUC_UNUSED,
     spot_open_file (file);
 }
 
+/* ── List view (Finder list: sortable Name / Size / Modified) ──────────── */
+
+static void
+spot_list_name_setup (GtkSignalListItemFactory *factory G_GNUC_UNUSED,
+                      GtkListItem              *item,
+                      gpointer                  user_data G_GNUC_UNUSED)
+{
+  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+  GtkWidget *image = gtk_image_new ();
+  GtkWidget *label = gtk_label_new (NULL);
+
+  gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+  gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
+  gtk_box_append (GTK_BOX (box), image);
+  gtk_box_append (GTK_BOX (box), label);
+  gtk_list_item_set_child (item, box);
+}
+
+static void
+spot_list_name_bind (GtkSignalListItemFactory *factory G_GNUC_UNUSED,
+                     GtkListItem              *item,
+                     gpointer                  user_data G_GNUC_UNUSED)
+{
+  GFileInfo *info = gtk_list_item_get_item (item);
+  GtkWidget *box = gtk_list_item_get_child (item);
+  GtkWidget *image = gtk_widget_get_first_child (box);
+  GtkWidget *label = gtk_widget_get_last_child (box);
+  GIcon *icon = g_file_info_get_icon (info);
+
+  gtk_image_set_from_gicon (GTK_IMAGE (image), icon);
+  gtk_label_set_text (GTK_LABEL (label),
+                      g_file_info_get_display_name (info));
+}
+
+static void
+spot_list_text_setup (GtkSignalListItemFactory *factory G_GNUC_UNUSED,
+                      GtkListItem              *item,
+                      gpointer                  user_data G_GNUC_UNUSED)
+{
+  GtkWidget *label = gtk_label_new (NULL);
+
+  gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+  gtk_widget_add_css_class (label, "spot-list-dim");
+  gtk_list_item_set_child (item, label);
+}
+
+static void
+spot_list_size_bind (GtkSignalListItemFactory *factory G_GNUC_UNUSED,
+                     GtkListItem              *item,
+                     gpointer                  user_data G_GNUC_UNUSED)
+{
+  GFileInfo *info = gtk_list_item_get_item (item);
+  GtkWidget *label = gtk_list_item_get_child (item);
+
+  if (g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
+    gtk_label_set_text (GTK_LABEL (label), "—");
+  else
+    {
+      g_autofree char *text = g_format_size (g_file_info_get_size (info));
+
+      gtk_label_set_text (GTK_LABEL (label), text);
+    }
+}
+
+static void
+spot_list_modified_bind (GtkSignalListItemFactory *factory G_GNUC_UNUSED,
+                         GtkListItem              *item,
+                         gpointer                  user_data G_GNUC_UNUSED)
+{
+  GFileInfo *info = gtk_list_item_get_item (item);
+  GtkWidget *label = gtk_list_item_get_child (item);
+  g_autoptr (GDateTime) mtime =
+    g_file_info_get_modification_date_time (info);
+
+  if (mtime)
+    {
+      g_autofree char *text = g_date_time_format (mtime, "%b %-e, %Y %H:%M");
+
+      gtk_label_set_text (GTK_LABEL (label), text);
+    }
+  else
+    gtk_label_set_text (GTK_LABEL (label), "—");
+}
+
+static int
+spot_list_sort_name (gconstpointer a,
+                     gconstpointer b,
+                     gpointer      user_data G_GNUC_UNUSED)
+{
+  return spot_compare_file_info (a, b);
+}
+
+static int
+spot_list_sort_size (gconstpointer a,
+                     gconstpointer b,
+                     gpointer      user_data G_GNUC_UNUSED)
+{
+  goffset sa = g_file_info_get_size ((GFileInfo *) a);
+  goffset sb = g_file_info_get_size ((GFileInfo *) b);
+
+  return (sa > sb) - (sa < sb);
+}
+
+static int
+spot_list_sort_modified (gconstpointer a,
+                         gconstpointer b,
+                         gpointer      user_data G_GNUC_UNUSED)
+{
+  g_autoptr (GDateTime) ta =
+    g_file_info_get_modification_date_time ((GFileInfo *) a);
+  g_autoptr (GDateTime) tb =
+    g_file_info_get_modification_date_time ((GFileInfo *) b);
+
+  if (!ta || !tb)
+    return (ta != NULL) - (tb != NULL);
+
+  return g_date_time_compare (ta, tb);
+}
+
+static void
+spot_list_row_activated (GtkColumnView *view G_GNUC_UNUSED,
+                         guint          position,
+                         gpointer       user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+  GtkSelectionModel *model =
+    gtk_column_view_get_model (GTK_COLUMN_VIEW (self->list_view));
+  g_autoptr (GFileInfo) info =
+    g_list_model_get_item (G_LIST_MODEL (model), position);
+  GFile *file;
+
+  if (!info)
+    return;
+
+  file = g_object_get_data (G_OBJECT (info), "spot-file");
+  if (!file)
+    return;
+
+  if (g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
+    spot_navigate_to (self, file, TRUE);
+  else
+    spot_open_file (file);
+}
+
+static void
+spot_populate_list (SpotWindow *self)
+{
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GFileEnumerator) enumerator = NULL;
+  GFileInfo *info;
+
+  g_list_store_remove_all (self->list_store);
+
+  if (!self->current_dir)
+    return;
+
+  enumerator = g_file_enumerate_children (self->current_dir,
+                                          G_FILE_ATTRIBUTE_STANDARD_NAME ","
+                                          G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME ","
+                                          G_FILE_ATTRIBUTE_STANDARD_ICON ","
+                                          G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON ","
+                                          G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE ","
+                                          G_FILE_ATTRIBUTE_STANDARD_TYPE ","
+                                          G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN ","
+                                          G_FILE_ATTRIBUTE_STANDARD_SIZE ","
+                                          G_FILE_ATTRIBUTE_TIME_MODIFIED,
+                                          G_FILE_QUERY_INFO_NONE,
+                                          NULL, &error);
+  if (!enumerator)
+    return;
+
+  while ((info = g_file_enumerator_next_file (enumerator, NULL, NULL)) != NULL)
+    {
+      if (g_file_info_get_is_hidden (info))
+        {
+          g_object_unref (info);
+          continue;
+        }
+
+      {
+        GFile *child = g_file_get_child (self->current_dir,
+                                         g_file_info_get_name (info));
+
+        g_object_set_data_full (G_OBJECT (info), "spot-file",
+                                child, g_object_unref);
+      }
+      g_list_store_append (self->list_store, info);
+      g_object_unref (info);
+    }
+}
+
+static GtkWidget *
+spot_create_list_view (SpotWindow *self)
+{
+  GtkWidget *scrolled;
+  GtkListItemFactory *factory;
+  GtkColumnViewColumn *column;
+  GtkSorter *sorter;
+  GtkSortListModel *sort_model;
+  GtkSingleSelection *selection;
+
+  self->list_store = g_list_store_new (G_TYPE_FILE_INFO);
+
+  self->list_view = gtk_column_view_new (NULL);
+  gtk_column_view_set_show_row_separators (
+    GTK_COLUMN_VIEW (self->list_view), FALSE);
+  gtk_widget_add_css_class (self->list_view, "spot-list-view");
+  gtk_widget_set_vexpand (self->list_view, TRUE);
+
+  /* Name */
+  factory = gtk_signal_list_item_factory_new ();
+  g_signal_connect (factory, "setup", G_CALLBACK (spot_list_name_setup), self);
+  g_signal_connect (factory, "bind", G_CALLBACK (spot_list_name_bind), self);
+  column = gtk_column_view_column_new ("Name", factory);
+  gtk_column_view_column_set_expand (column, TRUE);
+  gtk_column_view_column_set_resizable (column, TRUE);
+  sorter = GTK_SORTER (gtk_custom_sorter_new (spot_list_sort_name, NULL, NULL));
+  gtk_column_view_column_set_sorter (column, sorter);
+  g_object_unref (sorter);
+  gtk_column_view_append_column (GTK_COLUMN_VIEW (self->list_view), column);
+  g_object_unref (column);
+
+  /* Size */
+  factory = gtk_signal_list_item_factory_new ();
+  g_signal_connect (factory, "setup", G_CALLBACK (spot_list_text_setup), self);
+  g_signal_connect (factory, "bind", G_CALLBACK (spot_list_size_bind), self);
+  column = gtk_column_view_column_new ("Size", factory);
+  gtk_column_view_column_set_fixed_width (column, 96);
+  gtk_column_view_column_set_resizable (column, TRUE);
+  sorter = GTK_SORTER (gtk_custom_sorter_new (spot_list_sort_size, NULL, NULL));
+  gtk_column_view_column_set_sorter (column, sorter);
+  g_object_unref (sorter);
+  gtk_column_view_append_column (GTK_COLUMN_VIEW (self->list_view), column);
+  g_object_unref (column);
+
+  /* Modified */
+  factory = gtk_signal_list_item_factory_new ();
+  g_signal_connect (factory, "setup", G_CALLBACK (spot_list_text_setup), self);
+  g_signal_connect (factory, "bind", G_CALLBACK (spot_list_modified_bind), self);
+  column = gtk_column_view_column_new ("Modified", factory);
+  gtk_column_view_column_set_fixed_width (column, 170);
+  gtk_column_view_column_set_resizable (column, TRUE);
+  sorter = GTK_SORTER (gtk_custom_sorter_new (spot_list_sort_modified, NULL, NULL));
+  gtk_column_view_column_set_sorter (column, sorter);
+  g_object_unref (sorter);
+  gtk_column_view_append_column (GTK_COLUMN_VIEW (self->list_view), column);
+  g_object_unref (column);
+
+  sort_model = gtk_sort_list_model_new (
+    G_LIST_MODEL (g_object_ref (self->list_store)),
+    g_object_ref (gtk_column_view_get_sorter (GTK_COLUMN_VIEW (self->list_view))));
+  selection = gtk_single_selection_new (G_LIST_MODEL (sort_model));
+  gtk_single_selection_set_autoselect (selection, FALSE);
+  gtk_column_view_set_model (GTK_COLUMN_VIEW (self->list_view),
+                             GTK_SELECTION_MODEL (selection));
+  g_object_unref (selection);
+
+  gtk_column_view_set_single_click_activate (
+    GTK_COLUMN_VIEW (self->list_view), FALSE);
+  g_signal_connect (self->list_view, "activate",
+                    G_CALLBACK (spot_list_row_activated), self);
+
+  scrolled = ooze_scrolled_window_new ();
+  gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
+                                  GTK_POLICY_AUTOMATIC,
+                                  GTK_POLICY_AUTOMATIC);
+  gtk_widget_set_hexpand (scrolled, TRUE);
+  gtk_widget_set_vexpand (scrolled, TRUE);
+  gtk_widget_add_css_class (scrolled, "spot-list-scroll");
+  gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled),
+                                 self->list_view);
+
+  return scrolled;
+}
+
 /* ── View-mode switching ────────────────────────────────────────────────── */
 
 static void
 spot_set_view_mode (SpotWindow *self, SpotViewMode mode)
 {
-  GtkWidget *peers[2];
+  GtkWidget *peers[3];
+  const char *page;
+  int active;
 
   self->view_mode = mode;
 
   peers[0] = self->grid_view_button;
-  peers[1] = self->column_view_button;
-  ooze_button_set_exclusive (peers, 2,
-                             mode == SPOT_VIEW_GRID ? 0 : 1);
+  peers[1] = self->list_view_button;
+  peers[2] = self->column_view_button;
+  switch (mode)
+    {
+    case SPOT_VIEW_LIST:    active = 1; page = "list";    break;
+    case SPOT_VIEW_COLUMNS: active = 2; page = "columns"; break;
+    case SPOT_VIEW_GRID:
+    default:                active = 0; page = "grid";    break;
+    }
+  ooze_button_set_exclusive (peers, 3, active);
 
   gtk_stack_set_visible_child_name (
-      GTK_STACK (self->content_stack),
-      mode == SPOT_VIEW_GRID ? "grid" : "columns");
+      GTK_STACK (self->content_stack), page);
 
   if (mode == SPOT_VIEW_GRID)
     spot_populate_grid (self);
+  else if (mode == SPOT_VIEW_LIST)
+    spot_populate_list (self);
   else
     spot_rebuild_columns (self);
 }
@@ -2266,6 +2602,12 @@ static void
 on_grid_view_clicked (GtkButton *btn G_GNUC_UNUSED, SpotWindow *self)
 {
   spot_set_view_mode (self, SPOT_VIEW_GRID);
+}
+
+static void
+on_list_view_clicked (GtkButton *btn G_GNUC_UNUSED, SpotWindow *self)
+{
+  spot_set_view_mode (self, SPOT_VIEW_LIST);
 }
 
 static void
@@ -2290,6 +2632,9 @@ static const char * const spot_icon_forward[] = {
 };
 static const char * const spot_icon_view_grid[] = {
   "view-grid", "view-app-grid", "view-grid-symbolic", NULL
+};
+static const char * const spot_icon_view_list[] = {
+  "view-list", "view-list-symbolic", "view-continuous-symbolic", NULL
 };
 static const char * const spot_icon_view_column[] = {
   "view-column", "view-dual", "view-column-symbolic", "view-dual-symbolic", NULL
@@ -2956,6 +3301,19 @@ spot_create_column_list (SpotWindow *self,
         selected_row = row;
     }
 
+  if (!entries)
+    {
+      GtkWidget *row = gtk_list_box_row_new ();
+      GtkWidget *label = gtk_label_new ("Empty");
+
+      gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (row), FALSE);
+      gtk_list_box_row_set_selectable (GTK_LIST_BOX_ROW (row), FALSE);
+      gtk_widget_add_css_class (label, "spot-empty-hint");
+      gtk_widget_set_margin_top (label, 12);
+      gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), label);
+      gtk_list_box_append (GTK_LIST_BOX (list), row);
+    }
+
   g_list_free_full (entries, g_object_unref);
 
   if (selected_row)
@@ -3050,6 +3408,140 @@ spot_column_handle_drag_update (GtkGestureDrag *gesture,
   self->column_width = width;
 }
 
+/* Keyboard navigation for Miller columns: Left steps out to the parent,
+ * Right drills into the selected folder (Finder style). Up/Down within a
+ * column are native GtkListBox behaviour. */
+static GtkListBox *
+spot_columns_last_list (SpotWindow *self)
+{
+  GtkWidget *child = gtk_widget_get_last_child (self->columns_box);
+  GtkWidget *inner;
+
+  if (!child || !GTK_IS_SCROLLED_WINDOW (child))
+    return NULL;
+
+  inner = gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (child));
+  if (GTK_IS_VIEWPORT (inner))
+    inner = gtk_viewport_get_child (GTK_VIEWPORT (inner));
+
+  return GTK_IS_LIST_BOX (inner) ? GTK_LIST_BOX (inner) : NULL;
+}
+
+static gboolean
+spot_columns_key_pressed (GtkEventControllerKey *controller G_GNUC_UNUSED,
+                          guint                  keyval,
+                          guint                  keycode G_GNUC_UNUSED,
+                          GdkModifierType        state,
+                          gpointer               user_data)
+{
+  SpotWindow *self = SPOT_WINDOW (user_data);
+
+  if (self->view_mode != SPOT_VIEW_COLUMNS)
+    return FALSE;
+  if ((state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SHIFT_MASK)) != 0)
+    return FALSE;
+
+  if (keyval == GDK_KEY_Left)
+    {
+      g_autoptr (GFile) parent =
+        self->current_dir ? g_file_get_parent (self->current_dir) : NULL;
+
+      if (!parent)
+        return FALSE;
+
+      spot_navigate_to (self, parent, TRUE);
+      return TRUE;
+    }
+
+  if (keyval == GDK_KEY_Right)
+    {
+      GtkListBox *list = spot_columns_last_list (self);
+      GtkListBoxRow *row;
+      GFile *file;
+
+      if (!list)
+        return FALSE;
+
+      row = gtk_list_box_get_selected_row (list);
+      if (!row)
+        {
+          row = gtk_list_box_get_row_at_index (list, 0);
+          if (row)
+            {
+              gtk_list_box_select_row (list, row);
+              gtk_widget_grab_focus (GTK_WIDGET (row));
+            }
+          return row != NULL;
+        }
+
+      file = g_object_get_data (G_OBJECT (row), "spot-file");
+      if (!file)
+        return FALSE;
+
+      {
+        g_autoptr (GFileInfo) info = g_file_query_info (
+          file, G_FILE_ATTRIBUTE_STANDARD_TYPE,
+          G_FILE_QUERY_INFO_NONE, NULL, NULL);
+
+        if (info &&
+            g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
+          {
+            spot_navigate_to (self, file, TRUE);
+            return TRUE;
+          }
+      }
+
+      return FALSE;
+    }
+
+  return FALSE;
+}
+
+/* Column width persists across sessions in the Ooze config dir. */
+static char *
+spot_state_path_dup (void)
+{
+  return g_build_filename (g_get_user_config_dir (), "ooze",
+                           "spot-state.ini", NULL);
+}
+
+static void
+spot_state_load (SpotWindow *self)
+{
+  g_autoptr (GKeyFile) keyfile = g_key_file_new ();
+  g_autofree char *path = spot_state_path_dup ();
+  int width;
+
+  if (!g_key_file_load_from_file (keyfile, path, G_KEY_FILE_NONE, NULL))
+    return;
+
+  width = g_key_file_get_integer (keyfile, "columns", "width", NULL);
+  if (width >= SPOT_COLUMN_WIDTH_MIN && width <= SPOT_COLUMN_WIDTH_MAX)
+    self->column_width = width;
+}
+
+static void
+spot_state_save (SpotWindow *self)
+{
+  g_autoptr (GKeyFile) keyfile = g_key_file_new ();
+  g_autofree char *path = spot_state_path_dup ();
+  g_autofree char *dir = g_path_get_dirname (path);
+
+  g_key_file_load_from_file (keyfile, path, G_KEY_FILE_KEEP_COMMENTS, NULL);
+  g_key_file_set_integer (keyfile, "columns", "width", self->column_width);
+  g_mkdir_with_parents (dir, 0700);
+  g_key_file_save_to_file (keyfile, path, NULL);
+}
+
+static void
+spot_column_handle_drag_end (GtkGestureDrag *gesture G_GNUC_UNUSED,
+                             double          offset_x G_GNUC_UNUSED,
+                             double          offset_y G_GNUC_UNUSED,
+                             SpotWindow     *self)
+{
+  spot_state_save (self);
+}
+
 /* Divider between Miller columns: an Aqua pinline widened into a
  * grab strip that drag-resizes the column to its left, Finder style. */
 static GtkWidget *
@@ -3074,6 +3566,8 @@ spot_create_column_handle (SpotWindow *self)
                     G_CALLBACK (spot_column_handle_drag_begin), self);
   g_signal_connect (drag, "drag-update",
                     G_CALLBACK (spot_column_handle_drag_update), self);
+  g_signal_connect (drag, "drag-end",
+                    G_CALLBACK (spot_column_handle_drag_end), self);
   gtk_widget_add_controller (handle, GTK_EVENT_CONTROLLER (drag));
 
   return handle;
@@ -3195,6 +3689,8 @@ spot_refresh (SpotWindow *self)
 {
   if (self->view_mode == SPOT_VIEW_GRID)
     spot_populate_grid (self);
+  else if (self->view_mode == SPOT_VIEW_LIST)
+    spot_populate_list (self);
   else
     spot_rebuild_columns (self);
 
@@ -3453,9 +3949,12 @@ spot_create_toolbar (SpotWindow *self)
   view = ooze_toolbar_add_group (toolbar);
   self->grid_view_button =
     spot_create_toolbar_button (spot_icon_view_grid, "Grid", "Grid view", TRUE, TRUE);
+  self->list_view_button =
+    spot_create_toolbar_button (spot_icon_view_list, "List", "List view", TRUE, FALSE);
   self->column_view_button =
     spot_create_toolbar_button (spot_icon_view_column, "Columns", "Columns view", TRUE, FALSE);
   gtk_box_append (GTK_BOX (view), self->grid_view_button);
+  gtk_box_append (GTK_BOX (view), self->list_view_button);
   gtk_box_append (GTK_BOX (view), self->column_view_button);
 
   ooze_toolbar_add_spacer (toolbar);
@@ -3472,6 +3971,7 @@ spot_create_toolbar (SpotWindow *self)
   g_signal_connect (self->back_button, "clicked", G_CALLBACK (on_back_clicked), self);
   g_signal_connect (self->forward_button, "clicked", G_CALLBACK (on_forward_clicked), self);
   g_signal_connect (self->grid_view_button, "clicked", G_CALLBACK (on_grid_view_clicked), self);
+  g_signal_connect (self->list_view_button, "clicked", G_CALLBACK (on_list_view_clicked), self);
   g_signal_connect (self->column_view_button, "clicked", G_CALLBACK (on_column_view_clicked), self);
 
   return toolbar;
@@ -3585,9 +4085,15 @@ spot_window_constructed (GObject *object)
                        self->columns_scrolled, "columns");
   gtk_stack_add_named (GTK_STACK (self->content_stack),
                        self->grid_scrolled, "grid");
+  self->list_scrolled = spot_create_list_view (self);
+  gtk_stack_add_named (GTK_STACK (self->content_stack),
+                       self->list_scrolled, "list");
+  spot_attach_dir_drop (self->list_scrolled, self);
+  spot_attach_context_menu (self, self->list_scrolled);
   gtk_stack_set_visible_child_name (GTK_STACK (self->content_stack), "grid");
   self->view_mode = SPOT_VIEW_GRID;
   self->column_width = SPOT_COLUMN_WIDTH;
+  spot_state_load (self);
 
   gtk_paned_set_end_child (GTK_PANED (content_paned), self->content_stack);
 
@@ -3658,6 +4164,11 @@ spot_window_constructed (GObject *object)
     keys = gtk_event_controller_key_new ();
     g_signal_connect (keys, "key-pressed", G_CALLBACK (on_new_folder_shortcut), self);
     gtk_widget_add_controller (GTK_WIDGET (self), keys);
+
+    keys = gtk_event_controller_key_new ();
+    g_signal_connect (keys, "key-pressed",
+                      G_CALLBACK (spot_columns_key_pressed), self);
+    gtk_widget_add_controller (self->columns_scrolled, keys);
   }
 
   spot_update_action_states (self);
@@ -3675,6 +4186,7 @@ spot_window_dispose (GObject *object)
   g_clear_object (&self->current_dir);
   g_clear_object (&self->context_target);
   g_clear_object (&self->reveal_target);
+  g_clear_object (&self->list_store);
   if (self->context_menu)
     {
       gtk_widget_unparent (self->context_menu);
