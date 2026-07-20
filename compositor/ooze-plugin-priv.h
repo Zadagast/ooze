@@ -98,6 +98,8 @@ struct _OozePlugin
   gboolean      screensaver_input_armed;
   gpointer      screensaver_flow;
   ClutterActor *screensaver_flow_actor;
+  ClutterActor *screensaver_curtain; /* black fade curtain (phases) */
+  guint         screensaver_phase_id;
 
   /* XScreenSaver hack backdrop (X11 hack adopted into the overlay) */
   GPid          saver_hack_pid;
@@ -106,6 +108,7 @@ struct _OozePlugin
   guint         saver_hack_kill_id;
   ClutterActor *saver_hack_clone;
   gpointer      saver_hack_window; /* MetaWindow* */
+  gboolean      saver_unredirect_disabled;
 
   /* StatusNotifier tray (AppIndicator host) */
   ClutterActor *tray_box;
