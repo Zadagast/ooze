@@ -1,18 +1,23 @@
 /*
- * Ooze screensaver — a non-grabbing animated overlay inside Mutter.
+ * Ooze screensaver — XScreenSaver modules hosted by the compositor.
  *
- * Ooze Flow is rendered by a Cogl fragment shader over the shared wallpaper,
- * with a full-resolution Cairo renderer retained as a fallback.
+ * The lifecycle mirrors how classic desktops run screensavers:
+ *
+ *   1. On idle the desktop fades to black (an opaque overlay on top of
+ *      the stage).
+ *   2. The selected XScreenSaver module — an X11 program running under
+ *      Xwayland — is spawned; when its window maps it is adopted into
+ *      the overlay and fades in over the black.
+ *   3. On user activity the whole overlay cross-fades back to the
+ *      desktop, then the module is killed.
+ *
+ * If no module is configured or it is missing/dies, the saver simply
+ * stays black (classic blank mode).
  */
 
 #include "ooze-screensaver.h"
 #include "ooze-plugin-priv.h"
-#include "ooze-aqua-draw.h"
-#include "ooze-flow.h"
-#include "ooze-flow-gpu.h"
 #include "ooze-lock.h"
-#include "ooze-wallpaper.h"
-#include "ooze-theme.h"
 
 #include <meta/display.h>
 #include <meta/meta-backend.h>
@@ -23,173 +28,83 @@
 #include <clutter/clutter.h>
 
 #include <glib.h>
-#include <cairo/cairo.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/types.h>
 
-#define OOZE_SCREENSAVER_FADE_IN_MS   1600
-#define OOZE_SCREENSAVER_FADE_OUT_MS   1100
-#define OOZE_SCREENSAVER_ARM_DELAY_MS  250
-#define OOZE_SCREENSAVER_TIMELINE_MS 10000
-#define OOZE_SAVER_PHASE_MS            750
-
-typedef struct _OozeSaverMode OozeSaverMode;
-
-typedef struct
-{
-  cairo_surface_t *surface;
-  int              width;
-  int              height;
-  int              render_width;
-  int              render_height;
-  gdouble          phase;
-  gint64           phase_start_us;
-  gint64           last_render_us;
-  OozeFlowGpu     *gpu;
-  char            *scene;
-} OozeFlowState;
-
-struct _OozeSaverMode
-{
-  void (*start)  (OozePlugin *plugin);
-  void (*step)   (OozePlugin *plugin, gdouble progress);
-  void (*resize) (OozePlugin *plugin, int width, int height);
-  void (*stop)   (OozePlugin *plugin);
-};
+#define OOZE_SAVER_BLACK_MS        900  /* desktop -> black */
+#define OOZE_SAVER_REVEAL_MS       900  /* black -> module */
+#define OOZE_SAVER_DISMISS_MS      700  /* saver -> desktop */
+#define OOZE_SAVER_ARM_DELAY_MS    250
 
 static void ooze_screensaver_sync_watches (OozePlugin *plugin);
-static void ooze_screensaver_mode_resize (OozePlugin *plugin,
-                                          int          width,
-                                          int          height);
+static void ooze_screensaver_hack_start (OozePlugin *plugin);
 
 static char *
-ooze_screensaver_current_scene (OozePlugin *plugin)
+ooze_screensaver_current_mode (OozePlugin *plugin)
 {
   if (!plugin->scenery_settings)
-    return g_strdup ("flow");
+    return g_strdup ("none");
 
   return g_settings_get_string (plugin->scenery_settings,
                                 "screensaver-mode");
 }
 
 static gboolean
-ooze_screensaver_flow_enabled (OozePlugin *plugin)
+ooze_screensaver_enabled (OozePlugin *plugin)
 {
-  g_autofree char *mode = ooze_screensaver_current_scene (plugin);
+  g_autofree char *mode = ooze_screensaver_current_mode (plugin);
 
   return g_strcmp0 (mode, "none") != 0;
 }
 
-static OozeFlowState *
-ooze_screensaver_get_flow (OozePlugin *plugin)
+static ClutterActor *
+ooze_screensaver_get_stage (OozePlugin *plugin)
 {
-  return plugin->screensaver_flow;
-}
+  MetaDisplay *display;
+  MetaBackend *backend;
 
-static void
-ooze_screensaver_flow_render (OozePlugin *plugin,
-                              gboolean    force)
-{
-  OozeFlowState *flow = ooze_screensaver_get_flow (plugin);
-  const OozeAquaPalette *palette;
-  gboolean dark;
-  gdouble red;
-  gdouble green;
-  gdouble blue;
-  gint64 now;
-
-  if (!flow)
-    return;
-
-  now = g_get_monotonic_time ();
-  if (!force && flow->last_render_us != 0 &&
-      now - flow->last_render_us < 33000)
-    return;
-
-  dark = ooze_theme_is_dark (NULL);
-  palette = ooze_theme_get_palette (NULL);
-  red = 0.10 + palette->wallpaper_edge_r * 0.25;
-  green = 0.24 + palette->wallpaper_mid_g * 0.25;
-  blue = 0.58 + palette->wallpaper_mid_b * 0.25;
-  if (flow->gpu)
-    {
-      ooze_flow_gpu_set_phase (flow->gpu, flow->phase);
-      ooze_flow_gpu_set_color (flow->gpu,
-                               CLAMP (red, 0.0, 1.0),
-                               CLAMP (green, 0.0, 1.0),
-                               CLAMP (blue, 0.0, 1.0),
-                               dark);
-      clutter_actor_queue_redraw (plugin->screensaver_flow_actor);
-    }
-  else if (flow->surface)
-    {
-      if (flow->scene && g_strcmp0 (flow->scene, "flow") != 0 &&
-          g_strcmp0 (flow->scene, "none") != 0)
-        ooze_flow_render_scene (flow->surface,
-                                flow->render_width,
-                                flow->render_height,
-                                flow->phase,
-                                dark,
-                                flow->scene);
-      else
-        ooze_flow_render_with_color (flow->surface,
-                                     flow->render_width,
-                                     flow->render_height,
-                                     flow->phase,
-                                     dark,
-                                     CLAMP (red, 0.0, 1.0),
-                                     CLAMP (green, 0.0, 1.0),
-                                     CLAMP (blue, 0.0, 1.0));
-
-      {
-        g_autoptr (ClutterContent) content = NULL;
-
-        content = ooze_aqua_content_from_surface (
-          plugin->screensaver_flow_actor,
-          flow->surface);
-        if (content)
-          clutter_actor_set_content (plugin->screensaver_flow_actor,
-                                     g_steal_pointer (&content));
-      }
-    }
-  flow->last_render_us = now;
-}
-
-static void
-ooze_screensaver_flow_free (OozePlugin *plugin)
-{
-  OozeFlowState *flow = ooze_screensaver_get_flow (plugin);
-
-  if (!flow)
-    return;
-
-  ooze_flow_gpu_free (flow->gpu);
-  g_clear_pointer (&flow->surface, cairo_surface_destroy);
-  g_free (flow->scene);
-  g_free (flow);
-  plugin->screensaver_flow = NULL;
-}
-
-/* --- XScreenSaver hack backdrop ---------------------------------------
- *
- * Modes of the form "xscreensaver:<hack>" spawn the matching XScreenSaver
- * hack (an X11 program running under Xwayland) in windowed mode.  When its
- * window maps, the plugin map vfunc hands it to
- * ooze_screensaver_adopt_hack_window(): the real window actor is hidden and
- * a fullscreen ClutterClone of it is placed inside the saver overlay, so
- * the existing fade/lock lifecycle keeps working.  Ooze Flow renders
- * underneath until the hack's first frame arrives, and again if the hack
- * dies.
- */
-
-static const char *
-ooze_screensaver_scene_hack (const char *scene)
-{
-  if (scene == NULL || !g_str_has_prefix (scene, "xscreensaver:"))
+  display = meta_plugin_get_display (META_PLUGIN (plugin));
+  if (!display)
     return NULL;
 
-  return scene + strlen ("xscreensaver:");
+  backend = meta_context_get_backend (meta_display_get_context (display));
+  return CLUTTER_ACTOR (meta_backend_get_stage (backend));
+}
+
+/* Explicit opacity transition: implicit Clutter animations are skipped
+ * on actors that are not yet mapped, which made earlier fades snap. */
+static void
+ooze_screensaver_fade (ClutterActor *actor,
+                       guint         from,
+                       guint         to,
+                       guint         duration_ms)
+{
+  ClutterTransition *fade;
+
+  clutter_actor_remove_transition (actor, "saver-fade");
+  clutter_actor_show (actor);
+  clutter_actor_set_opacity (actor, from);
+
+  fade = clutter_property_transition_new ("opacity");
+  clutter_transition_set_from (fade, G_TYPE_UINT, from);
+  clutter_transition_set_to (fade, G_TYPE_UINT, to);
+  clutter_timeline_set_duration (CLUTTER_TIMELINE (fade), duration_ms);
+  clutter_timeline_set_progress_mode (CLUTTER_TIMELINE (fade),
+                                      CLUTTER_EASE_IN_OUT_SINE);
+  clutter_actor_add_transition (actor, "saver-fade", fade);
+  g_object_unref (fade);
+}
+
+/* --- XScreenSaver module process ------------------------------------- */
+
+static const char *
+ooze_screensaver_mode_hack (const char *mode)
+{
+  if (mode == NULL || !g_str_has_prefix (mode, "xscreensaver:"))
+    return NULL;
+
+  return mode + strlen ("xscreensaver:");
 }
 
 static char *
@@ -272,8 +187,6 @@ ooze_screensaver_hack_cleanup (OozePlugin *plugin,
   g_clear_pointer (&plugin->saver_hack_clone, clutter_actor_destroy);
   plugin->saver_hack_window = NULL;
   ooze_screensaver_set_unredirect (plugin, FALSE);
-  if (plugin->screensaver_flow_actor)
-    clutter_actor_show (plugin->screensaver_flow_actor);
 }
 
 static void
@@ -288,16 +201,16 @@ ooze_screensaver_hack_child_exited (GPid     pid,
     {
       g_spawn_close_pid (pid);
       plugin->saver_hack_pid = 0;
-      /* Fall back to Flow underneath if the hack dies mid-saver. */
+      /* The module died: the saver stays black (classic blank mode). */
       ooze_screensaver_hack_cleanup (plugin, FALSE);
     }
 }
 
 static void
-ooze_screensaver_hack_start (OozePlugin *plugin,
-                             const char *scene)
+ooze_screensaver_hack_start (OozePlugin *plugin)
 {
-  const char *hack = ooze_screensaver_scene_hack (scene);
+  g_autofree char *mode = ooze_screensaver_current_mode (plugin);
+  const char *hack = ooze_screensaver_mode_hack (mode);
   g_autofree char *binary = NULL;
   g_autoptr (GError) error = NULL;
   char *argv[3];
@@ -311,8 +224,9 @@ ooze_screensaver_hack_start (OozePlugin *plugin,
   binary = ooze_screensaver_hack_binary (hack);
   if (!binary)
     {
-      g_warning ("Ooze screensaver: XScreenSaver hack '%s' not found "
-                 "(install xscreensaver-data/-extra); showing Ooze Flow",
+      g_warning ("Ooze screensaver: XScreenSaver module '%s' not found "
+                 "(install the xscreensaver-data/-gl packages); "
+                 "staying blank",
                  hack);
       return;
     }
@@ -334,35 +248,10 @@ ooze_screensaver_hack_start (OozePlugin *plugin,
   plugin->saver_hack_child_watch_id =
     g_child_watch_add (pid, ooze_screensaver_hack_child_exited, plugin);
 
-  /* A fullscreen hack window would otherwise be unredirected (direct
+  /* A fullscreen module window would otherwise be unredirected (direct
    * scan-out), which stops the compositor updating the texture we clone,
    * freezing the saver after a few frames. */
   ooze_screensaver_set_unredirect (plugin, TRUE);
-}
-
-static gboolean
-ooze_screensaver_hack_kill_after_fade (gpointer user_data)
-{
-  OozePlugin *plugin = OOZE_PLUGIN (user_data);
-
-  plugin->saver_hack_kill_id = 0;
-  ooze_screensaver_hack_cleanup (plugin, TRUE);
-  return G_SOURCE_REMOVE;
-}
-
-static void
-ooze_screensaver_hack_stop (OozePlugin *plugin)
-{
-  if (!plugin->saver_hack_pid && !plugin->saver_hack_clone)
-    return;
-
-  /* Keep the clone painting through the overlay fade-out. */
-  if (plugin->saver_hack_kill_id)
-    g_source_remove (plugin->saver_hack_kill_id);
-  plugin->saver_hack_kill_id =
-    g_timeout_add (OOZE_SCREENSAVER_FADE_OUT_MS + 60,
-                   ooze_screensaver_hack_kill_after_fade,
-                   plugin);
 }
 
 static gboolean
@@ -375,8 +264,8 @@ ooze_screensaver_window_is_hack (OozePlugin *plugin,
   if (meta_window_get_pid (window) == (pid_t) plugin->saver_hack_pid)
     return TRUE;
 
-  /* X11 clients under Xwayland may not report a usable pid; the hacks
-   * all set their WM_CLASS to the hack name. */
+  /* X11 clients under Xwayland may not report a usable pid; the modules
+   * all set their WM_CLASS to the module name. */
   if (!plugin->saver_hack_name)
     return FALSE;
 
@@ -415,203 +304,128 @@ ooze_screensaver_adopt_hack_window (OozePlugin      *plugin,
   clone = clutter_clone_new (CLUTTER_ACTOR (actor));
   clutter_actor_set_position (clone, 0.0f, 0.0f);
   clutter_actor_set_size (clone, (gfloat) width, (gfloat) height);
+  clutter_actor_set_opacity (clone, 0);
   clutter_actor_add_child (plugin->screensaver_overlay, clone);
   plugin->saver_hack_clone = clone;
   plugin->saver_hack_window = window;
 
-  if (plugin->screensaver_flow_actor)
-    clutter_actor_hide (plugin->screensaver_flow_actor);
+  /* Once the screen is fully black, fade the module in over it.  If we
+   * are still fading to black the reveal timer does this instead. */
+  if (plugin->screensaver_active && plugin->screensaver_black)
+    ooze_screensaver_fade (clone, 0u, 255u, OOZE_SAVER_REVEAL_MS);
 
   return TRUE;
 }
 
-static void
-ooze_screensaver_mode_start (OozePlugin *plugin G_GNUC_UNUSED)
-{
-  OozeFlowState *flow;
-
-  if (!plugin->screensaver_flow_actor)
-    {
-      plugin->screensaver_flow_actor = clutter_actor_new ();
-      clutter_actor_set_position (plugin->screensaver_flow_actor, 0.0f, 0.0f);
-      clutter_actor_set_reactive (plugin->screensaver_flow_actor, FALSE);
-      clutter_actor_add_child (plugin->screensaver_overlay,
-                               plugin->screensaver_flow_actor);
-    }
-
-  flow = ooze_screensaver_get_flow (plugin);
-  if (!flow)
-    {
-      ooze_screensaver_mode_resize (plugin,
-                                    (int) clutter_actor_get_width (
-                                      plugin->screensaver_overlay),
-                                    (int) clutter_actor_get_height (
-                                      plugin->screensaver_overlay));
-      flow = ooze_screensaver_get_flow (plugin);
-    }
-
-  if (flow)
-    {
-      flow->phase = 0.0;
-      flow->phase_start_us = g_get_monotonic_time ();
-      flow->last_render_us = 0;
-      ooze_screensaver_flow_render (plugin, TRUE);
-    }
-
-  ooze_screensaver_hack_start (plugin, flow ? flow->scene : NULL);
-}
+/* --- Overlay and lifecycle ------------------------------------------- */
 
 static void
-ooze_screensaver_mode_step (OozePlugin *plugin G_GNUC_UNUSED,
-                            gdouble      progress G_GNUC_UNUSED)
+ooze_screensaver_build (OozePlugin *plugin)
 {
-  OozeFlowState *flow = ooze_screensaver_get_flow (plugin);
-  gint64 now;
-
-  if (!flow)
-    return;
-
-  now = g_get_monotonic_time ();
-  if (flow->phase_start_us == 0)
-    flow->phase_start_us = now;
-  /* ~26s per base cycle; per-blob speeds stretch this to a very slow,
-   * lava-lamp rise/sink of roughly 36-65s per blob. */
-  flow->phase = (now - flow->phase_start_us) *
-                (G_PI * 2.0 / 26000000.0);
-  ooze_screensaver_flow_render (plugin, FALSE);
-}
-
-static void
-ooze_screensaver_mode_resize (OozePlugin *plugin,
-                              int          width,
-                              int          height)
-{
-  OozeFlowState *flow;
-  int render_width;
-  int render_height;
-
-  if (!plugin->screensaver_flow_actor)
-    return;
-
-  clutter_actor_set_size (plugin->screensaver_flow_actor,
-                          (gfloat) width,
-                          (gfloat) height);
-  render_width = MAX (1, width);
-  render_height = MAX (1, height);
-
-  clutter_actor_set_content (plugin->screensaver_flow_actor, NULL);
-  ooze_screensaver_flow_free (plugin);
-  flow = g_new0 (OozeFlowState, 1);
-  flow->width = width;
-  flow->height = height;
-  flow->render_width = render_width;
-  flow->render_height = render_height;
-  flow->surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32,
-                                              render_width,
-                                              render_height);
-  flow->scene = ooze_screensaver_current_scene (plugin);
-  flow->gpu = ooze_flow_gpu_new_for_scene (flow->scene);
-  if (flow->gpu)
-    {
-      g_autoptr (ClutterContent) content = NULL;
-
-      ooze_flow_gpu_set_size (flow->gpu, width, height);
-      content = g_object_ref (ooze_flow_gpu_get_content (flow->gpu));
-      clutter_actor_set_content (plugin->screensaver_flow_actor,
-                                 g_steal_pointer (&content));
-    }
-  plugin->screensaver_flow = flow;
-}
-
-static void
-ooze_screensaver_mode_stop (OozePlugin *plugin G_GNUC_UNUSED)
-{
-  ooze_screensaver_hack_stop (plugin);
-  ooze_screensaver_flow_free (plugin);
-}
-
-static const OozeSaverMode ooze_screensaver_mode = {
-  .start = ooze_screensaver_mode_start,
-  .step = ooze_screensaver_mode_step,
-  .resize = ooze_screensaver_mode_resize,
-  .stop = ooze_screensaver_mode_stop,
-};
-
-static ClutterActor *
-ooze_screensaver_get_stage (OozePlugin *plugin)
-{
-  MetaDisplay *display;
-  MetaBackend *backend;
-
-  display = meta_plugin_get_display (META_PLUGIN (plugin));
-  if (!display)
-    return NULL;
-
-  backend = meta_context_get_backend (meta_display_get_context (display));
-  return CLUTTER_ACTOR (meta_backend_get_stage (backend));
-}
-
-void
-ooze_screensaver_refresh_wallpaper (OozePlugin *plugin)
-{
-  g_autoptr (ClutterContent) wallpaper = NULL;
+  ClutterActor *stage;
+  CoglColor black;
   int width;
   int height;
 
-  if (!plugin->screensaver_overlay)
+  if (plugin->screensaver_overlay)
     return;
 
-  width = (int) clutter_actor_get_width (plugin->screensaver_overlay);
-  height = (int) clutter_actor_get_height (plugin->screensaver_overlay);
-  wallpaper = ooze_wallpaper_content (plugin,
-                                      plugin->screensaver_overlay,
-                                      width,
-                                      height);
-  if (wallpaper)
-    clutter_actor_set_content (plugin->screensaver_overlay,
-                               g_steal_pointer (&wallpaper));
+  stage = ooze_screensaver_get_stage (plugin);
+  if (!stage)
+    return;
+
+  width = (int) clutter_actor_get_width (stage);
+  height = (int) clutter_actor_get_height (stage);
+
+  cogl_color_init_from_4f (&black, 0.0f, 0.0f, 0.0f, 1.0f);
+
+  plugin->screensaver_overlay = clutter_actor_new ();
+  clutter_actor_set_background_color (plugin->screensaver_overlay, &black);
+  clutter_actor_set_size (plugin->screensaver_overlay,
+                          (gfloat) width,
+                          (gfloat) height);
+  clutter_actor_set_position (plugin->screensaver_overlay, 0.0f, 0.0f);
+  clutter_actor_set_reactive (plugin->screensaver_overlay, FALSE);
+  clutter_actor_set_opacity (plugin->screensaver_overlay, 0);
+  clutter_actor_hide (plugin->screensaver_overlay);
+  clutter_actor_add_child (stage, plugin->screensaver_overlay);
 }
 
 static void
-ooze_screensaver_on_theme_changed (gpointer user_data)
+ooze_screensaver_raise_overlay (OozePlugin *plugin)
 {
-  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+  ClutterActor *stage = ooze_screensaver_get_stage (plugin);
 
-  if (!plugin->shutting_down)
-    {
-      ooze_screensaver_refresh_wallpaper (plugin);
-      if (plugin->screensaver_active)
-        ooze_screensaver_flow_render (plugin, TRUE);
-    }
+  if (stage && plugin->screensaver_overlay)
+    clutter_actor_set_child_above_sibling (stage,
+                                           plugin->screensaver_overlay,
+                                           NULL);
 }
 
+/* While the opaque overlay fully obscures the desktop, Mutter stops
+ * painting the windows behind it.  Force them to repaint as the overlay
+ * fades out so apps fade back in with it instead of popping in once it
+ * is gone. */
 static void
-ooze_screensaver_on_new_frame (ClutterTimeline *timeline,
-                               gint             msecs G_GNUC_UNUSED,
-                               gpointer         user_data)
+ooze_screensaver_repaint_desktop (OozePlugin *plugin)
 {
-  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+  MetaDisplay *display;
+  MetaCompositor *compositor;
+  ClutterActor *window_group;
+  ClutterActor *child;
 
-  if (plugin->screensaver_active)
-    ooze_screensaver_mode.step (plugin,
-                                clutter_timeline_get_progress (timeline));
+  display = meta_plugin_get_display (META_PLUGIN (plugin));
+  if (!display)
+    return;
+
+  compositor = meta_display_get_compositor (display);
+  if (!compositor)
+    return;
+
+  window_group = meta_compositor_get_window_group (compositor);
+  if (!window_group)
+    return;
+
+  clutter_actor_queue_redraw (window_group);
+  for (child = clutter_actor_get_first_child (window_group);
+       child != NULL;
+       child = clutter_actor_get_next_sibling (child))
+    clutter_actor_queue_redraw (child);
 }
 
+/* The desktop has finished fading to black: reveal the module if it has
+ * already mapped (otherwise adoption reveals it when it does). */
 static gboolean
-ooze_screensaver_hide_after_fade (gpointer user_data)
+ooze_screensaver_on_black (gpointer user_data)
+{
+  OozePlugin *plugin = OOZE_PLUGIN (user_data);
+
+  plugin->screensaver_phase_id = 0;
+  plugin->screensaver_black = TRUE;
+
+  if (plugin->screensaver_active && plugin->saver_hack_clone)
+    ooze_screensaver_fade (plugin->saver_hack_clone, 0u, 255u,
+                           OOZE_SAVER_REVEAL_MS);
+  return G_SOURCE_REMOVE;
+}
+
+/* The dismiss cross-fade has finished: hide the overlay and kill the
+ * module. */
+static gboolean
+ooze_screensaver_finish_dismiss (gpointer user_data)
 {
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
 
   plugin->screensaver_fade_id = 0;
   if (!plugin->screensaver_active)
     {
+      ooze_screensaver_hack_cleanup (plugin, TRUE);
       if (plugin->screensaver_overlay)
-        clutter_actor_hide (plugin->screensaver_overlay);
-      if (plugin->screensaver_curtain)
         {
-          clutter_actor_remove_all_transitions (plugin->screensaver_curtain);
-          clutter_actor_set_opacity (plugin->screensaver_curtain, 0);
-          clutter_actor_hide (plugin->screensaver_curtain);
+          clutter_actor_remove_transition (plugin->screensaver_overlay,
+                                           "saver-fade");
+          clutter_actor_set_opacity (plugin->screensaver_overlay, 0);
+          clutter_actor_hide (plugin->screensaver_overlay);
         }
     }
 
@@ -670,7 +484,7 @@ ooze_screensaver_on_idle (MetaIdleMonitor *monitor G_GNUC_UNUSED,
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
 
   plugin->screensaver_idle_watch_id = 0;
-  if (!ooze_screensaver_flow_enabled (plugin))
+  if (!ooze_screensaver_enabled (plugin))
     {
       ooze_screensaver_sync_watches (plugin);
       return;
@@ -741,200 +555,21 @@ ooze_screensaver_sync_watches (OozePlugin *plugin)
                                         NULL);
 }
 
-/* --- Phased black curtain --------------------------------------------
- *
- * Activation and dismissal run through an opaque black actor on top of the
- * saver overlay so the user sees three distinct phases:
- *   1. desktop fades to black (curtain 0 -> 255)
- *   2. the running saver is revealed (curtain 255 -> 0)
- *   3. on stop, saver fades to black then back to the desktop.
- */
-
 static void
-ooze_screensaver_curtain_ensure (OozePlugin *plugin)
+ooze_screensaver_ensure_capture (OozePlugin *plugin)
 {
   ClutterActor *stage;
-  CoglColor black;
-  int width;
-  int height;
 
-  if (plugin->screensaver_curtain)
+  if (plugin->screensaver_stage_capture_id)
     return;
 
   stage = ooze_screensaver_get_stage (plugin);
   if (!stage)
     return;
-
-  cogl_color_init_from_4f (&black, 0.0f, 0.0f, 0.0f, 1.0f);
-
-  width = (int) clutter_actor_get_width (stage);
-  height = (int) clutter_actor_get_height (stage);
-
-  plugin->screensaver_curtain = clutter_actor_new ();
-  clutter_actor_set_background_color (plugin->screensaver_curtain, &black);
-  clutter_actor_set_size (plugin->screensaver_curtain,
-                          (gfloat) width, (gfloat) height);
-  clutter_actor_set_position (plugin->screensaver_curtain, 0.0f, 0.0f);
-  clutter_actor_set_reactive (plugin->screensaver_curtain, FALSE);
-  clutter_actor_set_opacity (plugin->screensaver_curtain, 0);
-  clutter_actor_hide (plugin->screensaver_curtain);
-  clutter_actor_add_child (stage, plugin->screensaver_curtain);
-}
-
-static void
-ooze_screensaver_curtain_fade (OozePlugin *plugin,
-                               guint       from,
-                               guint       to)
-{
-  ClutterTransition *fade;
-  ClutterActor *stage = ooze_screensaver_get_stage (plugin);
-
-  ooze_screensaver_curtain_ensure (plugin);
-  if (!plugin->screensaver_curtain)
-    return;
-
-  if (stage)
-    clutter_actor_set_child_above_sibling (stage,
-                                           plugin->screensaver_curtain,
-                                           NULL);
-  clutter_actor_remove_all_transitions (plugin->screensaver_curtain);
-  clutter_actor_show (plugin->screensaver_curtain);
-  clutter_actor_set_opacity (plugin->screensaver_curtain, from);
-
-  fade = clutter_property_transition_new ("opacity");
-  clutter_transition_set_from (fade, G_TYPE_UINT, from);
-  clutter_transition_set_to (fade, G_TYPE_UINT, to);
-  clutter_timeline_set_duration (CLUTTER_TIMELINE (fade),
-                                 OOZE_SAVER_PHASE_MS);
-  clutter_timeline_set_progress_mode (CLUTTER_TIMELINE (fade),
-                                      CLUTTER_EASE_IN_OUT_SINE);
-  clutter_actor_add_transition (plugin->screensaver_curtain,
-                                "curtain-fade", fade);
-  g_object_unref (fade);
-}
-
-/* While the opaque curtain fully obscures the desktop, Mutter stops
- * painting the windows behind it. Force them to repaint as the curtain
- * lifts so apps fade back in with the curtain instead of popping in once
- * it is gone. */
-static void
-ooze_screensaver_repaint_desktop (OozePlugin *plugin)
-{
-  MetaDisplay *display;
-  MetaCompositor *compositor;
-  ClutterActor *window_group;
-  ClutterActor *child;
-
-  display = meta_plugin_get_display (META_PLUGIN (plugin));
-  if (!display)
-    return;
-
-  compositor = meta_display_get_compositor (display);
-  if (!compositor)
-    return;
-
-  window_group = meta_compositor_get_window_group (compositor);
-  if (!window_group)
-    return;
-
-  clutter_actor_queue_redraw (window_group);
-  for (child = clutter_actor_get_first_child (window_group);
-       child != NULL;
-       child = clutter_actor_get_next_sibling (child))
-    clutter_actor_queue_redraw (child);
-}
-
-static gboolean
-ooze_screensaver_reveal_saver (gpointer user_data)
-{
-  OozePlugin *plugin = OOZE_PLUGIN (user_data);
-
-  plugin->screensaver_phase_id = 0;
-  if (plugin->screensaver_active)
-    ooze_screensaver_curtain_fade (plugin, 255u, 0u);
-  return G_SOURCE_REMOVE;
-}
-
-static gboolean
-ooze_screensaver_finish_dismiss (gpointer user_data)
-{
-  OozePlugin *plugin = OOZE_PLUGIN (user_data);
-
-  plugin->screensaver_phase_id = 0;
-
-  /* Screen is black now: tear the saver down behind the curtain, then
-   * lift the curtain to reveal the desktop. */
-  ooze_screensaver_mode.stop (plugin);
-  if (plugin->screensaver_timeline)
-    clutter_timeline_pause (plugin->screensaver_timeline);
-  if (plugin->screensaver_overlay)
-    {
-      clutter_actor_remove_all_transitions (plugin->screensaver_overlay);
-      clutter_actor_hide (plugin->screensaver_overlay);
-      clutter_actor_set_opacity (plugin->screensaver_overlay, 0);
-    }
-
-  ooze_screensaver_repaint_desktop (plugin);
-  ooze_screensaver_curtain_fade (plugin, 255u, 0u);
-  if (plugin->screensaver_fade_id)
-    g_source_remove (plugin->screensaver_fade_id);
-  plugin->screensaver_fade_id =
-    g_timeout_add (OOZE_SAVER_PHASE_MS + 40,
-                   ooze_screensaver_hide_after_fade,
-                   plugin);
-  return G_SOURCE_REMOVE;
-}
-
-static void
-ooze_screensaver_build (OozePlugin *plugin)
-{
-  ClutterActor *stage;
-  ClutterActor *window_group;
-  MetaDisplay *display;
-  MetaCompositor *compositor;
-  int width;
-  int height;
-
-  if (plugin->screensaver_overlay)
-    return;
-
-  stage = ooze_screensaver_get_stage (plugin);
-  if (!stage)
-    return;
-
-  display = meta_plugin_get_display (META_PLUGIN (plugin));
-  width = (int) clutter_actor_get_width (stage);
-  height = (int) clutter_actor_get_height (stage);
-
-  plugin->screensaver_overlay = clutter_actor_new ();
-  clutter_actor_set_size (plugin->screensaver_overlay,
-                          (gfloat) width,
-                          (gfloat) height);
-  clutter_actor_set_position (plugin->screensaver_overlay, 0.0f, 0.0f);
-  clutter_actor_set_reactive (plugin->screensaver_overlay, FALSE);
-
-  ooze_screensaver_refresh_wallpaper (plugin);
-  clutter_actor_set_opacity (plugin->screensaver_overlay, 0);
-
-  compositor = meta_display_get_compositor (display);
-  window_group = meta_compositor_get_window_group (compositor);
-  clutter_actor_add_child (stage, plugin->screensaver_overlay);
-  clutter_actor_set_child_above_sibling (stage,
-                                         plugin->screensaver_overlay,
-                                         window_group);
-
-  plugin->screensaver_timeline =
-    clutter_timeline_new_for_actor (plugin->screensaver_overlay,
-                                    OOZE_SCREENSAVER_TIMELINE_MS);
-  clutter_timeline_set_repeat_count (plugin->screensaver_timeline, -1);
-  g_signal_connect (plugin->screensaver_timeline, "new-frame",
-                    G_CALLBACK (ooze_screensaver_on_new_frame), plugin);
 
   plugin->screensaver_stage_capture_id =
     g_signal_connect (stage, "captured-event",
                       G_CALLBACK (ooze_screensaver_on_stage_event), plugin);
-
-  ooze_screensaver_mode.resize (plugin, width, height);
 }
 
 void
@@ -943,22 +578,63 @@ ooze_screensaver_activate (OozePlugin *plugin)
   g_return_if_fail (OOZE_IS_PLUGIN (plugin));
 
   if (plugin->shutting_down || plugin->locked ||
-      !ooze_screensaver_flow_enabled (plugin) ||
+      !ooze_screensaver_enabled (plugin) ||
       plugin->screensaver_active)
     return;
 
   ooze_screensaver_build (plugin);
   if (!plugin->screensaver_overlay)
     return;
+  ooze_screensaver_ensure_capture (plugin);
+  ooze_screensaver_raise_overlay (plugin);
 
   plugin->screensaver_active = TRUE;
+  plugin->screensaver_black = FALSE;
   plugin->screensaver_input_armed = FALSE;
   if (plugin->screensaver_arm_id)
     g_source_remove (plugin->screensaver_arm_id);
   plugin->screensaver_arm_id =
-    g_timeout_add (OOZE_SCREENSAVER_ARM_DELAY_MS,
+    g_timeout_add (OOZE_SAVER_ARM_DELAY_MS,
                    ooze_screensaver_arm_input,
                    plugin);
+  if (plugin->screensaver_fade_id)
+    {
+      g_source_remove (plugin->screensaver_fade_id);
+      plugin->screensaver_fade_id = 0;
+    }
+  if (plugin->screensaver_phase_id)
+    {
+      g_source_remove (plugin->screensaver_phase_id);
+      plugin->screensaver_phase_id = 0;
+    }
+
+  /* Spawn the module now so it is ready behind the black. */
+  ooze_screensaver_hack_start (plugin);
+
+  /* Phase 1: fade the desktop to black. */
+  ooze_screensaver_fade (plugin->screensaver_overlay, 0u, 255u,
+                         OOZE_SAVER_BLACK_MS);
+  plugin->screensaver_phase_id =
+    g_timeout_add (OOZE_SAVER_BLACK_MS + 30,
+                   ooze_screensaver_on_black,
+                   plugin);
+
+  ooze_screensaver_sync_watches (plugin);
+}
+
+void
+ooze_screensaver_lock_backdrop (OozePlugin *plugin)
+{
+  g_return_if_fail (OOZE_IS_PLUGIN (plugin));
+
+  if (plugin->shutting_down || !ooze_screensaver_enabled (plugin))
+    return;
+
+  ooze_screensaver_build (plugin);
+  if (!plugin->screensaver_overlay)
+    return;
+  ooze_screensaver_ensure_capture (plugin);
+  ooze_screensaver_raise_overlay (plugin);
 
   if (plugin->screensaver_fade_id)
     {
@@ -971,61 +647,20 @@ ooze_screensaver_activate (OozePlugin *plugin)
       plugin->screensaver_phase_id = 0;
     }
 
-  /* The saver renders at full opacity underneath the black curtain; the
-   * curtain drives the desktop -> black -> saver phases on top. */
-  clutter_actor_remove_all_transitions (plugin->screensaver_overlay);
-  clutter_actor_show (plugin->screensaver_overlay);
-  clutter_actor_set_opacity (plugin->screensaver_overlay, 255);
-
-  ooze_screensaver_mode.start (plugin);
-  clutter_timeline_rewind (plugin->screensaver_timeline);
-  clutter_timeline_start (plugin->screensaver_timeline);
-
-  /* Phase 1: fade the desktop to black; phase 2 reveals the saver. */
-  ooze_screensaver_curtain_fade (plugin, 0u, 255u);
-  plugin->screensaver_phase_id =
-    g_timeout_add (OOZE_SAVER_PHASE_MS + 20,
-                   ooze_screensaver_reveal_saver,
-                   plugin);
-
-  ooze_screensaver_sync_watches (plugin);
-}
-
-void
-ooze_screensaver_lock_backdrop (OozePlugin *plugin)
-{
-  g_return_if_fail (OOZE_IS_PLUGIN (plugin));
-
-  if (plugin->shutting_down || !ooze_screensaver_flow_enabled (plugin))
-    return;
-
-  ooze_screensaver_build (plugin);
-  if (!plugin->screensaver_overlay)
-    return;
-
-  if (plugin->screensaver_fade_id)
-    {
-      g_source_remove (plugin->screensaver_fade_id);
-      plugin->screensaver_fade_id = 0;
-    }
-
+  plugin->screensaver_input_armed = FALSE;
   if (!plugin->screensaver_active)
     {
       plugin->screensaver_active = TRUE;
-      plugin->screensaver_input_armed = FALSE;
-      clutter_actor_remove_all_transitions (plugin->screensaver_overlay);
+      plugin->screensaver_black = TRUE;
+      clutter_actor_remove_transition (plugin->screensaver_overlay,
+                                       "saver-fade");
       clutter_actor_show (plugin->screensaver_overlay);
       clutter_actor_set_opacity (plugin->screensaver_overlay, 255);
-      ooze_screensaver_mode.start (plugin);
+      if (!plugin->saver_hack_pid)
+        ooze_screensaver_hack_start (plugin);
+      if (plugin->saver_hack_clone)
+        clutter_actor_set_opacity (plugin->saver_hack_clone, 255);
     }
-  else
-    {
-      plugin->screensaver_input_armed = FALSE;
-    }
-
-  if (plugin->screensaver_timeline &&
-      !clutter_timeline_is_playing (plugin->screensaver_timeline))
-    clutter_timeline_start (plugin->screensaver_timeline);
 
   ooze_screensaver_sync_watches (plugin);
 }
@@ -1039,7 +674,7 @@ ooze_screensaver_unlock_backdrop (OozePlugin *plugin)
 
   g_return_if_fail (OOZE_IS_PLUGIN (plugin));
 
-  if (!ooze_screensaver_flow_enabled (plugin))
+  if (!ooze_screensaver_enabled (plugin))
     {
       ooze_screensaver_dismiss (plugin);
       return;
@@ -1063,12 +698,7 @@ ooze_screensaver_unlock_backdrop (OozePlugin *plugin)
   if (!monitor || meta_idle_monitor_get_idletime (monitor) < 1000)
     ooze_screensaver_dismiss (plugin);
   else
-    {
-      if (plugin->screensaver_timeline &&
-          !clutter_timeline_is_playing (plugin->screensaver_timeline))
-        clutter_timeline_start (plugin->screensaver_timeline);
-      ooze_screensaver_rearm (plugin);
-    }
+    ooze_screensaver_rearm (plugin);
 }
 
 void
@@ -1080,6 +710,7 @@ ooze_screensaver_dismiss (OozePlugin *plugin)
     return;
 
   plugin->screensaver_active = FALSE;
+  plugin->screensaver_black = FALSE;
   plugin->screensaver_input_armed = FALSE;
 
   if (plugin->screensaver_arm_id)
@@ -1093,11 +724,21 @@ ooze_screensaver_dismiss (OozePlugin *plugin)
       plugin->screensaver_phase_id = 0;
     }
 
-  /* Phase 3: fade the running saver to black, then finish_dismiss tears
-   * it down behind the curtain and lifts the curtain to the desktop. */
-  ooze_screensaver_curtain_fade (plugin, 0u, 255u);
-  plugin->screensaver_phase_id =
-    g_timeout_add (OOZE_SAVER_PHASE_MS + 20,
+  /* Cross-fade the whole saver back to the desktop; the module keeps
+   * animating through the fade and is killed once it completes. */
+  if (plugin->screensaver_overlay)
+    {
+      guint from = clutter_actor_get_opacity (plugin->screensaver_overlay);
+
+      ooze_screensaver_repaint_desktop (plugin);
+      ooze_screensaver_fade (plugin->screensaver_overlay, from, 0u,
+                             OOZE_SAVER_DISMISS_MS);
+    }
+
+  if (plugin->screensaver_fade_id)
+    g_source_remove (plugin->screensaver_fade_id);
+  plugin->screensaver_fade_id =
+    g_timeout_add (OOZE_SAVER_DISMISS_MS + 40,
                    ooze_screensaver_finish_dismiss,
                    plugin);
 
@@ -1111,37 +752,30 @@ ooze_screensaver_is_active (OozePlugin *plugin)
 }
 
 void
+ooze_screensaver_refresh_wallpaper (OozePlugin *plugin G_GNUC_UNUSED)
+{
+  /* The saver no longer shows the wallpaper; nothing to refresh. */
+}
+
+void
 ooze_screensaver_mode_changed (OozePlugin *plugin)
 {
   g_return_if_fail (OOZE_IS_PLUGIN (plugin));
 
-  if (!ooze_screensaver_flow_enabled (plugin) &&
-      plugin->screensaver_active)
+  if (!ooze_screensaver_enabled (plugin) && plugin->screensaver_active)
     {
       ooze_screensaver_dismiss (plugin);
       return;
     }
 
-  /* Swap the scene live if the saver is already on screen. */
-  if (plugin->screensaver_active && plugin->screensaver_flow_actor)
+  /* Swap the module live if the saver is already on screen. */
+  if (plugin->screensaver_active)
     {
-      OozeFlowState *flow = ooze_screensaver_get_flow (plugin);
-      g_autofree char *scene = ooze_screensaver_current_scene (plugin);
+      g_autofree char *mode = ooze_screensaver_current_mode (plugin);
+      const char *hack = ooze_screensaver_mode_hack (mode);
 
-      if (!flow || g_strcmp0 (flow->scene, scene) != 0)
-        {
-          ooze_screensaver_mode_resize (
-            plugin,
-            (int) clutter_actor_get_width (plugin->screensaver_overlay),
-            (int) clutter_actor_get_height (plugin->screensaver_overlay));
-          flow = ooze_screensaver_get_flow (plugin);
-          if (flow)
-            {
-              flow->phase_start_us = g_get_monotonic_time ();
-              ooze_screensaver_flow_render (plugin, TRUE);
-            }
-          ooze_screensaver_hack_start (plugin, scene);
-        }
+      if (g_strcmp0 (hack, plugin->saver_hack_name) != 0)
+        ooze_screensaver_hack_start (plugin);
     }
 
   ooze_screensaver_sync_watches (plugin);
@@ -1167,7 +801,6 @@ ooze_screensaver_init (OozePlugin *plugin)
   g_signal_connect (plugin->screensaver_settings, "changed::lock-delay",
                     G_CALLBACK (ooze_screensaver_on_settings_changed), plugin);
 
-  ooze_theme_watch (NULL, ooze_screensaver_on_theme_changed, plugin);
   ooze_screensaver_sync_watches (plugin);
 }
 
@@ -1180,8 +813,6 @@ ooze_screensaver_dispose (OozePlugin *plugin)
 
   if (!plugin)
     return;
-
-  ooze_theme_unwatch (NULL, ooze_screensaver_on_theme_changed, plugin);
 
   if (plugin->screensaver_arm_id)
     {
@@ -1217,7 +848,6 @@ ooze_screensaver_dispose (OozePlugin *plugin)
   plugin->screensaver_idle_watch_id = 0;
   plugin->screensaver_user_active_watch_id = 0;
 
-  ooze_screensaver_mode.stop (plugin);
   ooze_screensaver_hack_cleanup (plugin, TRUE);
 
   if (plugin->screensaver_stage_capture_id)
@@ -1230,10 +860,8 @@ ooze_screensaver_dispose (OozePlugin *plugin)
         plugin->screensaver_stage_capture_id = 0;
     }
 
-  g_clear_object (&plugin->screensaver_timeline);
   g_clear_pointer (&plugin->screensaver_overlay, clutter_actor_destroy);
-  g_clear_pointer (&plugin->screensaver_curtain, clutter_actor_destroy);
-  plugin->screensaver_flow_actor = NULL;
   plugin->screensaver_active = FALSE;
+  plugin->screensaver_black = FALSE;
   plugin->screensaver_input_armed = FALSE;
 }

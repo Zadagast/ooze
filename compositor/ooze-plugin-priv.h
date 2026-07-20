@@ -86,20 +86,17 @@ struct _OozePlugin
   GSettings    *background_settings;
   GSettings    *scenery_settings;
 
-  /* Screensaver (non-grabbing compositor overlay + animation timeline) */
+  /* Screensaver (black compositor overlay hosting an XScreenSaver hack) */
   gboolean      screensaver_active;
+  gboolean      screensaver_black;   /* overlay reached full black */
   ClutterActor *screensaver_overlay;
-  ClutterTimeline *screensaver_timeline;
   guint         screensaver_idle_watch_id;
   guint         screensaver_user_active_watch_id;
   guint         screensaver_arm_id;
   guint         screensaver_fade_id;
+  guint         screensaver_phase_id;
   gulong        screensaver_stage_capture_id;
   gboolean      screensaver_input_armed;
-  gpointer      screensaver_flow;
-  ClutterActor *screensaver_flow_actor;
-  ClutterActor *screensaver_curtain; /* black fade curtain (phases) */
-  guint         screensaver_phase_id;
 
   /* XScreenSaver hack backdrop (X11 hack adopted into the overlay) */
   GPid          saver_hack_pid;

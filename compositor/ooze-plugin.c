@@ -1983,14 +1983,13 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->background_settings = NULL;
   plugin->scenery_settings = NULL;
   plugin->screensaver_active = FALSE;
+  plugin->screensaver_black = FALSE;
   plugin->screensaver_overlay = NULL;
-  plugin->screensaver_timeline = NULL;
   plugin->screensaver_idle_watch_id = 0;
   plugin->screensaver_user_active_watch_id = 0;
   plugin->screensaver_arm_id = 0;
   plugin->screensaver_fade_id = 0;
   plugin->screensaver_stage_capture_id = 0;
   plugin->screensaver_input_armed = FALSE;
-  plugin->screensaver_flow = NULL;
-  plugin->screensaver_flow_actor = NULL;
+  plugin->screensaver_phase_id = 0;
 }

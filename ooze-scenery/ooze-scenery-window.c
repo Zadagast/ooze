@@ -1020,8 +1020,8 @@ scenery_mode_tile (OozeSceneryWindow *self,
   return button;
 }
 
-/* Curated set of XScreenSaver modules Ooze offers, with display labels.
- * Binary names are matched against what is actually installed. */
+/* Friendly display labels for well-known XScreenSaver modules; anything
+ * else falls back to its binary name. */
 typedef struct
 {
   const char *bin;
@@ -1057,22 +1057,6 @@ static const char *ooze_hack_dirs[] = {
   "/usr/lib/misc/xscreensaver",
 };
 
-static gboolean
-scenery_hack_installed (const char *bin)
-{
-  gsize i;
-
-  for (i = 0; i < G_N_ELEMENTS (ooze_hack_dirs); i++)
-    {
-      g_autofree char *path =
-        g_build_filename (ooze_hack_dirs[i], bin, NULL);
-
-      if (g_file_test (path, G_FILE_TEST_IS_EXECUTABLE))
-        return TRUE;
-    }
-  return FALSE;
-}
-
 static const char *
 scenery_hack_label (const char *bin)
 {
@@ -1084,17 +1068,42 @@ scenery_hack_label (const char *bin)
   return bin;
 }
 
-/* Returns the curated modules that are installed, in curated order. */
+/* Returns every installed XScreenSaver module, sorted by name. */
 static GStrv
 scenery_list_hacks (void)
 {
   g_autoptr (GStrvBuilder) builder = g_strv_builder_new ();
+  g_autoptr (GPtrArray) names =
+    g_ptr_array_new_with_free_func (g_free);
   gsize i;
+  guint j;
 
-  for (i = 0; i < G_N_ELEMENTS (ooze_curated_hacks); i++)
-    if (scenery_hack_installed (ooze_curated_hacks[i].bin))
-      g_strv_builder_add (builder, ooze_curated_hacks[i].bin);
+  for (i = 0; i < G_N_ELEMENTS (ooze_hack_dirs); i++)
+    {
+      g_autoptr (GDir) dir = g_dir_open (ooze_hack_dirs[i], 0, NULL);
+      const char *entry;
 
+      if (!dir)
+        continue;
+      while ((entry = g_dir_read_name (dir)) != NULL)
+        {
+          g_autofree char *path =
+            g_build_filename (ooze_hack_dirs[i], entry, NULL);
+          guint k;
+          gboolean seen = FALSE;
+
+          if (!g_file_test (path, G_FILE_TEST_IS_EXECUTABLE))
+            continue;
+          for (k = 0; k < names->len && !seen; k++)
+            seen = g_strcmp0 (g_ptr_array_index (names, k), entry) == 0;
+          if (!seen)
+            g_ptr_array_add (names, g_strdup (entry));
+        }
+    }
+
+  g_ptr_array_sort_values (names, (GCompareFunc) g_strcmp0);
+  for (j = 0; j < names->len; j++)
+    g_strv_builder_add (builder, g_ptr_array_index (names, j));
   return g_strv_builder_end (builder);
 }
 
@@ -1210,8 +1219,6 @@ scenery_build_screensaver_page (OozeSceneryWindow *self)
   gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (modes), 2);
   gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (modes), 4);
   gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (modes), GTK_SELECTION_NONE);
-  gtk_flow_box_append (GTK_FLOW_BOX (modes),
-                       scenery_mode_tile (self, "Ooze Flow", "flow"));
   gtk_flow_box_append (GTK_FLOW_BOX (modes),
                        scenery_mode_tile (self, "None", "none"));
   gtk_box_append (GTK_BOX (content), modes);
