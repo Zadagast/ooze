@@ -6,12 +6,12 @@
 #include <cairo/cairo.h>
 #include <math.h>
 
-#define AQUA_MENU_WIDTH       280.0f
-#define AQUA_MENU_ROW_HEIGHT  22.0f
-#define AQUA_MENU_PAD         4.0f
-#define AQUA_MENU_SEPARATOR_H 9.0f
-#define AQUA_MENU_CORNER      6.0f
-#define AQUA_MENU_LABEL_MAX_W 240
+#define AQUA_MENU_WIDTH       ((gfloat) ooze_theme_get_palette (NULL)->menu_width)
+#define AQUA_MENU_ROW_HEIGHT  ((gfloat) ooze_theme_get_palette (NULL)->menu_row_height)
+#define AQUA_MENU_PAD         ((gfloat) ooze_theme_get_palette (NULL)->menu_padding)
+#define AQUA_MENU_SEPARATOR_H ((gfloat) ooze_theme_get_palette (NULL)->menu_separator_height)
+#define AQUA_MENU_CORNER      ((gfloat) ooze_theme_get_palette (NULL)->menu_corner)
+#define AQUA_MENU_LABEL_MAX_W ((int) ooze_theme_get_palette (NULL)->menu_label_max_width)
 #define AQUA_MENU_OPEN_MS     140
 #define AQUA_MENU_CLOSE_MS    100
 #define AQUA_MENU_SLIDE_PX    10.0f
@@ -82,13 +82,14 @@ ooze_aqua_menu_popup_background (ClutterActor *ref_actor,
   for (int y = 0; y < height; y += 2)
     {
       cairo_set_source_rgb (cr,
-                            palette->pinstripe_base_r,
-                            palette->pinstripe_base_g,
-                            palette->pinstripe_base_b);
+                            palette->menu_surface_r,
+                            palette->menu_surface_g,
+                            palette->menu_surface_b);
       cairo_rectangle (cr, 0, y, width, 1);
       cairo_fill (cr);
 
-      cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, palette->pinstripe_highlight_a);
+      cairo_set_source_rgba (cr, 1.0, 1.0, 1.0,
+                             palette->menu_surface_highlight_a);
       cairo_rectangle (cr, 0, y + 1, width, 1);
       cairo_fill (cr);
     }
@@ -133,16 +134,30 @@ ooze_aqua_menu_row_highlight (ClutterActor *ref_actor,
   surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
   cr = cairo_create (surface);
 
-  gradient = cairo_pattern_create_linear (0, 0, 0, height);
-  cairo_pattern_add_color_stop_rgba (gradient, 0.0, 0.38, 0.58, 0.98, 1.0);
-  cairo_pattern_add_color_stop_rgba (gradient, 0.5, 0.22, 0.45, 0.96, 1.0);
-  cairo_pattern_add_color_stop_rgba (gradient, 1.0, 0.12, 0.34, 0.92, 1.0);
+  {
+    const OozeAquaPalette *palette = ooze_theme_get_palette (NULL);
+
+    gradient = cairo_pattern_create_linear (0, 0, 0, height);
+    cairo_pattern_add_color_stop_rgba (gradient, 0.0,
+                                       palette->menu_hover_top_r,
+                                       palette->menu_hover_top_g,
+                                       palette->menu_hover_top_b, 1.0);
+    cairo_pattern_add_color_stop_rgba (gradient, 0.5,
+                                       palette->menu_hover_mid_r,
+                                       palette->menu_hover_mid_g,
+                                       palette->menu_hover_mid_b, 1.0);
+    cairo_pattern_add_color_stop_rgba (gradient, 1.0,
+                                       palette->menu_hover_bottom_r,
+                                       palette->menu_hover_bottom_g,
+                                       palette->menu_hover_bottom_b, 1.0);
+  }
   cairo_set_source (cr, gradient);
   cairo_rectangle (cr, 0, 0, width, height);
   cairo_fill (cr);
   cairo_pattern_destroy (gradient);
 
-  cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 0.18);
+  cairo_set_source_rgba (cr, 1.0, 1.0, 1.0,
+                         ooze_theme_get_palette (NULL)->menu_hover_gloss_a);
   cairo_rectangle (cr, 0, 0, width, 1);
   cairo_fill (cr);
 
@@ -167,10 +182,10 @@ ooze_aqua_menu_separator_content (ClutterActor *ref_actor,
   cr = cairo_create (surface);
 
   cairo_set_source_rgba (cr,
-                         palette->menu_text_r,
-                         palette->menu_text_g,
-                         palette->menu_text_b,
-                         0.25);
+                         palette->menu_separator_r,
+                         palette->menu_separator_g,
+                         palette->menu_separator_b,
+                         palette->menu_separator_a);
   cairo_set_line_width (cr, 1.0);
   cairo_move_to (cr, 8.0, height / 2.0 + 0.5);
   cairo_line_to (cr, width - 8.0, height / 2.0 + 0.5);
@@ -650,8 +665,7 @@ ooze_aqua_menu_open (OozeAquaMenu *menu)
   clutter_actor_show (menu->backdrop);
   {
     CoglColor scrim;
-    /* Dim the desktop under the popup — Unity/macOS-style so menus read clearly. */
-    cogl_color_init_from_4f (&scrim, 0.0f, 0.0f, 0.0f, 0.32f);
+    cogl_color_init_from_4f (&scrim, 0.0f, 0.0f, 0.0f, 0.0f);
     clutter_actor_set_background_color (menu->backdrop, &scrim);
   }
   clutter_actor_show (menu->popup);
@@ -729,7 +743,7 @@ ooze_aqua_menu_new (MetaContext          *context,
   clutter_actor_set_position (menu->backdrop, -4096.0f, -4096.0f);
   {
     CoglColor scrim;
-    cogl_color_init_from_4f (&scrim, 0.0f, 0.0f, 0.0f, 0.32f);
+    cogl_color_init_from_4f (&scrim, 0.0f, 0.0f, 0.0f, 0.0f);
     clutter_actor_set_background_color (menu->backdrop, &scrim);
   }
   clutter_actor_hide (menu->backdrop);
