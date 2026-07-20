@@ -241,6 +241,7 @@ ooze_screensaver_hack_cleanup (OozePlugin *plugin,
       g_spawn_close_pid (plugin->saver_hack_pid);
       plugin->saver_hack_pid = 0;
     }
+  g_clear_pointer (&plugin->saver_hack_name, g_free);
   g_clear_pointer (&plugin->saver_hack_clone, clutter_actor_destroy);
   plugin->saver_hack_window = NULL;
   if (plugin->screensaver_flow_actor)
@@ -301,6 +302,7 @@ ooze_screensaver_hack_start (OozePlugin *plugin,
     }
 
   plugin->saver_hack_pid = pid;
+  plugin->saver_hack_name = g_strdup (hack);
   plugin->saver_hack_child_watch_id =
     g_child_watch_add (pid, ooze_screensaver_hack_child_exited, plugin);
 }
@@ -330,6 +332,29 @@ ooze_screensaver_hack_stop (OozePlugin *plugin)
                    plugin);
 }
 
+static gboolean
+ooze_screensaver_window_is_hack (OozePlugin *plugin,
+                                 MetaWindow *window)
+{
+  const char *wm_class;
+  const char *wm_instance;
+
+  if (meta_window_get_pid (window) == (pid_t) plugin->saver_hack_pid)
+    return TRUE;
+
+  /* X11 clients under Xwayland may not report a usable pid; the hacks
+   * all set their WM_CLASS to the hack name. */
+  if (!plugin->saver_hack_name)
+    return FALSE;
+
+  wm_class = meta_window_get_wm_class (window);
+  wm_instance = meta_window_get_wm_class_instance (window);
+  return (wm_class &&
+          g_ascii_strcasecmp (wm_class, plugin->saver_hack_name) == 0) ||
+         (wm_instance &&
+          g_ascii_strcasecmp (wm_instance, plugin->saver_hack_name) == 0);
+}
+
 gboolean
 ooze_screensaver_adopt_hack_window (OozePlugin      *plugin,
                                     MetaWindowActor *actor)
@@ -344,13 +369,13 @@ ooze_screensaver_adopt_hack_window (OozePlugin      *plugin,
     return FALSE;
 
   window = meta_window_actor_get_meta_window (actor);
-  if (!window ||
-      meta_window_get_pid (window) != (pid_t) plugin->saver_hack_pid)
+  if (!window || !ooze_screensaver_window_is_hack (plugin, window))
     return FALSE;
 
   width = (int) clutter_actor_get_width (plugin->screensaver_overlay);
   height = (int) clutter_actor_get_height (plugin->screensaver_overlay);
 
+  meta_window_make_fullscreen (window);
   meta_window_move_resize_frame (window, FALSE, 0, 0, width, height);
   clutter_actor_hide (CLUTTER_ACTOR (actor));
 

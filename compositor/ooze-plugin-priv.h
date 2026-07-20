@@ -101,6 +101,7 @@ struct _OozePlugin
 
   /* XScreenSaver hack backdrop (X11 hack adopted into the overlay) */
   GPid          saver_hack_pid;
+  char         *saver_hack_name;
   guint         saver_hack_child_watch_id;
   guint         saver_hack_kill_id;
   ClutterActor *saver_hack_clone;
