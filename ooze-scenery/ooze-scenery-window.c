@@ -584,7 +584,6 @@ typedef struct
   const char *key;
   const SceneryDuration *choices;
   guint n_choices;
-  gulong settings_handler;
   gboolean syncing;
 } SceneryDurationBinding;
 
@@ -646,9 +645,7 @@ scenery_duration_binding_free (gpointer data)
 {
   SceneryDurationBinding *binding = data;
 
-  if (binding->settings_handler)
-    g_signal_handler_disconnect (binding->settings,
-                                 binding->settings_handler);
+  g_object_unref (binding->settings);
   g_free (binding);
 }
 
@@ -671,7 +668,7 @@ scenery_duration_dropdown_new (GSettings             *settings,
   dropdown = gtk_drop_down_new (G_LIST_MODEL (model), NULL);
 
   binding = g_new0 (SceneryDurationBinding, 1);
-  binding->settings = settings;
+  binding->settings = g_object_ref (settings);
   binding->key = key;
   binding->choices = choices;
   binding->n_choices = n_choices;
@@ -683,9 +680,9 @@ scenery_duration_dropdown_new (GSettings             *settings,
   g_signal_connect (dropdown, "notify::selected",
                     G_CALLBACK (on_duration_selected), binding);
   signal_name = g_strdup_printf ("changed::%s", key);
-  binding->settings_handler =
-    g_signal_connect (settings, signal_name,
-                      G_CALLBACK (on_duration_settings_changed), dropdown);
+  g_signal_connect_object (settings, signal_name,
+                           G_CALLBACK (on_duration_settings_changed),
+                           dropdown, G_CONNECT_DEFAULT);
 
   return dropdown;
 }
