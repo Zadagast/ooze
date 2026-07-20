@@ -1,5 +1,7 @@
 #include "ooze-popover.h"
 
+static int ooze_popover_monitor_max_height (GtkPopover *popover);
+
 static void
 ooze_popover_fix_scrolled (GtkWidget *widget,
                             int        max_height)
@@ -14,7 +16,10 @@ ooze_popover_fix_scrolled (GtkWidget *widget,
 
           gtk_scrolled_window_set_propagate_natural_height (sw, TRUE);
           gtk_scrolled_window_set_propagate_natural_width (sw, TRUE);
+          gtk_scrolled_window_set_min_content_height (sw, 0);
+          gtk_scrolled_window_set_min_content_width (sw, 0);
           gtk_scrolled_window_set_max_content_height (sw, max_height);
+          gtk_scrolled_window_set_max_content_width (sw, G_MAXINT);
           /* Scroll only when content exceeds max_height. */
           gtk_scrolled_window_set_policy (sw,
                                           GTK_POLICY_NEVER,
@@ -23,6 +28,17 @@ ooze_popover_fix_scrolled (GtkWidget *widget,
 
       ooze_popover_fix_scrolled (c, max_height);
     }
+}
+
+static gboolean
+ooze_popover_fix_scrolled_idle (gpointer user_data)
+{
+  GtkPopover *popover = user_data;
+
+  ooze_popover_fix_scrolled (
+    GTK_WIDGET (popover), ooze_popover_monitor_max_height (popover));
+  g_object_unref (popover);
+  return G_SOURCE_REMOVE;
 }
 
 static int
@@ -86,6 +102,7 @@ on_popover_map (GtkWidget *widget,
 
   max_h = ooze_popover_monitor_max_height (GTK_POPOVER (widget));
   ooze_popover_fix_scrolled (widget, max_h);
+  g_idle_add (ooze_popover_fix_scrolled_idle, g_object_ref (widget));
 }
 
 void
@@ -97,6 +114,7 @@ ooze_popover_fit_screen (GtkPopover *popover)
 
   max_h = ooze_popover_monitor_max_height (popover);
   ooze_popover_fix_scrolled (GTK_WIDGET (popover), max_h);
+  g_idle_add (ooze_popover_fix_scrolled_idle, g_object_ref (popover));
 
   if (!g_object_get_data (G_OBJECT (popover), "ooze-popover-fit-connected"))
     {
