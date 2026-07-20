@@ -1,6 +1,7 @@
 #include "ooze-about-window.h"
 #include "ooze-command-window.h"
 #include "ooze-defaults-window.h"
+#include "ooze-mouse-window.h"
 #include "ooze-eye-window.h"
 #include "ooze-init.h"
 #include "ooze-king-window.h"
@@ -353,6 +354,18 @@ test_defaults (void)
   assert_window_renders (test_app, new_defaults_window, "Ooze Defaults");
 }
 
+static GtkWidget *
+new_mouse_window (GtkApplication *app)
+{
+  return ooze_mouse_window_new (app);
+}
+
+static void
+test_mouse (void)
+{
+  assert_window_renders (test_app, new_mouse_window, "Ooze Mouse");
+}
+
 static void
 test_monitor (void)
 {
@@ -402,6 +415,7 @@ main (int argc, char **argv)
   g_test_add_func ("/app/shot", test_shot);
   g_test_add_func ("/app/about", test_about);
   g_test_add_func ("/app/defaults", test_defaults);
+  g_test_add_func ("/app/mouse", test_mouse);
   g_test_add_func ("/app/monitor", test_monitor);
   g_test_add_func ("/app/themes", test_themes);
   g_test_add_func ("/app/pak", test_pak);

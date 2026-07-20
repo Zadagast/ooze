@@ -5,8 +5,16 @@
 #include "ooze-surface.h"
 #include "ooze-theme.h"
 
-#include <adwaita.h>
 #include <math.h>
+
+typedef struct
+{
+  GtkWidget *title;
+  GtkWidget *badge;
+  GtkWidget *scale;
+  GtkWidget *mute;
+  GtkWidget *drop;
+} EarRowWidgets;
 
 struct _OozeSoundPane
 {
@@ -16,6 +24,7 @@ struct _OozeSoundPane
   GtkWidget *output_list;
   GtkWidget *input_list;
   GtkWidget *apps_list;
+  GtkWidget *apps_empty;
   GtkWidget *output_volume;
   GtkWidget *output_mute;
   GtkWidget *input_volume;
@@ -27,11 +36,72 @@ struct _OozeSoundPane
   guint      drag_freeze;
   guint      pending_rebuild_id;
 
+  GHashTable *row_widgets;   /* node id -> EarRowWidgets* */
+  char       *layout_signature;
+
   uint32_t   selected_output_id;
   uint32_t   selected_input_id;
 };
 
 G_DEFINE_FINAL_TYPE (OozeSoundPane, ooze_sound_pane, GTK_TYPE_BOX)
+
+static void
+ear_css_init (void)
+{
+  static gboolean loaded = FALSE;
+  GtkCssProvider *provider;
+  GdkDisplay *display;
+
+  if (loaded)
+    return;
+  display = gdk_display_get_default ();
+  if (!display)
+    return;
+
+  provider = gtk_css_provider_new ();
+  gtk_css_provider_load_from_string (
+    provider,
+    ".ear-heading {"
+    "  font-weight: bold;"
+    "}"
+    ".ear-rows {"
+    "  background: alpha(@card_bg_color, 0.72);"
+    "  border-radius: 8px;"
+    "  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10);"
+    "  padding: 0;"
+    "}"
+    ".ear-rows > row {"
+    "  padding: 0;"
+    "  background: none;"
+    "  border-radius: 0;"
+    "}"
+    ".ear-rows > row:not(:last-child) {"
+    "  border-bottom: 1px solid alpha(currentColor, 0.10);"
+    "}"
+    ".ear-rows > row:first-child { border-radius: 8px 8px 0 0; }"
+    ".ear-rows > row:last-child { border-radius: 0 0 8px 8px; }"
+    ".ear-rows > row:selected {"
+    "  background: alpha(@accent_bg_color, 0.85);"
+    "  color: @accent_fg_color;"
+    "}"
+    ".ear-rows > row:selected label { color: @accent_fg_color; }"
+    ".ear-badge {"
+    "  color: alpha(currentColor, 0.55);"
+    "  font-size: 0.88em;"
+    "}"
+    ".ear-section {"
+    "  font-weight: bold;"
+    "  color: alpha(currentColor, 0.65);"
+    "}"
+    ".ear-hint {"
+    "  color: alpha(currentColor, 0.55);"
+    "}");
+  gtk_style_context_add_provider_for_display (
+    display, GTK_STYLE_PROVIDER (provider),
+    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_object_unref (provider);
+  loaded = TRUE;
+}
 
 static float
 linear_to_ui (float linear)
@@ -58,30 +128,30 @@ clear_list (GtkWidget *list)
     gtk_list_box_remove (GTK_LIST_BOX (list), child);
 }
 
-static void sound_rebuild (OozeSoundPane *self);
+static void sound_refresh (OozeSoundPane *self);
 
 static gboolean
-sound_rebuild_idle (gpointer user_data)
+sound_refresh_idle (gpointer user_data)
 {
   OozeSoundPane *self = user_data;
 
   self->pending_rebuild_id = 0;
   if (self->drag_freeze == 0)
-    sound_rebuild (self);
+    sound_refresh (self);
   return G_SOURCE_REMOVE;
 }
 
 static void
-sound_request_rebuild (OozeSoundPane *self)
+sound_request_refresh (OozeSoundPane *self)
 {
   if (self->drag_freeze > 0)
     {
       if (self->pending_rebuild_id == 0)
-        self->pending_rebuild_id = g_idle_add (sound_rebuild_idle, self);
+        self->pending_rebuild_id = g_idle_add (sound_refresh_idle, self);
       return;
     }
 
-  sound_rebuild (self);
+  sound_refresh (self);
 }
 
 static void
@@ -104,7 +174,7 @@ on_scale_released (GtkGestureClick *gesture G_GNUC_UNUSED,
   if (self->drag_freeze > 0)
     self->drag_freeze--;
   if (self->drag_freeze == 0)
-    sound_request_rebuild (self);
+    sound_request_refresh (self);
 }
 
 static void
@@ -150,12 +220,17 @@ static void
 on_stream_mute_toggled (GtkToggleButton *btn, OozeSoundPane *self)
 {
   uint32_t id;
+  gboolean muted;
 
   if (self->rebuilding || !self->pw)
     return;
 
   id = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (btn), "node-id"));
-  ooze_ear_pw_set_mute (self->pw, id, gtk_toggle_button_get_active (btn));
+  muted = gtk_toggle_button_get_active (btn);
+  gtk_button_set_icon_name (GTK_BUTTON (btn),
+                            muted ? "audio-volume-muted-symbolic"
+                                  : "audio-volume-high-symbolic");
+  ooze_ear_pw_set_mute (self->pw, id, muted);
 }
 
 static void
@@ -219,6 +294,19 @@ target_matches (const OozeEarNodeInfo *stream, const OozeEarNodeInfo *device)
   return FALSE;
 }
 
+static guint
+target_selection_index (const OozeEarNodeInfo *stream, GPtrArray *devices)
+{
+  guint i;
+
+  for (i = 0; i < devices->len; i++)
+    {
+      if (target_matches (stream, g_ptr_array_index (devices, i)))
+        return i + 1;
+    }
+  return 0;
+}
+
 static GtkWidget *
 make_target_dropdown (OozeSoundPane         *self,
                       const OozeEarNodeInfo *stream,
@@ -227,7 +315,6 @@ make_target_dropdown (OozeSoundPane         *self,
   GtkStringList *strings;
   GtkWidget *drop;
   guint i;
-  guint selected = 0;
   GListModel *model;
 
   strings = gtk_string_list_new (NULL);
@@ -244,8 +331,6 @@ make_target_dropdown (OozeSoundPane         *self,
         label = g_strdup (dev->name ? dev->name : "Device");
 
       gtk_string_list_append (strings, label);
-      if (target_matches (stream, dev))
-        selected = i + 1;
     }
 
   drop = gtk_drop_down_new (NULL, NULL);
@@ -253,8 +338,10 @@ make_target_dropdown (OozeSoundPane         *self,
    * when a live model is passed to gtk_drop_down_new and later replaced. */
   gtk_drop_down_set_model (GTK_DROP_DOWN (drop), G_LIST_MODEL (strings));
   g_object_unref (strings);
-  gtk_drop_down_set_selected (GTK_DROP_DOWN (drop), selected);
+  gtk_drop_down_set_selected (GTK_DROP_DOWN (drop),
+                              target_selection_index (stream, devices));
   gtk_widget_set_size_request (drop, 180, -1);
+  gtk_widget_set_valign (drop, GTK_ALIGN_CENTER);
   g_object_set_data (G_OBJECT (drop), "node-id", GUINT_TO_POINTER (stream->id));
 
   model = gtk_drop_down_get_model (GTK_DROP_DOWN (drop));
@@ -313,36 +400,47 @@ clear_device_controls (OozeSoundPane *self, gboolean is_output)
 }
 
 static GtkWidget *
-make_device_row (const OozeEarNodeInfo *info)
+make_device_row (OozeSoundPane *self, const OozeEarNodeInfo *info)
 {
   GtkWidget *row;
   GtkWidget *box;
+  GtkWidget *icon;
   GtkWidget *title;
-  GtkWidget *badge = NULL;
+  GtkWidget *badge;
+  EarRowWidgets *w;
 
   row = gtk_list_box_row_new ();
   gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (row), TRUE);
   g_object_set_data (G_OBJECT (row), "node-id", GUINT_TO_POINTER (info->id));
 
-  box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+  box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
   gtk_widget_set_margin_top (box, 10);
   gtk_widget_set_margin_bottom (box, 10);
   gtk_widget_set_margin_start (box, 12);
   gtk_widget_set_margin_end (box, 12);
   gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), box);
 
-  title = gtk_label_new (info->name ? info->name : "Audio");
+  icon = gtk_image_new_from_icon_name (
+      info->kind == OOZE_EAR_NODE_SOURCE
+        ? "audio-input-microphone-symbolic"
+        : "audio-speakers-symbolic");
+  gtk_box_append (GTK_BOX (box), icon);
+
+  title = gtk_label_new (info->name ? info->name : "Audio device");
   gtk_label_set_xalign (GTK_LABEL (title), 0.0);
   gtk_label_set_ellipsize (GTK_LABEL (title), PANGO_ELLIPSIZE_END);
   gtk_widget_set_hexpand (title, TRUE);
   gtk_box_append (GTK_BOX (box), title);
 
-  if (info->is_default)
-    {
-      badge = gtk_label_new ("Default");
-      gtk_widget_add_css_class (badge, "dim-label");
-      gtk_box_append (GTK_BOX (box), badge);
-    }
+  badge = gtk_label_new ("Default");
+  gtk_widget_add_css_class (badge, "ear-badge");
+  gtk_widget_set_visible (badge, info->is_default);
+  gtk_box_append (GTK_BOX (box), badge);
+
+  w = g_new0 (EarRowWidgets, 1);
+  w->title = title;
+  w->badge = badge;
+  g_hash_table_insert (self->row_widgets, GUINT_TO_POINTER (info->id), w);
 
   return row;
 }
@@ -359,15 +457,16 @@ make_stream_row (OozeSoundPane         *self,
   GtkWidget *title;
   GtkWidget *mute;
   GtkWidget *scale;
-  GtkWidget *route;
+  GtkWidget *route = NULL;
+  EarRowWidgets *w;
 
   row = gtk_list_box_row_new ();
   gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (row), FALSE);
   g_object_set_data (G_OBJECT (row), "node-id", GUINT_TO_POINTER (info->id));
 
   outer = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
-  gtk_widget_set_margin_top (outer, 8);
-  gtk_widget_set_margin_bottom (outer, 8);
+  gtk_widget_set_margin_top (outer, 10);
+  gtk_widget_set_margin_bottom (outer, 10);
   gtk_widget_set_margin_start (outer, 12);
   gtk_widget_set_margin_end (outer, 12);
   gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), outer);
@@ -377,12 +476,13 @@ make_stream_row (OozeSoundPane         *self,
 
   labels = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
   gtk_widget_set_hexpand (labels, TRUE);
+  gtk_widget_set_valign (labels, GTK_ALIGN_CENTER);
   gtk_box_append (GTK_BOX (top), labels);
 
   title = gtk_label_new (info->name ? info->name : "Stream");
   gtk_label_set_xalign (GTK_LABEL (title), 0.0);
   gtk_label_set_ellipsize (GTK_LABEL (title), PANGO_ELLIPSIZE_END);
-  gtk_widget_add_css_class (title, "heading");
+  gtk_widget_add_css_class (title, "ear-heading");
   gtk_box_append (GTK_BOX (labels), title);
 
   if (info->detail && info->detail[0])
@@ -390,7 +490,7 @@ make_stream_row (OozeSoundPane         *self,
       GtkWidget *sub = gtk_label_new (info->detail);
       gtk_label_set_xalign (GTK_LABEL (sub), 0.0);
       gtk_label_set_ellipsize (GTK_LABEL (sub), PANGO_ELLIPSIZE_END);
-      gtk_widget_add_css_class (sub, "dim-label");
+      gtk_widget_add_css_class (sub, "ear-hint");
       gtk_box_append (GTK_BOX (labels), sub);
     }
 
@@ -400,7 +500,12 @@ make_stream_row (OozeSoundPane         *self,
       gtk_box_append (GTK_BOX (top), route);
     }
 
-  mute = gtk_toggle_button_new_with_label ("Mute");
+  mute = gtk_toggle_button_new ();
+  gtk_button_set_icon_name (GTK_BUTTON (mute),
+                            info->mute ? "audio-volume-muted-symbolic"
+                                       : "audio-volume-high-symbolic");
+  gtk_widget_set_tooltip_text (mute, "Mute");
+  gtk_widget_set_valign (mute, GTK_ALIGN_CENTER);
   gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (mute), info->mute);
   g_object_set_data (G_OBJECT (mute), "node-id", GUINT_TO_POINTER (info->id));
   g_signal_connect (mute, "toggled", G_CALLBACK (on_stream_mute_toggled), self);
@@ -414,6 +519,13 @@ make_stream_row (OozeSoundPane         *self,
   g_signal_connect (scale, "value-changed", G_CALLBACK (on_stream_volume_changed), self);
   attach_drag_freeze (scale, self);
   gtk_box_append (GTK_BOX (outer), scale);
+
+  w = g_new0 (EarRowWidgets, 1);
+  w->title = title;
+  w->scale = scale;
+  w->mute = mute;
+  w->drop = route;
+  g_hash_table_insert (self->row_widgets, GUINT_TO_POINTER (info->id), w);
 
   return row;
 }
@@ -431,8 +543,8 @@ make_section_header (const char *text)
 
   label = gtk_label_new (text);
   gtk_label_set_xalign (GTK_LABEL (label), 0.0);
-  gtk_widget_add_css_class (label, "heading");
-  gtk_widget_set_margin_top (label, 8);
+  gtk_widget_add_css_class (label, "ear-section");
+  gtk_widget_set_margin_top (label, 10);
   gtk_widget_set_margin_bottom (label, 4);
   gtk_widget_set_margin_start (label, 12);
   gtk_widget_set_margin_end (label, 12);
@@ -445,11 +557,14 @@ compare_nodes (gconstpointer a, gconstpointer b)
 {
   const OozeEarNodeInfo *na = *(const OozeEarNodeInfo * const *) a;
   const OozeEarNodeInfo *nb = *(const OozeEarNodeInfo * const *) b;
+  int cmp;
 
-  if (na->is_default != nb->is_default)
-    return na->is_default ? -1 : 1;
-  return g_ascii_strcasecmp (na->name ? na->name : "",
-                             nb->name ? nb->name : "");
+  /* Stable, name-only order: rows must not jump when the default changes. */
+  cmp = g_ascii_strcasecmp (na->name ? na->name : "",
+                            nb->name ? nb->name : "");
+  if (cmp != 0)
+    return cmp;
+  return (na->id > nb->id) - (na->id < nb->id);
 }
 
 static void
@@ -502,10 +617,66 @@ on_device_row_selected (GtkListBox    *box,
   ooze_ear_pw_set_default (self->pw, id);
 }
 
-static void
-sound_rebuild (OozeSoundPane *self)
+/* Layout signature: rebuild widgets only when the set of nodes, their
+ * labels/defaults, or routing targets changed; plain volume/mute updates
+ * are applied in place so sliders never fight the user's drag. */
+static char *
+compute_signature (GPtrArray *nodes)
 {
-  g_autoptr (GPtrArray) nodes = NULL;
+  GString *sig = g_string_new (NULL);
+  guint i;
+
+  for (i = 0; i < nodes->len; i++)
+    {
+      OozeEarNodeInfo *n = g_ptr_array_index (nodes, i);
+
+      g_string_append_printf (sig, "%u/%d/%s/%d/%s;",
+                              n->id, (int) n->kind,
+                              n->name ? n->name : "",
+                              n->is_default ? 1 : 0,
+                              n->target ? n->target : "");
+    }
+  return g_string_free (sig, FALSE);
+}
+
+static void
+update_in_place (OozeSoundPane *self, GPtrArray *nodes)
+{
+  guint i;
+
+  self->rebuilding = TRUE;
+  for (i = 0; i < nodes->len; i++)
+    {
+      OozeEarNodeInfo *info = g_ptr_array_index (nodes, i);
+      EarRowWidgets *w = g_hash_table_lookup (self->row_widgets,
+                                              GUINT_TO_POINTER (info->id));
+
+      if (!w)
+        continue;
+
+      if (w->scale && self->drag_freeze == 0)
+        gtk_range_set_value (GTK_RANGE (w->scale), linear_to_ui (info->volume));
+      if (w->mute)
+        {
+          gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (w->mute), info->mute);
+          gtk_button_set_icon_name (GTK_BUTTON (w->mute),
+                                    info->mute ? "audio-volume-muted-symbolic"
+                                               : "audio-volume-high-symbolic");
+        }
+
+      if (info->kind == OOZE_EAR_NODE_SINK &&
+          info->id == self->selected_output_id)
+        update_device_controls (self, info, TRUE);
+      else if (info->kind == OOZE_EAR_NODE_SOURCE &&
+               info->id == self->selected_input_id)
+        update_device_controls (self, info, FALSE);
+    }
+  self->rebuilding = FALSE;
+}
+
+static void
+sound_rebuild (OozeSoundPane *self, GPtrArray *nodes)
+{
   g_autoptr (GPtrArray) sinks = NULL;
   g_autoptr (GPtrArray) sources = NULL;
   guint i;
@@ -515,17 +686,12 @@ sound_rebuild (OozeSoundPane *self)
   gboolean have_playback = FALSE;
   gboolean have_record = FALSE;
 
-  if (!self->pw || self->drag_freeze > 0)
-    return;
-
   self->rebuilding = TRUE;
 
+  g_hash_table_remove_all (self->row_widgets);
   clear_list (self->output_list);
   clear_list (self->input_list);
   clear_list (self->apps_list);
-
-  nodes = ooze_ear_pw_snapshot (self->pw);
-  g_ptr_array_sort (nodes, compare_nodes);
 
   sinks = g_ptr_array_new ();
   sources = g_ptr_array_new ();
@@ -541,44 +707,26 @@ sound_rebuild (OozeSoundPane *self)
   for (i = 0; i < sinks->len; i++)
     {
       OozeEarNodeInfo *info = g_ptr_array_index (sinks, i);
-      gtk_list_box_append (GTK_LIST_BOX (self->output_list), make_device_row (info));
+      gtk_list_box_append (GTK_LIST_BOX (self->output_list),
+                           make_device_row (self, info));
       counts[OOZE_EAR_NODE_SINK]++;
-      if (info->is_default || info->id == self->selected_output_id)
-        sel_out = info;
-      if (!sel_out && i == 0)
+      if (info->is_default)
         sel_out = info;
     }
+  if (!sel_out && sinks->len > 0)
+    sel_out = g_ptr_array_index (sinks, 0);
 
   for (i = 0; i < sources->len; i++)
     {
       OozeEarNodeInfo *info = g_ptr_array_index (sources, i);
-      gtk_list_box_append (GTK_LIST_BOX (self->input_list), make_device_row (info));
+      gtk_list_box_append (GTK_LIST_BOX (self->input_list),
+                           make_device_row (self, info));
       counts[OOZE_EAR_NODE_SOURCE]++;
-      if (info->is_default || info->id == self->selected_input_id)
-        sel_in = info;
-      if (!sel_in && i == 0)
+      if (info->is_default)
         sel_in = info;
     }
-
-  /* Prefer explicit defaults for selection highlight. */
-  for (i = 0; i < sinks->len; i++)
-    {
-      OozeEarNodeInfo *info = g_ptr_array_index (sinks, i);
-      if (info->is_default)
-        {
-          sel_out = info;
-          break;
-        }
-    }
-  for (i = 0; i < sources->len; i++)
-    {
-      OozeEarNodeInfo *info = g_ptr_array_index (sources, i);
-      if (info->is_default)
-        {
-          sel_in = info;
-          break;
-        }
-    }
+  if (!sel_in && sources->len > 0)
+    sel_in = g_ptr_array_index (sources, 0);
 
   for (i = 0; i < nodes->len; i++)
     {
@@ -612,6 +760,8 @@ sound_rebuild (OozeSoundPane *self)
           counts[OOZE_EAR_NODE_RECORD]++;
         }
     }
+
+  gtk_widget_set_visible (self->apps_empty, !have_playback && !have_record);
 
   if (sel_out)
     {
@@ -651,9 +801,33 @@ sound_rebuild (OozeSoundPane *self)
 }
 
 static void
+sound_refresh (OozeSoundPane *self)
+{
+  g_autoptr (GPtrArray) nodes = NULL;
+  g_autofree char *sig = NULL;
+
+  if (!self->pw || self->drag_freeze > 0)
+    return;
+
+  nodes = ooze_ear_pw_snapshot (self->pw);
+  g_ptr_array_sort (nodes, compare_nodes);
+
+  sig = compute_signature (nodes);
+  if (self->layout_signature && g_strcmp0 (sig, self->layout_signature) == 0)
+    {
+      update_in_place (self, nodes);
+      return;
+    }
+
+  g_free (self->layout_signature);
+  self->layout_signature = g_steal_pointer (&sig);
+  sound_rebuild (self, nodes);
+}
+
+static void
 on_pw_changed (gpointer user_data)
 {
-  sound_request_rebuild (OOZE_SOUND_PANE (user_data));
+  sound_request_refresh (OOZE_SOUND_PANE (user_data));
 }
 
 static GtkWidget *
@@ -670,10 +844,8 @@ make_volume_strip (OozeSoundPane *self,
   GtkWidget *mute;
 
   strip = ooze_surface_new (OOZE_SURFACE_TOOLBAR, GTK_ORIENTATION_HORIZONTAL);
-  gtk_widget_set_margin_top (strip, 8);
-  gtk_widget_set_margin_bottom (strip, 8);
-  gtk_widget_set_margin_start (strip, 14);
-  gtk_widget_set_margin_end (strip, 14);
+  gtk_widget_set_margin_top (strip, 10);
+  gtk_widget_set_margin_bottom (strip, 10);
 
   label = gtk_label_new (label_text);
   gtk_widget_set_size_request (label, 110, -1);
@@ -709,7 +881,6 @@ make_device_page (OozeSoundPane *self,
                   GtkWidget     *volume_strip)
 {
   GtkWidget *page;
-  GtkWidget *frame;
   GtkWidget *scrolled;
   GtkWidget *list;
   GtkWidget *label;
@@ -721,12 +892,9 @@ make_device_page (OozeSoundPane *self,
 
   label = gtk_label_new (heading);
   gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+  gtk_widget_add_css_class (label, "ear-section");
   gtk_widget_set_margin_bottom (label, 8);
   gtk_box_append (GTK_BOX (page), label);
-
-  frame = gtk_frame_new (NULL);
-  gtk_widget_set_vexpand (frame, TRUE);
-  gtk_widget_set_hexpand (frame, TRUE);
 
   scrolled = ooze_scrolled_window_new ();
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
@@ -735,11 +903,11 @@ make_device_page (OozeSoundPane *self,
 
   list = gtk_list_box_new ();
   gtk_list_box_set_selection_mode (GTK_LIST_BOX (list), GTK_SELECTION_SINGLE);
-  gtk_widget_add_css_class (list, "boxed-list");
+  gtk_widget_add_css_class (list, "ear-rows");
+  gtk_widget_set_valign (list, GTK_ALIGN_START);
   g_signal_connect (list, "row-selected", G_CALLBACK (on_device_row_selected), self);
   gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled), list);
-  gtk_frame_set_child (GTK_FRAME (frame), scrolled);
-  gtk_box_append (GTK_BOX (page), frame);
+  gtk_box_append (GTK_BOX (page), scrolled);
 
   gtk_box_append (GTK_BOX (page), volume_strip);
 
@@ -751,7 +919,6 @@ static GtkWidget *
 make_apps_page (OozeSoundPane *self)
 {
   GtkWidget *page;
-  GtkWidget *frame;
   GtkWidget *scrolled;
   GtkWidget *label;
 
@@ -763,11 +930,9 @@ make_apps_page (OozeSoundPane *self)
 
   label = gtk_label_new ("Application volume and device routing");
   gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+  gtk_widget_add_css_class (label, "ear-section");
   gtk_widget_set_margin_bottom (label, 8);
   gtk_box_append (GTK_BOX (page), label);
-
-  frame = gtk_frame_new (NULL);
-  gtk_widget_set_vexpand (frame, TRUE);
 
   scrolled = ooze_scrolled_window_new ();
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
@@ -776,10 +941,16 @@ make_apps_page (OozeSoundPane *self)
 
   self->apps_list = gtk_list_box_new ();
   gtk_list_box_set_selection_mode (GTK_LIST_BOX (self->apps_list), GTK_SELECTION_NONE);
-  gtk_widget_add_css_class (self->apps_list, "boxed-list");
+  gtk_widget_add_css_class (self->apps_list, "ear-rows");
+  gtk_widget_set_valign (self->apps_list, GTK_ALIGN_START);
   gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled), self->apps_list);
-  gtk_frame_set_child (GTK_FRAME (frame), scrolled);
-  gtk_box_append (GTK_BOX (page), frame);
+  gtk_box_append (GTK_BOX (page), scrolled);
+
+  self->apps_empty = gtk_label_new ("Nothing is playing or recording.");
+  gtk_widget_add_css_class (self->apps_empty, "ear-hint");
+  gtk_widget_set_margin_top (self->apps_empty, 8);
+  gtk_widget_set_visible (self->apps_empty, FALSE);
+  gtk_box_append (GTK_BOX (page), self->apps_empty);
 
   return page;
 }
@@ -795,6 +966,8 @@ ooze_sound_pane_dispose (GObject *object)
       self->pending_rebuild_id = 0;
     }
   g_clear_pointer (&self->pw, ooze_ear_pw_free);
+  g_clear_pointer (&self->row_widgets, g_hash_table_unref);
+  g_clear_pointer (&self->layout_signature, g_free);
   G_OBJECT_CLASS (ooze_sound_pane_parent_class)->dispose (object);
 }
 
@@ -816,14 +989,15 @@ ooze_sound_pane_init (OozeSoundPane *self)
   GtkWidget *apps_page;
   GtkWidget *status_bar;
 
+  ear_css_init ();
+
   gtk_orientable_set_orientation (GTK_ORIENTABLE (self), GTK_ORIENTATION_VERTICAL);
   gtk_widget_add_css_class (GTK_WIDGET (self), "ooze-sound-pane");
 
+  self->row_widgets = g_hash_table_new_full (g_direct_hash, g_direct_equal,
+                                             NULL, g_free);
+
   toolbar = ooze_surface_new (OOZE_SURFACE_TOOLBAR, GTK_ORIENTATION_VERTICAL);
-  gtk_widget_set_margin_top (toolbar, 8);
-  gtk_widget_set_margin_bottom (toolbar, 4);
-  gtk_widget_set_margin_start (toolbar, 12);
-  gtk_widget_set_margin_end (toolbar, 12);
 
   self->stack = gtk_stack_new ();
   gtk_stack_set_transition_type (GTK_STACK (self->stack),
@@ -837,11 +1011,11 @@ ooze_sound_pane_init (OozeSoundPane *self)
                                    &self->input_volume, &self->input_mute);
 
   output_page = make_device_page (self,
-                                  "Choose a sound output device:",
+                                  "Choose a sound output device",
                                   &self->output_list,
                                   output_strip);
   input_page = make_device_page (self,
-                                 "Choose a sound input device:",
+                                 "Choose a sound input device",
                                  &self->input_list,
                                  input_strip);
   apps_page = make_apps_page (self);
@@ -853,16 +1027,17 @@ ooze_sound_pane_init (OozeSoundPane *self)
   switcher = gtk_stack_switcher_new ();
   gtk_stack_switcher_set_stack (GTK_STACK_SWITCHER (switcher), GTK_STACK (self->stack));
   gtk_widget_set_halign (switcher, GTK_ALIGN_CENTER);
+  gtk_widget_set_margin_top (switcher, 6);
+  gtk_widget_set_margin_bottom (switcher, 6);
   gtk_box_append (GTK_BOX (toolbar), switcher);
 
   status_bar = ooze_surface_new (OOZE_SURFACE_STATUSBAR, GTK_ORIENTATION_HORIZONTAL);
-  gtk_widget_set_margin_top (status_bar, 2);
-  gtk_widget_set_margin_bottom (status_bar, 4);
-  gtk_widget_set_margin_start (status_bar, 12);
-  gtk_widget_set_margin_end (status_bar, 12);
   self->status = gtk_label_new ("Connecting to PipeWire…");
   gtk_label_set_xalign (GTK_LABEL (self->status), 0.0);
-  gtk_widget_add_css_class (self->status, "dim-label");
+  gtk_widget_add_css_class (self->status, "ear-hint");
+  gtk_widget_set_margin_top (self->status, 4);
+  gtk_widget_set_margin_bottom (self->status, 4);
+  gtk_widget_set_margin_start (self->status, OOZE_CHROME_CORNER_INSET);
   gtk_box_append (GTK_BOX (status_bar), self->status);
 
   gtk_box_append (GTK_BOX (self), toolbar);
@@ -877,7 +1052,7 @@ ooze_sound_pane_init (OozeSoundPane *self)
     gtk_label_set_text (GTK_LABEL (self->status),
                         "Could not connect to PipeWire. Is the daemon running?");
   else
-    sound_rebuild (self);
+    sound_refresh (self);
 
   ooze_theme_connect_dark_notify (G_OBJECT (self),
                                   G_CALLBACK (gtk_widget_queue_draw));

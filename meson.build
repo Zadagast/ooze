@@ -631,6 +631,28 @@ if gtk4_dep.found() and adw_dep.found()
     install_dir: get_option('datadir') / 'applications',
   )
 
+  executable('ooze-mouse',
+    'ooze-mouse/main.c',
+    'ooze-mouse/ooze-mouse-window.c',
+    'ooze-mouse/ooze-mouse-pane.c',
+    ooze_shared_sources,
+    include_directories: ooze_app_inc + [include_directories('ooze-mouse')],
+    dependencies: [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.Mouse.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
   executable('ooze-eye',
     'ooze-eye/main.c',
     'ooze-eye/ooze-eye-window.c',
