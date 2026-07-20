@@ -419,6 +419,12 @@ if gtk4_dep.found() and adw_dep.found()
   executable('spot',
     'spot/main.c',
     'spot/spot-window.c',
+    'spot/spot-sidebar.c',
+    'spot/spot-view-grid.c',
+    'spot/spot-view-list.c',
+    'spot/spot-view-columns.c',
+    'spot/spot-fileops.c',
+    'spot/spot-actions.c',
     ooze_shared_sources,
     include_directories: ooze_app_inc,
     dependencies: [
