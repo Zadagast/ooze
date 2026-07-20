@@ -20,19 +20,6 @@ test('render-smoke', test_render_smoke,
   ],
 )
 
-test_flow_smoke = executable('test-flow-smoke',
-  'ooze-flow-smoke.c',
-  '../compositor/ooze-flow.c',
-  include_directories: inc_compositor,
-  dependencies: [gio_dep, cairo_dep, cc.find_library('m')],
-)
-
-test('flow-smoke', test_flow_smoke,
-  env: [
-    'GSK_RENDERER=cairo',
-    'LIBGL_ALWAYS_SOFTWARE=1',
-  ],
-)
 
 test_wallpaper_smoke = executable('test-wallpaper-smoke',
   'ooze-wallpaper-smoke.c',
@@ -62,7 +49,6 @@ test_app_smoke = executable('test-app-smoke',
   '../ooze-monitor/ooze-display-config.c',
   '../ooze-pak/ooze-pak-window.c',
   '../ooze-scenery/ooze-scenery-window.c',
-  '../compositor/ooze-flow.c',
   '../ooze-pak/ooze-pak-flatpak.c',
   '../ooze-eye/ooze-eye-window.c',
   '../ooze-shot/ooze-shot-window.c',
@@ -111,7 +97,6 @@ test_app_smoke = executable('test-app-smoke',
 test_app_smoke_env = [
   'GSK_RENDERER=cairo',
   'LIBGL_ALWAYS_SOFTWARE=1',
-  'GSETTINGS_SCHEMA_DIR=' + meson.project_build_root(),
 ]
 
 test('app-smoke-spot', test_app_smoke,

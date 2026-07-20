@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Scenery
-GenericName=Wallpaper and Screensaver
+GenericName=Wallpaper and Screen Lock
 Comment=Choose your Ooze desktop scenery
 Exec=ooze-scenery
 Icon=org.ooze.Scenery

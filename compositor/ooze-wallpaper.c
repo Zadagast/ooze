@@ -1,7 +1,6 @@
 #include "ooze-wallpaper.h"
 
 #include "ooze-aqua-draw.h"
-#include "ooze-screensaver.h"
 #include "ooze-theme.h"
 #include "ooze-plugin-priv.h"
 #include "ooze-wallpaper-source.h"
@@ -71,24 +70,17 @@ ooze_wallpaper_refresh (OozePlugin *plugin)
                                        width,
                                        height);
       }
-
-  ooze_screensaver_refresh_wallpaper (plugin);
 }
 
 static void
 ooze_wallpaper_on_settings_changed (GSettings  *settings G_GNUC_UNUSED,
-                                    const char *key,
+                                    const char *key G_GNUC_UNUSED,
                                     gpointer    user_data)
 {
   OozePlugin *plugin = OOZE_PLUGIN (user_data);
 
   if (!plugin->shutting_down)
-    {
-      ooze_wallpaper_refresh (plugin);
-      if (settings == plugin->scenery_settings &&
-          g_strcmp0 (key, "screensaver-mode") == 0)
-        ooze_screensaver_mode_changed (plugin);
-    }
+    ooze_wallpaper_refresh (plugin);
 }
 
 void
@@ -97,15 +89,12 @@ ooze_wallpaper_init (OozePlugin *plugin)
   g_return_if_fail (OOZE_IS_PLUGIN (plugin));
 
   plugin->background_settings = g_settings_new ("org.gnome.desktop.background");
-  plugin->scenery_settings = g_settings_new ("org.ooze.scenery");
 
   g_signal_connect (plugin->background_settings, "changed::picture-uri",
                     G_CALLBACK (ooze_wallpaper_on_settings_changed), plugin);
   g_signal_connect (plugin->background_settings, "changed::picture-uri-dark",
                     G_CALLBACK (ooze_wallpaper_on_settings_changed), plugin);
   g_signal_connect (plugin->background_settings, "changed::picture-options",
-                    G_CALLBACK (ooze_wallpaper_on_settings_changed), plugin);
-  g_signal_connect (plugin->scenery_settings, "changed::screensaver-mode",
                     G_CALLBACK (ooze_wallpaper_on_settings_changed), plugin);
 }
 
@@ -117,8 +106,5 @@ ooze_wallpaper_dispose (OozePlugin *plugin)
 
   if (plugin->background_settings)
     g_signal_handlers_disconnect_by_data (plugin->background_settings, plugin);
-  if (plugin->scenery_settings)
-    g_signal_handlers_disconnect_by_data (plugin->scenery_settings, plugin);
   g_clear_object (&plugin->background_settings);
-  g_clear_object (&plugin->scenery_settings);
 }
