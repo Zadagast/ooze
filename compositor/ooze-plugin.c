@@ -17,6 +17,7 @@
 #include "ooze-stall.h"
 #include "ooze-lock.h"
 #include "ooze-screensaver.h"
+#include "ooze-wallpaper.h"
 #include "ooze-tray.h"
 #include "ooze-notifications.h"
 #include "ooze-shot.h"
@@ -37,6 +38,7 @@
 #include <meta/meta-background-group.h>
 #include <meta/meta-background.h>
 #include <meta/meta-context.h>
+#include <meta/meta-cursor-tracker.h>
 #include <meta/meta-monitor-manager.h>
 #include <meta/meta-window-actor.h>
 #include <meta/meta-workspace-manager.h>
@@ -344,6 +346,46 @@ ooze_plugin_get_primary_monitor_geometry (MetaDisplay  *display,
     primary = 0;
 
   meta_display_get_monitor_geometry (display, primary, rect_out);
+}
+
+void
+ooze_plugin_get_active_monitor_geometry (MetaDisplay  *display,
+                                         MtkRectangle *rect_out)
+{
+  MetaBackend *backend;
+  MetaCursorTracker *cursor_tracker;
+  graphene_point_t pointer;
+  MtkRectangle monitor;
+  int n_monitors;
+  int i;
+
+  g_return_if_fail (META_IS_DISPLAY (display));
+  g_return_if_fail (rect_out != NULL);
+
+  ooze_plugin_get_primary_monitor_geometry (display, rect_out);
+
+  n_monitors = meta_display_get_n_monitors (display);
+  if (n_monitors < 1)
+    return;
+
+  backend = meta_context_get_backend (meta_display_get_context (display));
+  cursor_tracker = backend ? meta_backend_get_cursor_tracker (backend) : NULL;
+  if (!cursor_tracker)
+    return;
+
+  meta_cursor_tracker_get_pointer (cursor_tracker, &pointer, NULL);
+  for (i = 0; i < n_monitors; i++)
+    {
+      meta_display_get_monitor_geometry (display, i, &monitor);
+      if (pointer.x >= monitor.x &&
+          pointer.x < monitor.x + monitor.width &&
+          pointer.y >= monitor.y &&
+          pointer.y < monitor.y + monitor.height)
+        {
+          *rect_out = monitor;
+          return;
+        }
+    }
 }
 
 static void
@@ -687,40 +729,6 @@ ooze_plugin_update_layout (OozePlugin *plugin, MetaDisplay *display)
   ooze_plugin_update_builtin_struts (plugin, display);
 }
 
-static void
-ooze_plugin_refresh_wallpapers (OozePlugin *plugin)
-{
-  ClutterActor *child;
-
-  if (!plugin->background_group)
-    return;
-
-  /*
-   * Repaint wallpaper cloth for the new palette only. Do NOT call
-   * ooze_plugin_on_monitors_changed here — that destroys desktop icons and
-   * reloads every themed icon on the main thread, which freezes launches
-   * after Light↔Dark (clicks still reach clients under the fade overlay).
-   */
-  for (child = clutter_actor_get_first_child (plugin->background_group);
-       child != NULL;
-       child = clutter_actor_get_next_sibling (child))
-    {
-      g_autoptr (ClutterContent) wallpaper = NULL;
-      int width = (int) clutter_actor_get_width (child);
-      int height = (int) clutter_actor_get_height (child);
-
-      if (width < 1 || height < 1)
-        continue;
-
-      wallpaper = ooze_aqua_wallpaper_content (child, width, height);
-      if (wallpaper)
-        ooze_aqua_actor_set_content (child,
-                                     g_steal_pointer (&wallpaper),
-                                     width,
-                                     height);
-    }
-}
-
 static gboolean
 ooze_plugin_chrome_theme_idle (gpointer user_data)
 {
@@ -798,7 +806,7 @@ ooze_plugin_refresh_theme (OozePlugin *plugin)
   ooze_panel_recolor_menu_bar (plugin);
   ooze_tray_refresh_appearance (plugin);
   ooze_plugin_update_layout (plugin, display);
-  ooze_plugin_refresh_wallpapers (plugin);
+  ooze_wallpaper_refresh (plugin);
   ooze_plugin_schedule_chrome_theme_refresh (plugin);
 }
 
@@ -1001,9 +1009,10 @@ ooze_plugin_on_monitors_changed (MetaMonitorManager *monitor_manager G_GNUC_UNUS
       meta_display_get_monitor_geometry (display, i, &rect);
 
       background_actor = clutter_actor_new ();
-      wallpaper = ooze_aqua_wallpaper_content (background_actor,
-                                             rect.width,
-                                             rect.height);
+      wallpaper = ooze_wallpaper_content (plugin,
+                                          background_actor,
+                                          rect.width,
+                                          rect.height);
       if (wallpaper)
         ooze_aqua_actor_set_content (background_actor,
                                    g_steal_pointer (&wallpaper),
@@ -1268,11 +1277,35 @@ ooze_plugin_unminimize (MetaPlugin *plugin, MetaWindowActor *actor)
   ooze_plugin_run_magic_lamp (plugin, actor, TRUE);
 }
 
+/* Window-open transition: a subtle scale-up + fade-in, in the spirit of the
+ * GNOME/Mutter default plugin's _mapWindow and macOS's window-open ease
+ * (scale from ~92% + opacity), instead of the window popping in instantly. */
+#define OOZE_MAP_MS     180
+#define OOZE_MAP_SCALE  0.92
+
+static void
+ooze_plugin_map_effect_done (ClutterActor *window_actor,
+                             gpointer      user_data)
+{
+  MetaPlugin *plugin = META_PLUGIN (user_data);
+
+  g_signal_handlers_disconnect_by_func (window_actor,
+                                        G_CALLBACK (ooze_plugin_map_effect_done),
+                                        plugin);
+
+  clutter_actor_set_scale (window_actor, 1.0, 1.0);
+  clutter_actor_set_opacity (window_actor, 255);
+
+  meta_plugin_map_completed (plugin, META_WINDOW_ACTOR (window_actor));
+}
+
 static void
 ooze_plugin_map (MetaPlugin *plugin, MetaWindowActor *actor)
 {
   MetaWindow *window;
   ClutterActor *window_actor;
+  MetaWindowType wtype;
+  gboolean animate;
 
   if (OOZE_PLUGIN (plugin)->shutting_down)
     {
@@ -1284,6 +1317,12 @@ ooze_plugin_map (MetaPlugin *plugin, MetaWindowActor *actor)
   window_actor = CLUTTER_ACTOR (actor);
 
   clutter_actor_show (window_actor);
+
+  if (ooze_screensaver_adopt_hack_window (OOZE_PLUGIN (plugin), actor))
+    {
+      meta_plugin_map_completed (plugin, actor);
+      return;
+    }
 
   ooze_window_chrome_apply (actor, plugin);
   ooze_foreign_gel_maybe_attach (OOZE_PLUGIN (plugin), actor);
@@ -1298,7 +1337,32 @@ ooze_plugin_map (MetaPlugin *plugin, MetaWindowActor *actor)
       meta_window_get_window_type (window) != META_WINDOW_DESKTOP)
     meta_window_focus (window, clutter_get_current_event_time ());
 
-  meta_plugin_map_completed (plugin, actor);
+  wtype = window ? meta_window_get_window_type (window) : META_WINDOW_OVERRIDE_OTHER;
+  animate = window &&
+            !meta_window_is_override_redirect (window) &&
+            (wtype == META_WINDOW_NORMAL ||
+             wtype == META_WINDOW_DIALOG ||
+             wtype == META_WINDOW_MODAL_DIALOG);
+
+  if (!animate)
+    {
+      meta_plugin_map_completed (plugin, actor);
+      return;
+    }
+
+  clutter_actor_set_pivot_point (window_actor, 0.5f, 0.5f);
+  clutter_actor_set_scale (window_actor, OOZE_MAP_SCALE, OOZE_MAP_SCALE);
+  clutter_actor_set_opacity (window_actor, 0);
+
+  g_signal_connect (window_actor, "transitions-completed",
+                    G_CALLBACK (ooze_plugin_map_effect_done), plugin);
+
+  clutter_actor_save_easing_state (window_actor);
+  clutter_actor_set_easing_mode (window_actor, CLUTTER_EASE_OUT_QUAD);
+  clutter_actor_set_easing_duration (window_actor, OOZE_MAP_MS);
+  clutter_actor_set_scale (window_actor, 1.0, 1.0);
+  clutter_actor_set_opacity (window_actor, 255);
+  clutter_actor_restore_easing_state (window_actor);
 }
 
 static void
@@ -1708,6 +1772,7 @@ ooze_plugin_start (MetaPlugin *plugin)
                           G_CALLBACK (on_stage_key_press), self);
     }
 
+  ooze_wallpaper_init (self);
   ooze_lock_init (self);
   ooze_screensaver_init (self);
   ooze_polkit_init (self);
@@ -1745,6 +1810,7 @@ ooze_plugin_begin_shutdown (OozePlugin *plugin)
    */
   ooze_screensaver_dispose (plugin);
   ooze_lock_dispose (plugin);
+  ooze_wallpaper_dispose (plugin);
   ooze_session_dialog_dismiss ();
   ooze_foreign_gel_shutdown (plugin);
   ooze_polkit_shutdown ();
@@ -1914,15 +1980,16 @@ ooze_plugin_init (OozePlugin *plugin)
   plugin->lock_logind_conn = NULL;
   plugin->session_settings = NULL;
   plugin->screensaver_settings = NULL;
+  plugin->background_settings = NULL;
+  plugin->scenery_settings = NULL;
   plugin->screensaver_active = FALSE;
+  plugin->screensaver_black = FALSE;
   plugin->screensaver_overlay = NULL;
-  plugin->screensaver_timeline = NULL;
   plugin->screensaver_idle_watch_id = 0;
   plugin->screensaver_user_active_watch_id = 0;
   plugin->screensaver_arm_id = 0;
   plugin->screensaver_fade_id = 0;
   plugin->screensaver_stage_capture_id = 0;
   plugin->screensaver_input_armed = FALSE;
-  plugin->screensaver_flow = NULL;
-  plugin->screensaver_flow_actor = NULL;
+  plugin->screensaver_phase_id = 0;
 }

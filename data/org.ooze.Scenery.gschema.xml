@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.ooze.scenery" path="/org/ooze/scenery/">
+    <key name="screensaver-mode" type="s">
+      <default>'xscreensaver:glmatrix'</default>
+      <summary>Screensaver visual mode</summary>
+      <description>
+        Choose the visual shown when the session is idle. Recognised values
+        are 'xscreensaver:NAME' (run the installed XScreenSaver module NAME
+        full screen; the screen stays black if it is missing) and 'none'
+        (keep the desktop clear while retaining the normal lock-on-idle
+        behavior). Any other value behaves as a blank black saver.
+      </description>
+    </key>
+  </schema>
+</schemalist>

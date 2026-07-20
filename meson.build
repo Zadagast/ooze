@@ -1,5 +1,5 @@
 project('ooze', 'c', 'cpp',
-  version: '0.2.1',
+  version: '0.4.0',
   meson_version: '>= 1.0.0',
   default_options: [
     'c_std=c11',
@@ -104,6 +104,7 @@ executable('ooze',
   'compositor/ooze-dock-shell.c',
   'compositor/ooze-window-tracker.c',
   'compositor/ooze-dock-pins.c',
+  'compositor/ooze-dock-folder-popup.c',
   'compositor/ooze-desktop-icons.c',
   'compositor/ooze-aqua-menu.c',
   'compositor/ooze-global-menu.c',
@@ -119,6 +120,9 @@ executable('ooze',
   'compositor/ooze-lock.c',
   'compositor/ooze-screensaver.c',
   'compositor/ooze-flow.c',
+  'compositor/ooze-flow-gpu.c',
+  'compositor/ooze-wallpaper.c',
+  'compositor/ooze-wallpaper-source.c',
   'compositor/ooze-sni.c',
   'compositor/ooze-tray.c',
   'compositor/ooze-notifications.c',
@@ -189,6 +193,24 @@ install_data('data/pam/ooze-lock',
   rename: 'ooze-lock',
 )
 
+schema_files = files('data/org.ooze.Scenery.gschema.xml')
+glib_compile_schemas = find_program('glib-compile-schemas')
+compiled_schemas = custom_target('gschemas.compiled',
+  input: schema_files,
+  output: 'gschemas.compiled',
+  command: [
+    glib_compile_schemas,
+    '--strict',
+    '--targetdir', '@OUTDIR@',
+    meson.project_source_root() / 'data',
+  ],
+  build_by_default: true,
+  install: false,
+)
+install_data(schema_files,
+  install_dir: get_option('datadir') / 'glib-2.0' / 'schemas',
+)
+
 install_data('data/wayland-sessions/ooze.desktop',
   install_dir: get_option('datadir') / 'wayland-sessions',
 )
@@ -241,6 +263,12 @@ install_data('data/icons/hicolor/scalable/apps/org.ooze.Launch.svg',
 install_data('data/icons/hicolor/scalable/apps/org.ooze.Launch.svg',
   install_dir: ooze_data_dir / 'icons/hicolor/scalable/apps',
 )
+install_data('data/icons/hicolor/scalable/apps/org.ooze.Scenery.svg',
+  install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps',
+)
+install_data('data/icons/hicolor/scalable/apps/org.ooze.Scenery.svg',
+  install_dir: ooze_data_dir / 'icons/hicolor/scalable/apps',
+)
 
 vte_dep = dependency('vte-2.91-gtk4', required: false)
 
@@ -259,6 +287,8 @@ ooze_kit_lib = shared_library('ooze-kit',
   'ooze-kit/ooze-toolbar.c',
   'ooze-kit/ooze-theme.c',
   'ooze-kit/ooze-about.c',
+  'ooze-kit/ooze-feedback.c',
+  'ooze-kit/ooze-action-bar.c',
   'ooze-kit/ooze-window-actions.c',
   'ooze-kit/ooze-pinline.c',
   'ooze-kit/ooze-scroll.c',
@@ -301,6 +331,8 @@ oozekit_public_headers = [
   'ooze-kit/ooze-init.h',
   'ooze-kit/ooze-application-window.h',
   'ooze-kit/ooze-about.h',
+  'ooze-kit/ooze-feedback.h',
+  'ooze-kit/ooze-action-bar.h',
   'ooze-kit/ooze-button.h',
   'ooze-kit/ooze-draw.h',
   'ooze-kit/ooze-icons.h',
@@ -422,6 +454,13 @@ if gtk4_dep.found() and adw_dep.found()
   install_data('data/org.ooze.Spot.desktop',
     install_dir: get_option('datadir') / 'applications',
   )
+  install_data(configure_file(
+    input: 'data/org.freedesktop.FileManager1.service',
+    output: 'org.freedesktop.FileManager1.service',
+    configuration: {
+      'bindir': join_paths(get_option('prefix'), get_option('bindir')),
+    },
+  ), install_dir: get_option('datadir') / 'dbus-1' / 'services')
 
   executable('ooze-pak',
     'ooze-pak/main.c',
@@ -512,6 +551,30 @@ if gtk4_dep.found() and adw_dep.found()
   )
 
   install_data('data/org.ooze.Launch.desktop',
+    install_dir: get_option('datadir') / 'applications',
+  )
+
+  executable('ooze-scenery',
+    'ooze-scenery/main.c',
+    'ooze-scenery/ooze-scenery-window.c',
+    'compositor/ooze-flow.c',
+    ooze_shared_sources,
+    include_directories: ooze_app_inc + [include_directories('ooze-scenery'),
+                                         inc_compositor],
+    dependencies: [
+      ooze_kit_dep,
+      gtk4_dep,
+      adw_dep,
+      gio_dep,
+      gdk_pixbuf_dep,
+      cairo_dep,
+      cc.find_library('m'),
+    ],
+    c_args: ooze_app_c_args,
+    install: true,
+  )
+
+  install_data('data/org.ooze.Scenery.desktop',
     install_dir: get_option('datadir') / 'applications',
   )
 

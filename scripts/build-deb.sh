@@ -16,7 +16,7 @@ ARCH="${ARCH:-amd64}"
 # configured build dir can hold a stale project version until ninja
 # reconfigures it, so introspecting it here would mislabel the package.
 VERSION="${VERSION:-$(sed -n "s/.*version: '\\([^']*\\)'.*/\\1/p" meson.build | head -1)}"
-VERSION="${VERSION:-0.2.1}"
+VERSION="${VERSION:-0.4.0}"
 DEB_NAME="ooze_${VERSION}_${ARCH}.deb"
 OUTPUT="${OUTPUT:-$DIST_DIR/$DEB_NAME}"
 
@@ -38,9 +38,13 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 DESTDIR="$STAGE" ninja -C "$BUILD_DIR" install
 
-echo "==> Bundling WhiteSur foreign GTK themes"
-OOZE_THEMES_DEST="$STAGE/usr/share/ooze/themes" \
-  "$ROOT/scripts/install-whitesur-theme.sh"
+if [[ "${SKIP_WHITESUR:-0}" == 1 ]]; then
+  echo "==> Skipping WhiteSur bundling (SKIP_WHITESUR=1)"
+else
+  echo "==> Bundling WhiteSur foreign GTK themes"
+  OOZE_THEMES_DEST="$STAGE/usr/share/ooze/themes" \
+    "$ROOT/scripts/install-whitesur-theme.sh"
+fi
 
 # Expose WhiteSur on the standard freedesktop theme path so foreign apps
 # resolve it without Ooze's XDG_DATA_DIRS. Otherwise they fall back to light
@@ -123,6 +127,13 @@ sed "s/@VERSION@/${VERSION}/g" "$ROOT/packaging/deb/control.in" > "$STAGE/DEBIAN
 # Installed-Size in KiB (exclude DEBIAN metadata from rough size)
 INSTALLED_SIZE="$(du -sk --exclude=DEBIAN "$STAGE" | awk '{print $1}')"
 printf 'Installed-Size: %s\n' "$INSTALLED_SIZE" >> "$STAGE/DEBIAN/control"
+
+# Maintainer scripts (e.g. dpkg-divert the FileManager1 service vs Nautilus).
+for script in preinst postrm; do
+  if [[ -f "$ROOT/packaging/deb/$script" ]]; then
+    install -m 0755 "$ROOT/packaging/deb/$script" "$STAGE/DEBIAN/$script"
+  fi
+done
 
 mkdir -p "$DIST_DIR"
 echo "==> Building $OUTPUT"

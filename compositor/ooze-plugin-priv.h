@@ -83,19 +83,29 @@ struct _OozePlugin
   GDBusConnection *lock_logind_conn;
   GSettings    *session_settings;
   GSettings    *screensaver_settings;
+  GSettings    *background_settings;
+  GSettings    *scenery_settings;
 
-  /* Screensaver (non-grabbing compositor overlay + animation timeline) */
+  /* Screensaver (black compositor overlay hosting an XScreenSaver hack) */
   gboolean      screensaver_active;
+  gboolean      screensaver_black;   /* overlay reached full black */
   ClutterActor *screensaver_overlay;
-  ClutterTimeline *screensaver_timeline;
   guint         screensaver_idle_watch_id;
   guint         screensaver_user_active_watch_id;
   guint         screensaver_arm_id;
   guint         screensaver_fade_id;
+  guint         screensaver_phase_id;
   gulong        screensaver_stage_capture_id;
   gboolean      screensaver_input_armed;
-  gpointer      screensaver_flow;
-  ClutterActor *screensaver_flow_actor;
+
+  /* XScreenSaver hack backdrop (X11 hack adopted into the overlay) */
+  GPid          saver_hack_pid;
+  char         *saver_hack_name;
+  guint         saver_hack_child_watch_id;
+  guint         saver_hack_kill_id;
+  ClutterActor *saver_hack_clone;
+  gpointer      saver_hack_window; /* MetaWindow* */
+  gboolean      saver_unredirect_disabled;
 
   /* StatusNotifier tray (AppIndicator host) */
   ClutterActor *tray_box;
@@ -105,5 +115,8 @@ struct _OozePlugin
   OozeAquaMenu *tray_popup;
   guint         tray_appearance_idle;
 };
+
+void ooze_plugin_get_active_monitor_geometry (MetaDisplay  *display,
+                                               MtkRectangle *rect_out);
 
 void ooze_plugin_begin_shutdown (OozePlugin *plugin);

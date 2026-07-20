@@ -87,6 +87,8 @@ struct _SpotWindow
   GtkWidget *shell_drag_highlight; /* widget showing folder drop highlight */
   GList *back_stack;
   GList *forward_stack;
+  gpointer grid_enumeration;
+  GFile *reveal_target;
   guint last_column_count;
   guint spring_id;
   SpotViewMode view_mode;
@@ -349,6 +351,25 @@ static void spot_pop_history (SpotWindow *self,
                               GList     **stack,
                               GList     **other_stack);
 static void spot_append_menus (SpotWindow *self);
+
+typedef struct
+{
+  SpotWindow *window;
+  GFile *directory;
+  GFileEnumerator *enumerator;
+  GCancellable *cancellable;
+} SpotGridEnumeration;
+
+static void spot_grid_enumeration_free (SpotGridEnumeration *enumeration);
+static void spot_grid_enumerate_next_cb (GObject      *source,
+                                         GAsyncResult *result,
+                                         gpointer      user_data);
+static void spot_grid_enumerate_children_cb (GObject      *source,
+                                             GAsyncResult *result,
+                                             gpointer      user_data);
+static gint spot_grid_sort_func (GtkFlowBoxChild *child_a,
+                                 GtkFlowBoxChild *child_b,
+                                 gpointer         user_data);
 
 static void
 spot_set_context_target (SpotWindow *self,
@@ -1957,69 +1978,201 @@ spot_clear_grid (SpotWindow *self)
 }
 
 static void
+spot_grid_enumeration_free (SpotGridEnumeration *enumeration)
+{
+  if (!enumeration)
+    return;
+
+  if (enumeration->window->grid_enumeration == enumeration)
+    {
+      enumeration->window->grid_enumeration = NULL;
+      g_clear_object (&enumeration->window->reveal_target);
+    }
+  g_clear_object (&enumeration->enumerator);
+  g_clear_object (&enumeration->directory);
+  g_clear_object (&enumeration->cancellable);
+  g_object_unref (enumeration->window);
+  g_free (enumeration);
+}
+
+static void
+spot_grid_enumeration_cancel (SpotWindow *self)
+{
+  SpotGridEnumeration *enumeration = self->grid_enumeration;
+
+  if (!enumeration)
+    return;
+
+  g_cancellable_cancel (enumeration->cancellable);
+  self->grid_enumeration = NULL;
+}
+
+static void
+spot_grid_append_info (SpotGridEnumeration *enumeration,
+                       GFileInfo           *info)
+{
+  SpotWindow *self = enumeration->window;
+  GtkWidget *loading;
+  g_autoptr (GFile) child = NULL;
+  GtkWidget *cell;
+  GtkWidget *fbc;
+
+  if (g_file_info_get_is_hidden (info))
+    return;
+
+  loading = gtk_widget_get_first_child (self->grid_flow);
+  if (GTK_IS_FLOW_BOX_CHILD (loading))
+    {
+      GtkWidget *inner =
+        gtk_flow_box_child_get_child (GTK_FLOW_BOX_CHILD (loading));
+
+      if (inner && g_object_get_data (G_OBJECT (inner), "spot-loading"))
+        gtk_flow_box_remove (GTK_FLOW_BOX (self->grid_flow), loading);
+    }
+
+  child = g_file_get_child (enumeration->directory,
+                            g_file_info_get_name (info));
+  cell = spot_create_grid_cell (self, info, child);
+  g_object_set_data_full (G_OBJECT (cell), "spot-info",
+                          g_object_ref (info), g_object_unref);
+  gtk_flow_box_append (GTK_FLOW_BOX (self->grid_flow), cell);
+
+  fbc = gtk_widget_get_parent (cell);
+  if (fbc)
+    {
+      gtk_widget_set_margin_top (fbc, 0);
+      gtk_widget_set_margin_bottom (fbc, 0);
+      gtk_widget_set_margin_start (fbc, 0);
+      gtk_widget_set_margin_end (fbc, 0);
+      gtk_widget_set_valign (fbc, GTK_ALIGN_START);
+    }
+
+  if (self->reveal_target)
+    spot_select_file_widget (self, self->grid_flow, self->reveal_target);
+}
+
+static gint
+spot_grid_sort_func (GtkFlowBoxChild *child_a,
+                     GtkFlowBoxChild *child_b,
+                     gpointer         user_data G_GNUC_UNUSED)
+{
+  GtkWidget *widget_a;
+  GtkWidget *widget_b;
+  GFileInfo *info_a;
+  GFileInfo *info_b;
+  gboolean loading_a;
+  gboolean loading_b;
+
+  widget_a = gtk_flow_box_child_get_child (child_a);
+  widget_b = gtk_flow_box_child_get_child (child_b);
+  loading_a = widget_a &&
+              g_object_get_data (G_OBJECT (widget_a), "spot-loading");
+  loading_b = widget_b &&
+              g_object_get_data (G_OBJECT (widget_b), "spot-loading");
+
+  if (loading_a != loading_b)
+    return loading_a ? -1 : 1;
+
+  if (loading_a)
+    return 0;
+
+  info_a = widget_a ? g_object_get_data (G_OBJECT (widget_a), "spot-info") : NULL;
+  info_b = widget_b ? g_object_get_data (G_OBJECT (widget_b), "spot-info") : NULL;
+  if (!info_a || !info_b)
+    return 0;
+
+  return spot_compare_file_info (info_a, info_b);
+}
+
+static void
+spot_grid_enumerate_next_cb (GObject      *source,
+                             GAsyncResult *result,
+                             gpointer      user_data)
+{
+  SpotGridEnumeration *enumeration = user_data;
+  g_autoptr (GError) error = NULL;
+  GList *infos;
+  GList *link;
+
+  infos = g_file_enumerator_next_files_finish (
+    G_FILE_ENUMERATOR (source), result, &error);
+  if (error || !infos)
+    {
+      spot_grid_enumeration_free (enumeration);
+      return;
+    }
+
+  for (link = infos; link; link = link->next)
+    {
+      spot_grid_append_info (enumeration, link->data);
+      g_object_unref (link->data);
+    }
+  g_list_free (infos);
+
+  g_file_enumerator_next_files_async (
+    enumeration->enumerator, 32, G_PRIORITY_DEFAULT,
+    enumeration->cancellable, spot_grid_enumerate_next_cb, enumeration);
+}
+
+static void
+spot_grid_enumerate_children_cb (GObject      *source,
+                                 GAsyncResult *result,
+                                 gpointer      user_data)
+{
+  SpotGridEnumeration *enumeration = user_data;
+  g_autoptr (GError) error = NULL;
+
+  enumeration->enumerator =
+    g_file_enumerate_children_finish (G_FILE (source), result, &error);
+  if (error || !enumeration->enumerator)
+    {
+      spot_grid_enumeration_free (enumeration);
+      return;
+    }
+
+  g_file_enumerator_next_files_async (
+    enumeration->enumerator, 32, G_PRIORITY_DEFAULT,
+    enumeration->cancellable, spot_grid_enumerate_next_cb, enumeration);
+}
+
+static void
 spot_populate_grid (SpotWindow *self)
 {
-  g_autoptr (GError) error = NULL;
-  g_autoptr (GFileEnumerator) enumerator = NULL;
-  GList *entries = NULL;
-  GList *l;
-  GFileInfo *info;
+  SpotGridEnumeration *enumeration;
 
+  spot_grid_enumeration_cancel (self);
   spot_clear_grid (self);
 
   if (!self->current_dir)
     return;
 
-  enumerator = g_file_enumerate_children (
-      self->current_dir,
-      G_FILE_ATTRIBUTE_STANDARD_NAME ","
-      G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME ","
-      G_FILE_ATTRIBUTE_STANDARD_ICON ","
-      G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON ","
-      G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE ","
-      G_FILE_ATTRIBUTE_STANDARD_TYPE ","
-      G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN,
-      G_FILE_QUERY_INFO_NONE,
-      NULL,
-      &error);
+  {
+    GtkWidget *loading = gtk_label_new ("Loading…");
 
-  if (!enumerator)
-    return;
+    gtk_widget_set_margin_top (loading, 24);
+    gtk_widget_set_margin_start (loading, 24);
+    g_object_set_data (G_OBJECT (loading), "spot-loading",
+                       GINT_TO_POINTER (1));
+    gtk_flow_box_append (GTK_FLOW_BOX (self->grid_flow), loading);
+  }
 
-  while ((info = g_file_enumerator_next_file (enumerator, NULL, NULL)) != NULL)
-    {
-      if (g_file_info_get_is_hidden (info))
-        g_object_unref (info);
-      else
-        entries = g_list_prepend (entries, info);
-    }
+  enumeration = g_new0 (SpotGridEnumeration, 1);
+  enumeration->window = g_object_ref (self);
+  enumeration->directory = g_object_ref (self->current_dir);
+  enumeration->cancellable = g_cancellable_new ();
+  self->grid_enumeration = enumeration;
 
-  entries = g_list_sort (entries, spot_compare_file_info);
-
-  for (l = entries; l != NULL; l = l->next)
-    {
-      GFileInfo *entry = l->data;
-      g_autoptr (GFile) child = g_file_get_child (self->current_dir,
-                                                   g_file_info_get_name (entry));
-      GtkWidget *cell = spot_create_grid_cell (self, entry, child);
-
-      gtk_flow_box_append (GTK_FLOW_BOX (self->grid_flow), cell);
-
-      /* Pin the auto-created GtkFlowBoxChild so it never stretches */
-      {
-        GtkWidget *fbc = gtk_widget_get_parent (cell);
-        if (fbc)
-          {
-            gtk_widget_set_margin_top    (fbc, 0);
-            gtk_widget_set_margin_bottom (fbc, 0);
-            gtk_widget_set_margin_start  (fbc, 0);
-            gtk_widget_set_margin_end    (fbc, 0);
-            gtk_widget_set_valign (fbc, GTK_ALIGN_START);
-          }
-      }
-    }
-
-  g_list_free_full (entries, g_object_unref);
+  g_file_enumerate_children_async (
+    enumeration->directory,
+    G_FILE_ATTRIBUTE_STANDARD_NAME ","
+    G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME ","
+    G_FILE_ATTRIBUTE_STANDARD_ICON ","
+    G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON ","
+    G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE ","
+    G_FILE_ATTRIBUTE_STANDARD_TYPE ","
+    G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN,
+    G_FILE_QUERY_INFO_NONE, G_PRIORITY_DEFAULT,
+    enumeration->cancellable, spot_grid_enumerate_children_cb, enumeration);
 }
 
 static void
@@ -2943,6 +3096,46 @@ spot_window_open_path (SpotWindow *self,
   spot_navigate_to (self, dir, FALSE);
 }
 
+void
+spot_window_reveal_uri (SpotWindow   *self,
+                        const char   *uri)
+{
+  g_autoptr (GFile) file = NULL;
+  g_autoptr (GFileInfo) info = NULL;
+  g_autoptr (GFile) parent = NULL;
+
+  if (!self || !uri || !*uri)
+    return;
+
+  file = g_file_new_for_uri (uri);
+  info = g_file_query_info (file,
+                            G_FILE_ATTRIBUTE_STANDARD_TYPE,
+                            G_FILE_QUERY_INFO_NONE,
+                            NULL, NULL);
+  if (!info)
+    return;
+
+  if (g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
+    {
+      g_autofree char *path = g_file_get_path (file);
+
+      if (path)
+        {
+          spot_set_view_mode (self, SPOT_VIEW_GRID);
+          spot_window_open_path (self, path);
+        }
+      return;
+    }
+
+  parent = g_file_get_parent (file);
+  if (!parent)
+    return;
+
+  spot_set_view_mode (self, SPOT_VIEW_GRID);
+  g_set_object (&self->reveal_target, file);
+  spot_navigate_to (self, parent, FALSE);
+}
+
 static void
 spot_navigate_to_path_string (SpotWindow *self,
                               const char *path,
@@ -3212,6 +3405,8 @@ spot_window_constructed (GObject *object)
   gtk_flow_box_set_activate_on_single_click (GTK_FLOW_BOX (self->grid_flow), FALSE);
   /* homogeneous = FALSE: rows are only as tall as their tallest cell */
   gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (self->grid_flow), FALSE);
+  gtk_flow_box_set_sort_func (GTK_FLOW_BOX (self->grid_flow),
+                              spot_grid_sort_func, self, NULL);
   gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (self->grid_flow), 2);
   gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (self->grid_flow), 20);
   gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (self->grid_flow), 2);
@@ -3303,9 +3498,11 @@ spot_window_dispose (GObject *object)
   SpotWindow *self = SPOT_WINDOW (object);
 
   spot_spring_cancel (self);
+  spot_grid_enumeration_cancel (self);
   spot_window_shell_drag_leave (self);
   g_clear_object (&self->current_dir);
   g_clear_object (&self->context_target);
+  g_clear_object (&self->reveal_target);
   if (self->context_menu)
     {
       gtk_widget_unparent (self->context_menu);

@@ -88,7 +88,7 @@ echo "==> Building package"
 ./scripts/build-deb.sh
 
 VERSION="$(sed -n "s/.*version: '\\([^']*\\)'.*/\\1/p" meson.build | head -1)"
-VERSION="${VERSION:-0.2.1}"
+VERSION="${VERSION:-0.4.0}"
 DEB="dist/ooze_${VERSION}_amd64.deb"
 if [[ ! -f "$DEB" ]]; then
   echo "ooze update: expected package $DEB not found" >&2

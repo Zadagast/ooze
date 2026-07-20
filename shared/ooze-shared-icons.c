@@ -145,17 +145,16 @@ ooze_icons_setup_environment (void)
     {
       g_autofree char *updated = NULL;
 
-      if (existing && existing[0] != '\0')
-        {
-          updated = g_strdup_printf ("%s%c%s",
-                                     data_root,
-                                     G_SEARCHPATH_SEPARATOR,
-                                     existing);
-        }
-      else
-        {
-          updated = g_strdup (data_root);
-        }
+      /* When unset, keep the freedesktop default search path so other
+       * consumers of XDG_DATA_DIRS (glycin image loaders, mime data,
+       * schemas) keep working. */
+      if (!existing || existing[0] == '\0')
+        existing = "/usr/local/share:/usr/share";
+
+      updated = g_strdup_printf ("%s%c%s",
+                                 data_root,
+                                 G_SEARCHPATH_SEPARATOR,
+                                 existing);
 
       g_setenv ("XDG_DATA_DIRS", updated, TRUE);
     }

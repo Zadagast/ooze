@@ -1,0 +1,17 @@
+#!/bin/sh
+# Spot provides the org.freedesktop.FileManager1 D-Bus interface so that
+# "Show in folder" (e.g. from Firefox) opens Spot instead of cold-starting
+# Nautilus. Nautilus ships the same activation file, so divert its copy to
+# let ours own the canonical path without a dpkg file conflict.
+set -e
+
+FILE=/usr/share/dbus-1/services/org.freedesktop.FileManager1.service
+DIVERT="${FILE}.distrib"
+
+case "$1" in
+  install|upgrade)
+    dpkg-divert --package ooze --add --rename --divert "$DIVERT" "$FILE"
+    ;;
+esac
+
+exit 0

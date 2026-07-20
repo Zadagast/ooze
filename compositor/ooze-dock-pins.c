@@ -3,17 +3,17 @@
 #include <gio/gio.h>
 #include <string.h>
 
+/* Ooze Launch (leftmost) and Spot (second) are added as fixed items by the
+ * dock itself, so they are not listed here. Downloads + Trash are fixed at the
+ * end. This is the curated default lineup between them. */
 static const char * const ooze_dock_default_pins[] = {
-  "org.ooze.Spot",
+  "firefox",
   "org.ooze.Command",
   "org.ooze.Eye",
-  "org.ooze.Shot",
-  "org.ooze.Torrent",
   "org.ooze.Ear",
-  "org.ooze.Monitor",
+  "org.ooze.Scenery",
   "org.ooze.King",
   "org.ooze.Pak",
-  "org.ooze.About",
   NULL,
 };
 
@@ -70,15 +70,17 @@ ooze_dock_pins_load (void)
       g_strstrip (lines[i]);
       if (lines[i][0] == '\0' || lines[i][0] == '#')
         continue;
-      if (g_strcmp0 (lines[i], "org.ooze.Trash") == 0)
-        continue;
-      if (g_strcmp0 (lines[i], "org.ooze.Downloads") == 0)
+      /* Trash, Downloads, Launch and Spot are fixed items added by the dock. */
+      if (g_strcmp0 (lines[i], "org.ooze.Trash") == 0 ||
+          g_strcmp0 (lines[i], "org.ooze.Downloads") == 0 ||
+          g_strcmp0 (lines[i], "org.ooze.Launch") == 0 ||
+          g_strcmp0 (lines[i], "org.ooze.Spot") == 0)
         continue;
       g_ptr_array_add (out, g_strdup (lines[i]));
     }
 
-  if (!ooze_dock_pins_contains (out, "org.ooze.Shot"))
-    g_ptr_array_add (out, g_strdup ("org.ooze.Shot"));
+  if (!ooze_dock_pins_contains (out, "org.ooze.Scenery"))
+    g_ptr_array_add (out, g_strdup ("org.ooze.Scenery"));
   g_ptr_array_add (out, NULL);
   return (char **) g_ptr_array_free (out, FALSE);
 }

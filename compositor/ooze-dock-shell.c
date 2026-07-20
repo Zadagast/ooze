@@ -1,5 +1,6 @@
 #include "ooze-dock-shell.h"
 #include "ooze-dock-pins.h"
+#include "ooze-dock-folder-popup.h"
 #include "ooze-aqua-draw.h"
 #include "ooze-aqua-menu.h"
 #include "ooze-dnd-bridge.h"
@@ -123,6 +124,7 @@ static MetaWindow *ooze_dock_get_most_recent_window (GList *windows);
 static gboolean  ooze_dock_window_matches_app   (MetaWindow *window, GDesktopAppInfo *app_info);
 static gboolean  ooze_dock_window_matches_app_id (MetaWindow *window, const char *app_id);
 static void      ooze_dock_attach_indicator     (ClutterActor *launcher, float launcher_w);
+static void      ooze_dock_stop_launch_bounce    (ClutterActor *launcher);
 
 typedef void (*OozeDockLaunchFn) (MetaContext *context);
 static void      ooze_dock_wire_app_launcher    (ClutterActor  *button,
@@ -1339,6 +1341,10 @@ ooze_dock_refresh_running_state (MetaDisplay  *display,
         }
 
       clutter_actor_set_opacity (indicator, running ? 255 : 0);
+
+      /* App is up — stop any launch bounce still running on this icon. */
+      if (running)
+        ooze_dock_stop_launch_bounce (child);
     }
 
   ooze_dock_update_icon_geometries (display, container);
@@ -1664,19 +1670,124 @@ static const char *downloads_dock_icon_names[] = {
   "folder-download", "folder-downloads", "folder", NULL,
 };
 
+static void
+ooze_dock_folder_open_dir_cb (const char *path,
+                              gpointer    user_data)
+{
+  ooze_dock_launch_spot_path ((MetaContext *) user_data, path);
+}
+
+static OozeDockFolderPopup *
+ooze_dock_get_folder_popup (ClutterActor *container)
+{
+  OozeDockFolderPopup *popup;
+  MetaContext *context;
+  ClutterActor *stage;
+
+  if (!container)
+    return NULL;
+
+  popup = g_object_get_data (G_OBJECT (container), "dock-folder-popup");
+  if (popup)
+    return popup;
+
+  context = g_object_get_data (G_OBJECT (container), "dock-context");
+  stage = g_object_get_data (G_OBJECT (container), "dock-stage");
+  if (!context || !stage)
+    return NULL;
+
+  popup = ooze_dock_folder_popup_new (context, stage);
+  ooze_dock_folder_popup_set_open_dir_func (popup, ooze_dock_folder_open_dir_cb,
+                                            context);
+  g_object_set_data_full (G_OBJECT (container), "dock-folder-popup", popup,
+                          (GDestroyNotify) ooze_dock_folder_popup_destroy);
+  return popup;
+}
+
 static gboolean
-on_downloads_pressed (ClutterActor *actor G_GNUC_UNUSED,
+ooze_dock_id_is_folder (const char *app_id)
+{
+  return app_id && g_str_has_prefix (app_id, "folder:");
+}
+
+static gboolean
+on_downloads_pressed (ClutterActor *actor,
                       ClutterEvent *event,
                       gpointer      user_data G_GNUC_UNUSED)
 {
-  MetaContext *context;
+  ClutterActor *container;
+  OozeDockFolderPopup *popup;
+  g_autofree char *path = NULL;
 
   if (clutter_event_get_button (event) != CLUTTER_BUTTON_PRIMARY)
     return CLUTTER_EVENT_PROPAGATE;
 
-  context = g_object_get_data (G_OBJECT (actor), "launch-context");
-  ooze_dock_launch_downloads (context);
+  container = clutter_actor_get_parent (actor);
+  popup = ooze_dock_get_folder_popup (container);
+  path = ooze_dock_downloads_path ();
+  g_mkdir_with_parents (path, 0700);
+
+  if (popup)
+    ooze_dock_folder_popup_toggle (popup, actor, path);
+  else
+    ooze_dock_launch_downloads (
+      g_object_get_data (G_OBJECT (actor), "launch-context"));
   return CLUTTER_EVENT_STOP;
+}
+
+static gboolean
+on_folder_pin_pressed (ClutterActor *actor,
+                       ClutterEvent *event,
+                       gpointer      user_data G_GNUC_UNUSED)
+{
+  ClutterActor *container;
+  OozeDockFolderPopup *popup;
+  const char *path;
+
+  if (clutter_event_get_button (event) != CLUTTER_BUTTON_PRIMARY)
+    return CLUTTER_EVENT_PROPAGATE;
+
+  path = g_object_get_data (G_OBJECT (actor), "folder-path");
+  container = clutter_actor_get_parent (actor);
+  popup = ooze_dock_get_folder_popup (container);
+  if (popup && path)
+    ooze_dock_folder_popup_toggle (popup, actor, path);
+  return CLUTTER_EVENT_STOP;
+}
+
+static ClutterActor *
+ooze_dock_create_folder_launcher (ClutterActor *stage,
+                                  MetaDisplay  *display,
+                                  const char   *path)
+{
+  ClutterActor *button;
+  g_autoptr (ClutterContent) content = NULL;
+  g_autofree char *app_id = NULL;
+  int logical = 48;
+  int texture = ooze_aqua_icon_texture_size (display, logical);
+  static const char *folder_icons[] = { "folder", NULL };
+
+  button = clutter_actor_new ();
+  clutter_actor_set_size (button, (gfloat) logical, (gfloat) logical);
+  clutter_actor_set_reactive (button, TRUE);
+
+  g_object_set_data_full (G_OBJECT (button), "folder-path",
+                          g_strdup (path), g_free);
+  app_id = g_strdup_printf ("folder:%s", path);
+  g_object_set_data_full (G_OBJECT (button), "app-id",
+                          g_steal_pointer (&app_id), g_free);
+
+  content = ooze_dock_themed_icon_content (stage, display, folder_icons,
+                                           logical);
+  if (!content)
+    content = ooze_aqua_dock_icon_content (stage, texture, 0.35f, 0.45f, 0.62f);
+  if (content)
+    ooze_aqua_actor_set_scaled_content (button, g_steal_pointer (&content),
+                                        logical, logical, texture, texture);
+
+  g_signal_connect (button, "button-press-event",
+                    G_CALLBACK (on_folder_pin_pressed), NULL);
+  return button;
 }
 
 static ClutterActor *
@@ -1792,16 +1903,31 @@ ooze_dock_fill_icons (ClutterActor *container,
         g_ptr_array_add (running_order, g_strdup (app_id));
     }
 
+  {
+    OozeDockFolderPopup *popup =
+      g_object_get_data (G_OBJECT (container), "dock-folder-popup");
+    if (popup)
+      ooze_dock_folder_popup_close (popup);
+  }
+
   ooze_dock_clear_icons (container);
 
-  /* Ooze Launch is a permanent leftmost dock item. */
+  /* Ooze Launch (leftmost) and Spot are permanent, non-removable items so
+   * there is always a way to launch apps and reach the file manager. */
   {
-    const OozeDockAppSpec *spec = ooze_dock_find_spec ("org.ooze.Launch");
-    OozeDockLaunchFn launch = ooze_dock_launch_fn_for_id ("org.ooze.Launch");
-    ClutterActor *launcher;
+    static const char * const fixed_leading[] = {
+      "org.ooze.Launch", "org.ooze.Spot", NULL,
+    };
+    gsize f;
 
-    if (spec && launch)
+    for (f = 0; fixed_leading[f]; f++)
       {
+        const OozeDockAppSpec *spec = ooze_dock_find_spec (fixed_leading[f]);
+        OozeDockLaunchFn launch = ooze_dock_launch_fn_for_id (fixed_leading[f]);
+        ClutterActor *launcher;
+
+        if (!spec || !launch)
+          continue;
         launcher = ooze_dock_create_app_launcher (stage, display, spec, launch);
         g_object_set_data (G_OBJECT (launcher), "dock-fixed",
                            GINT_TO_POINTER (1));
@@ -1820,6 +1946,18 @@ ooze_dock_fill_icons (ClutterActor *container,
 
       if (ooze_dock_find_by_app_id (container, pins[i]))
         continue;
+      if (ooze_dock_id_is_folder (pins[i]))
+        {
+          const char *fpath = pins[i] + strlen ("folder:");
+
+          if (!fpath || !*fpath || !g_file_test (fpath, G_FILE_TEST_IS_DIR))
+            continue;
+          launcher = ooze_dock_create_folder_launcher (stage, display, fpath);
+          g_object_set_data (G_OBJECT (launcher), "dock-pinned",
+                             GINT_TO_POINTER (1));
+          ooze_dock_add_launcher (container, launcher);
+          continue;
+        }
       if (spec)
         {
           launch = ooze_dock_launch_fn_for_id (pins[i]);
@@ -2338,6 +2476,59 @@ on_app_launcher_motion (ClutterActor *actor,
   return CLUTTER_EVENT_STOP;
 }
 
+/* ── Launch feedback (mac-style bouncing dock icon) ─────────────────────── */
+
+#define DOCK_LAUNCH_BOUNCE_MS 260
+#define DOCK_LAUNCH_BOUNCE_PX 14.0f
+
+static void
+ooze_dock_stop_launch_bounce (ClutterActor *launcher)
+{
+  if (!launcher ||
+      !g_object_get_data (G_OBJECT (launcher), "launch-bouncing"))
+    return;
+
+  clutter_actor_remove_transition (launcher, "launch-bounce");
+  clutter_actor_set_translation (launcher, 0.f, 0.f, 0.f);
+  g_object_set_data (G_OBJECT (launcher), "launch-bouncing", NULL);
+}
+
+static void
+ooze_dock_launch_bounce_stopped (ClutterTimeline *timeline G_GNUC_UNUSED,
+                                 gboolean         is_finished G_GNUC_UNUSED,
+                                 gpointer         user_data)
+{
+  ooze_dock_stop_launch_bounce (CLUTTER_ACTOR (user_data));
+}
+
+static void
+ooze_dock_start_launch_bounce (ClutterActor *launcher)
+{
+  ClutterTransition *t;
+
+  if (!launcher ||
+      g_object_get_data (G_OBJECT (launcher), "launch-bouncing"))
+    return;
+
+  clutter_actor_set_translation (launcher, 0.f, 0.f, 0.f);
+
+  t = clutter_property_transition_new ("translation-y");
+  clutter_transition_set_from (t, G_TYPE_FLOAT, 0.0f);
+  clutter_transition_set_to (t, G_TYPE_FLOAT, -DOCK_LAUNCH_BOUNCE_PX);
+  clutter_timeline_set_duration (CLUTTER_TIMELINE (t), DOCK_LAUNCH_BOUNCE_MS);
+  clutter_timeline_set_progress_mode (CLUTTER_TIMELINE (t),
+                                      CLUTTER_EASE_OUT_QUAD);
+  clutter_timeline_set_auto_reverse (CLUTTER_TIMELINE (t), TRUE);
+  clutter_timeline_set_repeat_count (CLUTTER_TIMELINE (t), 5); /* ~3 hops */
+  g_signal_connect (t, "stopped",
+                    G_CALLBACK (ooze_dock_launch_bounce_stopped), launcher);
+  clutter_actor_add_transition (launcher, "launch-bounce", t);
+  g_object_unref (t);
+
+  g_object_set_data (G_OBJECT (launcher), "launch-bouncing",
+                     GINT_TO_POINTER (1));
+}
+
 static gboolean
 on_app_launcher_released (ClutterActor *actor,
                           ClutterEvent *event,
@@ -2390,6 +2581,15 @@ on_app_launcher_released (ClutterActor *actor,
   app_info = g_object_get_data (G_OBJECT (actor), "app-info");
   if (!display || !context || !app_id)
     return CLUTTER_EVENT_STOP;
+
+  {
+    gboolean running = ooze_dock_check_by_id (display, app_id);
+
+    if (!running && app_info)
+      running = ooze_dock_check_by_info (display, app_info);
+    if (!running)
+      ooze_dock_start_launch_bounce (actor);
+  }
 
   if (app_info && !launch)
     ooze_dock_handle_desktop_click (display, app_info);

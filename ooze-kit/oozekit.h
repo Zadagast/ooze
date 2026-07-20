@@ -11,6 +11,8 @@
 #include <oozekit/ooze-init.h>
 #include <oozekit/ooze-application-window.h>
 #include <oozekit/ooze-about.h>
+#include <oozekit/ooze-feedback.h>
+#include <oozekit/ooze-action-bar.h>
 #include <oozekit/ooze-button.h>
 #include <oozekit/ooze-draw.h>
 #include <oozekit/ooze-icons.h>
@@ -31,6 +33,8 @@
 #include "ooze-init.h"
 #include "ooze-application-window.h"
 #include "ooze-about.h"
+#include "ooze-feedback.h"
+#include "ooze-action-bar.h"
 #include "ooze-button.h"
 #include "ooze-draw.h"
 #include "ooze-icons.h"

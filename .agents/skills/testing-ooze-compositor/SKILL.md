@@ -33,7 +33,8 @@ docker exec oozebuild bash -c "apt-get update -qq && DEBIAN_FRONTEND=noninteract
   libgtk-4-dev libvte-2.91-gtk4-dev libadwaita-1-dev dbus-x11 x11-utils \
   libpolkit-agent-1-dev libpolkit-gobject-1-dev \
   xwayland pipewire pipewire-pulse wireplumber gsettings-desktop-schemas \
-  mutter-common adwaita-icon-theme fonts-dejavu-core imagemagick"
+  mutter-common adwaita-icon-theme fonts-dejavu-core imagemagick \
+  xscreensaver-data xscreensaver-data-extra xscreensaver-gl xscreensaver-gl-extra"
 ```
 Notes:
 - `libadwaita-1-dev` IS required to build (OozeKit apps `#include <adwaita.h>`).

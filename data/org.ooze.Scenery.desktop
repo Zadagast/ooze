@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Scenery
+GenericName=Wallpaper and Screensaver
+Comment=Choose your Ooze desktop scenery
+Exec=ooze-scenery
+Icon=org.ooze.Scenery
+Terminal=false
+Type=Application
+Categories=Settings;DesktopSettings;GTK;
+StartupWMClass=org.ooze.Scenery

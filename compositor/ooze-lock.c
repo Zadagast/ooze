@@ -478,6 +478,7 @@ ooze_lock_build_ui (OozePlugin *plugin)
   g_autoptr (ClutterContent) btn_content = NULL;
   CoglColor scrub;
   CoglColor text_color;
+  MtkRectangle monitor;
   int stage_w = 0;
   int stage_h = 0;
   gfloat card_x;
@@ -492,6 +493,7 @@ ooze_lock_build_ui (OozePlugin *plugin)
   backend = meta_context_get_backend (meta_display_get_context (display));
   stage = CLUTTER_ACTOR (meta_backend_get_stage (backend));
   meta_display_get_size (display, &stage_w, &stage_h);
+  ooze_plugin_get_active_monitor_geometry (display, &monitor);
 
   cogl_color_init_from_4f (&scrub, 0.0f, 0.0f, 0.0f, dark ? 0.42f : 0.28f);
   cogl_color_init_from_4f (&text_color, text_r, text_g, text_b, 1.0f);
@@ -593,8 +595,8 @@ ooze_lock_build_ui (OozePlugin *plugin)
                                                0.92f, 0.45f, 0.38f);
   clutter_actor_add_child (card, plugin->lock_status_label);
 
-  card_x = ((gfloat) stage_w - OOZE_LOCK_CARD_W) / 2.0f;
-  card_y = ((gfloat) stage_h - OOZE_LOCK_CARD_H) / 2.0f + 48.0f;
+  card_x = monitor.x + ((gfloat) monitor.width - OOZE_LOCK_CARD_W) / 2.0f;
+  card_y = monitor.y + ((gfloat) monitor.height - OOZE_LOCK_CARD_H) / 2.0f + 48.0f;
   clutter_actor_set_position (card, card_x, card_y);
   clutter_actor_set_position (user_label,
                               (OOZE_LOCK_CARD_W - clutter_actor_get_width (user_label)) / 2.0f,
@@ -610,7 +612,7 @@ ooze_lock_build_ui (OozePlugin *plugin)
                                clutter_actor_get_width (plugin->lock_status_label)) / 2.0f,
                               200.0f);
   clutter_actor_set_position (plugin->lock_clock_label,
-                              ((gfloat) stage_w -
+                              monitor.x + ((gfloat) monitor.width -
                                clutter_actor_get_width (plugin->lock_clock_label)) / 2.0f,
                               card_y - 100.0f);
 

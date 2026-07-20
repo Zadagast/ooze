@@ -101,6 +101,7 @@ watch_paths=(
   "$SRC/ooze-launch"
   "$SRC/ooze-monitor"
   "$SRC/ooze-pak"
+  "$SRC/ooze-scenery"
   "$SRC/ooze-shot"
   "$SRC/ooze-themes"
   "$SRC/ooze-torrent"
