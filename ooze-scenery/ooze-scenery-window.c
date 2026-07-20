@@ -550,43 +550,144 @@ on_setting_changed (GSettings  *settings G_GNUC_UNUSED,
   scenery_reload (self);
 }
 
-static void
-on_spin_activate (GtkSpinButton *spin,
-                  gpointer       user_data G_GNUC_UNUSED)
+/* Fixed duration choices (GNOME-style dropdowns) — instant apply. */
+typedef struct
 {
-  gtk_spin_button_update (spin);
+  const char *label;
+  guint seconds;
+} SceneryDuration;
+
+static const SceneryDuration scenery_fade_choices[] = {
+  { "Never", 0 },
+  { "1 minute", 60 },
+  { "2 minutes", 120 },
+  { "5 minutes", 300 },
+  { "10 minutes", 600 },
+  { "15 minutes", 900 },
+  { "30 minutes", 1800 },
+  { "1 hour", 3600 },
+};
+
+static const SceneryDuration scenery_lock_choices[] = {
+  { "Immediately", 0 },
+  { "30 seconds", 30 },
+  { "1 minute", 60 },
+  { "2 minutes", 120 },
+  { "5 minutes", 300 },
+  { "30 minutes", 1800 },
+  { "1 hour", 3600 },
+};
+
+typedef struct
+{
+  GSettings *settings;
+  const char *key;
+  const SceneryDuration *choices;
+  guint n_choices;
+  gulong settings_handler;
+  gboolean syncing;
+} SceneryDurationBinding;
+
+static void
+scenery_duration_sync_selected (SceneryDurationBinding *binding,
+                                GtkDropDown            *dropdown)
+{
+  guint value = g_settings_get_uint (binding->settings, binding->key);
+  guint best = 0;
+  guint i;
+
+  /* Pick the exact match, or the nearest choice below the value. */
+  for (i = 0; i < binding->n_choices; i++)
+    {
+      if (binding->choices[i].seconds == value)
+        {
+          best = i;
+          break;
+        }
+      if (binding->choices[i].seconds < value)
+        best = i;
+    }
+
+  binding->syncing = TRUE;
+  gtk_drop_down_set_selected (dropdown, best);
+  binding->syncing = FALSE;
 }
 
-/* GtkSpinButton only parses typed text on Enter/focus-out; commit it as
- * soon as the digits change so instant-apply never misses a typed value. */
-static gboolean
-scenery_spin_commit_idle (gpointer user_data)
+static void
+on_duration_selected (GtkDropDown *dropdown,
+                      GParamSpec  *pspec G_GNUC_UNUSED,
+                      gpointer     user_data)
 {
-  GtkSpinButton *spin = GTK_SPIN_BUTTON (user_data);
-  const char *text = gtk_editable_get_text (GTK_EDITABLE (spin));
+  SceneryDurationBinding *binding = user_data;
+  guint selected = gtk_drop_down_get_selected (dropdown);
 
-  g_object_set_data (G_OBJECT (spin), "scenery-commit-id", NULL);
-  if (text && *text)
-    gtk_spin_button_update (spin);
-  return G_SOURCE_REMOVE;
+  if (binding->syncing || selected >= binding->n_choices)
+    return;
+
+  g_settings_set_uint (binding->settings, binding->key,
+                       binding->choices[selected].seconds);
 }
 
 static void
-on_spin_text_changed (GtkEditable *editable,
-                      gpointer     user_data G_GNUC_UNUSED)
+on_duration_settings_changed (GSettings  *settings G_GNUC_UNUSED,
+                              const char *key G_GNUC_UNUSED,
+                              gpointer    user_data)
 {
-  guint id;
+  GtkDropDown *dropdown = GTK_DROP_DOWN (user_data);
+  SceneryDurationBinding *binding =
+    g_object_get_data (G_OBJECT (dropdown), "scenery-duration");
 
-  id = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (editable),
-                                            "scenery-commit-id"));
-  if (id)
-    g_source_remove (id);
-  id = g_timeout_add_seconds_full (G_PRIORITY_DEFAULT, 1,
-                                   scenery_spin_commit_idle,
-                                   g_object_ref (editable),
-                                   g_object_unref);
-  g_object_set_data (G_OBJECT (editable), "scenery-commit-id",
-                     GUINT_TO_POINTER (id));
+  if (binding)
+    scenery_duration_sync_selected (binding, dropdown);
+}
+
+static void
+scenery_duration_binding_free (gpointer data)
+{
+  SceneryDurationBinding *binding = data;
+
+  if (binding->settings_handler)
+    g_signal_handler_disconnect (binding->settings,
+                                 binding->settings_handler);
+  g_free (binding);
+}
+
+static GtkWidget *
+scenery_duration_dropdown_new (GSettings             *settings,
+                               const char            *key,
+                               const SceneryDuration *choices,
+                               guint                  n_choices)
+{
+  GtkWidget *dropdown;
+  GtkStringList *model;
+  SceneryDurationBinding *binding;
+  g_autofree char *signal_name = NULL;
+  guint i;
+
+  model = gtk_string_list_new (NULL);
+  for (i = 0; i < n_choices; i++)
+    gtk_string_list_append (model, choices[i].label);
+
+  dropdown = gtk_drop_down_new (G_LIST_MODEL (model), NULL);
+
+  binding = g_new0 (SceneryDurationBinding, 1);
+  binding->settings = settings;
+  binding->key = key;
+  binding->choices = choices;
+  binding->n_choices = n_choices;
+  g_object_set_data_full (G_OBJECT (dropdown), "scenery-duration",
+                          binding, scenery_duration_binding_free);
+
+  scenery_duration_sync_selected (binding, GTK_DROP_DOWN (dropdown));
+
+  g_signal_connect (dropdown, "notify::selected",
+                    G_CALLBACK (on_duration_selected), binding);
+  signal_name = g_strdup_printf ("changed::%s", key);
+  binding->settings_handler =
+    g_signal_connect (settings, signal_name,
+                      G_CALLBACK (on_duration_settings_changed), dropdown);
+
+  return dropdown;
 }
 
 static GtkWidget *
@@ -746,8 +847,8 @@ scenery_build_screenlock_page (OozeSceneryWindow *self)
 
   hint = gtk_label_new ("When the session is idle the desktop fades to "
                         "black, then locks. Display power saving turns "
-                        "the screen off. Set 0 seconds to never fade. "
-                        "Changes take effect immediately.");
+                        "the screen off. Choose Never to disable the "
+                        "fade. Changes take effect immediately.");
   gtk_label_set_wrap (GTK_LABEL (hint), TRUE);
   gtk_label_set_xalign (GTK_LABEL (hint), 0);
   gtk_box_append (GTK_BOX (content), hint);
@@ -758,47 +859,29 @@ scenery_build_screenlock_page (OozeSceneryWindow *self)
   gtk_grid_set_row_spacing (GTK_GRID (settings), 8);
   gtk_grid_set_column_spacing (GTK_GRID (settings), 14);
   gtk_widget_set_hexpand (settings, TRUE);
-  self->start_after = gtk_spin_button_new_with_range (0, 86400, 1);
-  g_settings_bind (self->session_settings, "idle-delay",
-                   gtk_spin_button_get_adjustment (
-                     GTK_SPIN_BUTTON (self->start_after)), "value",
-                   G_SETTINGS_BIND_DEFAULT);
+  self->start_after =
+    scenery_duration_dropdown_new (self->session_settings, "idle-delay",
+                                   scenery_fade_choices,
+                                   G_N_ELEMENTS (scenery_fade_choices));
   label = gtk_label_new ("Fade to black after");
   gtk_label_set_xalign (GTK_LABEL (label), 0);
   gtk_grid_attach (GTK_GRID (settings), label, 0, 0, 1, 1);
   gtk_grid_attach (GTK_GRID (settings), self->start_after, 1, 0, 1, 1);
   gtk_widget_set_hexpand (self->start_after, FALSE);
-  label = gtk_label_new ("seconds");
-  gtk_widget_add_css_class (label, "scenery-unit");
-  gtk_label_set_xalign (GTK_LABEL (label), 0);
-  gtk_grid_attach (GTK_GRID (settings), label, 2, 0, 1, 1);
   self->lock_enabled = gtk_check_button_new_with_label ("Lock screen");
   g_settings_bind (self->screensaver_settings, "lock-enabled",
                    self->lock_enabled, "active",
                    G_SETTINGS_BIND_DEFAULT);
   gtk_grid_attach (GTK_GRID (settings), self->lock_enabled, 0, 1, 2, 1);
-  self->lock_after = gtk_spin_button_new_with_range (0, 86400, 1);
-  g_settings_bind (self->screensaver_settings, "lock-delay",
-                   gtk_spin_button_get_adjustment (
-                     GTK_SPIN_BUTTON (self->lock_after)), "value",
-                   G_SETTINGS_BIND_DEFAULT);
+  self->lock_after =
+    scenery_duration_dropdown_new (self->screensaver_settings, "lock-delay",
+                                   scenery_lock_choices,
+                                   G_N_ELEMENTS (scenery_lock_choices));
   label = gtk_label_new ("Lock after");
   gtk_label_set_xalign (GTK_LABEL (label), 0);
   gtk_grid_attach (GTK_GRID (settings), label, 0, 2, 1, 1);
   gtk_grid_attach (GTK_GRID (settings), self->lock_after, 1, 2, 1, 1);
-  label = gtk_label_new ("seconds");
-  gtk_widget_add_css_class (label, "scenery-unit");
-  gtk_label_set_xalign (GTK_LABEL (label), 0);
-  gtk_grid_attach (GTK_GRID (settings), label, 2, 2, 1, 1);
   gtk_box_append (GTK_BOX (content), settings);
-  g_signal_connect (self->start_after, "changed",
-                    G_CALLBACK (on_spin_text_changed), NULL);
-  g_signal_connect (self->start_after, "activate",
-                    G_CALLBACK (on_spin_activate), NULL);
-  g_signal_connect (self->lock_after, "changed",
-                    G_CALLBACK (on_spin_text_changed), NULL);
-  g_signal_connect (self->lock_after, "activate",
-                    G_CALLBACK (on_spin_activate), NULL);
   return page;
 }
 
