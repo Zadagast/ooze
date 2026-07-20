@@ -93,7 +93,6 @@ struct _SpotWindow
   GList *forward_stack;
   gpointer grid_enumeration;
   GFile *reveal_target;
-  guint last_column_count;
   int column_width;
   guint spring_id;
   SpotViewMode view_mode;
@@ -241,14 +240,14 @@ spot_ensure_css (void)
                                      ".spot-sidebar-list row.spot-sidebar-heading,"
                                      ".spot-sidebar-list row.spot-sidebar-heading:hover {"
                                      "  background: none;"
-                                     "  padding: 8px 6px 1px 6px;"
+                                     "  padding: 7px 8px 1px 8px;"
                                      "}"
                                      ".spot-sidebar-heading label {"
                                      "  font-size: 0.72em;"
                                      "  font-weight: 700;"
                                      "  color: alpha(@sidebar_fg_color, 0.55);"
                                      "}"
-                                     ".spot-sidebar-list row { padding: 5px 6px; }"
+                                     ".spot-sidebar-list row { padding: 3px 8px; }"
                                      ".spot-sidebar-list row:hover { background: rgba(128,128,128,0.10); }"
                                      ".spot-sidebar-list row:selected {"
                                      "  background: @accent_bg_color;"
@@ -2395,11 +2394,13 @@ spot_create_sidebar_row (const char          *label,
   GtkWidget *lbl;
 
   row = gtk_list_box_row_new ();
-  box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
-  gtk_widget_set_halign (box, GTK_ALIGN_CENTER);
+  /* Compact Finder row — icon beside label so Favorites + Locations all
+   * fit on screen without scrolling the sidebar. */
+  box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 7);
   image = spot_image_new_from_icon_list (icon_names, SPOT_SIDEBAR_ICON_SIZE, TRUE);
   lbl = gtk_label_new (label);
-  gtk_label_set_xalign (GTK_LABEL (lbl), 0.5);
+  gtk_label_set_xalign (GTK_LABEL (lbl), 0.0);
+  gtk_label_set_ellipsize (GTK_LABEL (lbl), PANGO_ELLIPSIZE_END);
   gtk_widget_add_css_class (lbl, "spot-sidebar-label");
   gtk_box_append (GTK_BOX (box), image);
   gtk_box_append (GTK_BOX (box), lbl);
@@ -2424,7 +2425,7 @@ spot_create_sidebar_heading (const char *label)
   gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (row), FALSE);
   gtk_widget_add_css_class (row, "spot-sidebar-heading");
   lbl = gtk_label_new (upper);
-  gtk_label_set_xalign (GTK_LABEL (lbl), 0.5);
+  gtk_label_set_xalign (GTK_LABEL (lbl), 0.0);
   gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), lbl);
   return row;
 }
@@ -2440,22 +2441,6 @@ on_new_folder_shortcut (GtkEventControllerKey *controller G_GNUC_UNUSED,
       (GDK_CONTROL_MASK | GDK_SHIFT_MASK) &&
       (keyval == GDK_KEY_n || keyval == GDK_KEY_N))
     spot_show_new_folder_popover (self);
-}
-
-static guint
-spot_max_columns_for_width (SpotWindow *self,
-                            int         width)
-{
-  guint by_space;
-
-  if (width < self->column_width)
-    return SPOT_MIN_COLUMNS;
-
-  by_space = (guint) (width / self->column_width);
-  if (by_space <= SPOT_MIN_COLUMNS)
-    return SPOT_MIN_COLUMNS;
-
-  return by_space;
 }
 
 static void
@@ -3103,71 +3088,35 @@ spot_rebuild_columns (SpotWindow *self)
 {
   g_autoptr (GFile) root = NULL;
   g_autolist (GFile) chain = NULL;
-  guint len;
-  guint i;
-  guint max_columns;
-  guint start;
-  int width;
+  GList *l;
+  gboolean first = TRUE;
 
   spot_clear_columns (self);
 
   if (!self->current_dir)
     return;
 
+  /* Finder model: the FULL chain from root is always present; the pane
+   * scrolls horizontally and stays pinned at the current folder. */
   root = spot_column_browser_root (self->current_dir);
   chain = spot_path_chain_from_root (self->current_dir, root);
-  len = g_list_length (chain);
-  if (len == 0)
-    return;
 
-  width = gtk_widget_get_width (self->columns_scrolled);
-  if (width <= 0)
-    width = self->column_width * SPOT_MIN_COLUMNS;
-
-  /* Track the width-based capacity (not path length) so notify::width
-   * does not rebuild in a loop when the path is shorter than the pane. */
-  max_columns = spot_max_columns_for_width (self, width);
-  self->last_column_count = max_columns;
-  if (max_columns > len)
-    max_columns = len;
-
-  start = len - max_columns;
-
-  for (i = start; i < len; i++)
+  for (l = chain; l != NULL; l = l->next)
     {
-      GFile *dir = g_list_nth_data (chain, i);
-      GFile *select = (i + 1 < len) ? g_list_nth_data (chain, i + 1) : NULL;
+      GFile *dir = l->data;
+      GFile *select = l->next ? l->next->data : NULL;
       GtkWidget *column;
 
-      if (i > start)
+      if (!first)
         gtk_box_append (GTK_BOX (self->columns_box),
                         spot_create_column_handle (self));
+      first = FALSE;
 
       column = spot_create_column_list (self, dir, select);
       gtk_box_append (GTK_BOX (self->columns_box), column);
     }
 
   spot_scroll_columns_to_end (self);
-}
-
-static void
-spot_on_columns_width_changed (GObject    *object G_GNUC_UNUSED,
-                               GParamSpec *pspec G_GNUC_UNUSED,
-                               SpotWindow *self)
-{
-  int width;
-  guint max_columns;
-
-  if (!self->current_dir)
-    return;
-
-  width = gtk_widget_get_width (self->columns_scrolled);
-  max_columns = spot_max_columns_for_width (self, width);
-
-  if (max_columns == self->last_column_count)
-    return;
-
-  spot_rebuild_columns (self);
 }
 
 static void
@@ -3423,7 +3372,7 @@ spot_create_sidebar (SpotWindow *self)
   /* OozeSurface draws the sidebar chrome; the scrolled window inside is
    * transparent so the surface colour shows through. */
   bin = ooze_surface_new (OOZE_SURFACE_SIDEBAR, GTK_ORIENTATION_VERTICAL);
-  gtk_widget_set_size_request (bin, 88, -1);
+  gtk_widget_set_size_request (bin, 148, -1);
 
   scrolled = ooze_scrolled_window_new ();
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
@@ -3579,10 +3528,6 @@ spot_window_constructed (GObject *object)
   self->columns_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (self->columns_scrolled),
                                  self->columns_box);
-  g_signal_connect (self->columns_scrolled,
-                    "notify::width",
-                    G_CALLBACK (spot_on_columns_width_changed),
-                    self);
 
   /* ── Grid / icon view ───────────────────────────────────────────── */
   self->grid_scrolled = ooze_scrolled_window_new ();
