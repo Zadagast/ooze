@@ -36,7 +36,6 @@ struct _OozeSceneryWindow
   GtkWidget *wallpaper_tiles;
   GtkWidget *ubuntu_tiles;
   GtkWidget *start_after;
-  GtkWidget *lock_enabled;
   GtkWidget *lock_after;
   GtkWidget *nav_wallpaper;
   GtkWidget *nav_screenlock;
@@ -589,7 +588,9 @@ static const SceneryDuration scenery_fade_choices[] = {
   { "1 hour", 3600 },
 };
 
+/* First entry means "lock disabled" (writes lock-enabled=false). */
 static const SceneryDuration scenery_lock_choices[] = {
+  { "Never", 0 },
   { "Immediately", 0 },
   { "30 seconds", 30 },
   { "1 minute", 60 },
@@ -603,6 +604,8 @@ typedef struct
 {
   GSettings *settings;
   const char *key;
+  /* When set, choice 0 disables this boolean key and the rest enable it. */
+  const char *enabled_key;
   const SceneryDuration *choices;
   guint n_choices;
   gboolean syncing;
@@ -616,8 +619,17 @@ scenery_duration_sync_selected (SceneryDurationBinding *binding,
   guint best = 0;
   guint i;
 
+  if (binding->enabled_key &&
+      !g_settings_get_boolean (binding->settings, binding->enabled_key))
+    {
+      binding->syncing = TRUE;
+      gtk_drop_down_set_selected (dropdown, 0);
+      binding->syncing = FALSE;
+      return;
+    }
+
   /* Pick the exact match, or the nearest choice below the value. */
-  for (i = 0; i < binding->n_choices; i++)
+  for (i = binding->enabled_key ? 1 : 0; i < binding->n_choices; i++)
     {
       if (binding->choices[i].seconds == value)
         {
@@ -643,6 +655,17 @@ on_duration_selected (GtkDropDown *dropdown,
 
   if (binding->syncing || selected >= binding->n_choices)
     return;
+
+  if (binding->enabled_key)
+    {
+      if (selected == 0)
+        {
+          g_settings_set_boolean (binding->settings, binding->enabled_key,
+                                  FALSE);
+          return;
+        }
+      g_settings_set_boolean (binding->settings, binding->enabled_key, TRUE);
+    }
 
   g_settings_set_uint (binding->settings, binding->key,
                        binding->choices[selected].seconds);
@@ -673,6 +696,7 @@ scenery_duration_binding_free (gpointer data)
 static GtkWidget *
 scenery_duration_dropdown_new (GSettings             *settings,
                                const char            *key,
+                               const char            *enabled_key,
                                const SceneryDuration *choices,
                                guint                  n_choices)
 {
@@ -691,6 +715,7 @@ scenery_duration_dropdown_new (GSettings             *settings,
   binding = g_new0 (SceneryDurationBinding, 1);
   binding->settings = g_object_ref (settings);
   binding->key = key;
+  binding->enabled_key = enabled_key;
   binding->choices = choices;
   binding->n_choices = n_choices;
   g_object_set_data_full (G_OBJECT (dropdown), "scenery-duration",
@@ -704,6 +729,14 @@ scenery_duration_dropdown_new (GSettings             *settings,
   g_signal_connect_object (settings, signal_name,
                            G_CALLBACK (on_duration_settings_changed),
                            dropdown, G_CONNECT_DEFAULT);
+  if (enabled_key)
+    {
+      g_autofree char *enabled_signal =
+        g_strdup_printf ("changed::%s", enabled_key);
+      g_signal_connect_object (settings, enabled_signal,
+                               G_CALLBACK (on_duration_settings_changed),
+                               dropdown, G_CONNECT_DEFAULT);
+    }
 
   return dropdown;
 }
@@ -906,6 +939,7 @@ scenery_build_screenlock_page (OozeSceneryWindow *self)
 
   self->start_after =
     scenery_duration_dropdown_new (self->session_settings, "idle-delay",
+                                   NULL,
                                    scenery_fade_choices,
                                    G_N_ELEMENTS (scenery_fade_choices));
   gtk_list_box_append (GTK_LIST_BOX (rows),
@@ -914,26 +948,16 @@ scenery_build_screenlock_page (OozeSceneryWindow *self)
                                              "desktop always on",
                                              self->start_after));
 
-  self->lock_enabled = gtk_switch_new ();
-  g_settings_bind (self->screensaver_settings, "lock-enabled",
-                   self->lock_enabled, "active",
-                   G_SETTINGS_BIND_DEFAULT);
-  gtk_list_box_append (GTK_LIST_BOX (rows),
-                       scenery_settings_row ("Lock screen",
-                                             "Require your password after "
-                                             "the fade",
-                                             self->lock_enabled));
-
   self->lock_after =
     scenery_duration_dropdown_new (self->screensaver_settings, "lock-delay",
+                                   "lock-enabled",
                                    scenery_lock_choices,
                                    G_N_ELEMENTS (scenery_lock_choices));
-  g_object_bind_property (self->lock_enabled, "active",
-                          self->lock_after, "sensitive",
-                          G_BINDING_SYNC_CREATE);
   gtk_list_box_append (GTK_LIST_BOX (rows),
-                       scenery_settings_row ("Lock after the fade",
-                                             NULL, self->lock_after));
+                       scenery_settings_row ("Lock screen after the fade",
+                                             "Require your password to get "
+                                             "back in",
+                                             self->lock_after));
 
   gtk_box_append (GTK_BOX (content), rows);
 
