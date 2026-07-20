@@ -90,7 +90,7 @@ feel at home too.
 
 ## Install
 
-Download the current Alpha 0.4.5 AppImage or Debian package from
+Download the current Alpha 0.4.6 AppImage or Debian package from
 [Releases](https://github.com/Zadagast/ooze/releases).
 
 The AppImage runs Ooze as a nested window on an existing Wayland desktop:
@@ -104,7 +104,7 @@ The Debian package installs a native session you can select from your login
 screen:
 
 ```sh
-sudo apt install ./ooze_0.4.5_amd64.deb
+sudo apt install ./ooze_0.4.6_amd64.deb
 ```
 
 ## Build from source
@@ -128,7 +128,7 @@ You can also launch the nested devkit directly with `./run-devkit.sh`, or use
 
 ## Status
 
-**Ooze is Alpha 0.4.5** — a bold, early, work-in-progress desktop that already
+**Ooze is Alpha 0.4.6** — a bold, early, work-in-progress desktop that already
 feels like coming home.
 
 ## License
