@@ -122,7 +122,14 @@ ooze_scroll_load_css (void)
       "  background: none;"
       "}"
 
-      ".ooze-scrolled { background: none; }";
+      ".ooze-scrolled { background: none; }"
+
+      /* Flush variant — no painted gutter, only the candy thumb shows
+       * (used where panes must sit snug, e.g. Spot Miller columns). */
+      ".ooze-scroll-flush scrollbar > range > trough {"
+      "  background: transparent;"
+      "  box-shadow: none;"
+      "}";
   else
     css =
       "scrollbar {"
@@ -220,7 +227,14 @@ ooze_scroll_load_css (void)
       "  background: none;"
       "}"
 
-      ".ooze-scrolled { background: none; }";
+      ".ooze-scrolled { background: none; }"
+
+      /* Flush variant — no painted gutter, only the candy thumb shows
+       * (used where panes must sit snug, e.g. Spot Miller columns). */
+      ".ooze-scroll-flush scrollbar > range > trough {"
+      "  background: transparent;"
+      "  box-shadow: none;"
+      "}";
 
   gtk_css_provider_load_from_string (scroll_provider, css);
 }

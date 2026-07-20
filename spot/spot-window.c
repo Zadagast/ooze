@@ -2868,6 +2868,8 @@ spot_create_column_list (SpotWindow *self,
   gtk_widget_set_hexpand (scrolled, FALSE);
   gtk_widget_set_vexpand (scrolled, TRUE);
   gtk_widget_add_css_class (scrolled, "spot-column");
+  /* Flush gutter: only the candy thumb shows, so columns sit snug. */
+  gtk_widget_add_css_class (scrolled, "ooze-scroll-flush");
 
   list = gtk_list_box_new ();
   gtk_list_box_set_selection_mode (GTK_LIST_BOX (list), GTK_SELECTION_SINGLE);
@@ -3056,7 +3058,7 @@ spot_create_column_handle (SpotWindow *self)
 
   handle = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   gtk_widget_add_css_class (handle, "spot-column-handle");
-  gtk_widget_set_size_request (handle, 7, -1);
+  gtk_widget_set_size_request (handle, 5, -1);
   gtk_widget_set_cursor_from_name (handle, "col-resize");
 
   pin = ooze_pinline_new (OOZE_SIDE_RIGHT);
