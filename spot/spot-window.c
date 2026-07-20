@@ -3557,8 +3557,10 @@ spot_create_column_handle (SpotWindow *self)
   gtk_widget_set_cursor_from_name (handle, "col-resize");
 
   pin = ooze_pinline_new (OOZE_SIDE_RIGHT);
-  gtk_widget_set_hexpand (pin, TRUE);
+  gtk_widget_set_hexpand (pin, FALSE);
   gtk_widget_set_halign (pin, GTK_ALIGN_CENTER);
+  gtk_widget_set_margin_start (pin, 2);
+  gtk_widget_set_hexpand (handle, FALSE);
   gtk_box_append (GTK_BOX (handle), pin);
 
   drag = gtk_gesture_drag_new ();
