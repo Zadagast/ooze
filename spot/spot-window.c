@@ -2977,43 +2977,91 @@ spot_create_column_list (SpotWindow *self,
   return scrolled;
 }
 
+/* Pointer x in columns_box space — the handle itself moves while the
+ * column beside it resizes, so its own coordinate frame is unstable. */
+static gboolean
+spot_column_handle_pointer_x (GtkGestureDrag *gesture,
+                              GtkWidget      *handle,
+                              SpotWindow     *self,
+                              double         *out_x)
+{
+  GdkEventSequence *seq;
+  graphene_point_t local;
+  graphene_point_t in_box;
+  double x, y;
+
+  seq = gtk_gesture_single_get_current_sequence (GTK_GESTURE_SINGLE (gesture));
+  if (!gtk_gesture_get_point (GTK_GESTURE (gesture), seq, &x, &y))
+    return FALSE;
+
+  local = GRAPHENE_POINT_INIT ((float) x, (float) y);
+  if (!gtk_widget_compute_point (handle, self->columns_box, &local, &in_box))
+    return FALSE;
+
+  *out_x = in_box.x;
+  return TRUE;
+}
+
 static void
 spot_column_handle_drag_begin (GtkGestureDrag *gesture,
                                double          x G_GNUC_UNUSED,
                                double          y G_GNUC_UNUSED,
                                SpotWindow     *self)
 {
-  g_object_set_data (G_OBJECT (gesture),
-                     "spot-start-width",
-                     GINT_TO_POINTER (self->column_width));
+  GtkWidget *handle;
+  GtkWidget *left;
+  double box_x;
+
+  handle = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+  left = gtk_widget_get_prev_sibling (handle);
+  if (!left || !gtk_widget_has_css_class (left, "spot-column") ||
+      !spot_column_handle_pointer_x (gesture, handle, self, &box_x))
+    {
+      gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_DENIED);
+      return;
+    }
+
+  g_object_set_data (G_OBJECT (gesture), "spot-left-column", left);
+  g_object_set_data (G_OBJECT (gesture), "spot-start-width",
+                     GINT_TO_POINTER (gtk_widget_get_width (left)));
+  g_object_set_data (G_OBJECT (gesture), "spot-start-x",
+                     GINT_TO_POINTER ((int) box_x));
 }
 
 static void
 spot_column_handle_drag_update (GtkGestureDrag *gesture,
-                                double          offset_x,
+                                double          offset_x G_GNUC_UNUSED,
                                 double          offset_y G_GNUC_UNUSED,
                                 SpotWindow     *self)
 {
-  int start = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (gesture),
-                                                  "spot-start-width"));
-  int width = CLAMP (start + (int) offset_x,
-                     SPOT_COLUMN_WIDTH_MIN,
-                     SPOT_COLUMN_WIDTH_MAX);
-  GtkWidget *child;
+  GtkWidget *handle;
+  GtkWidget *left;
+  int start_width;
+  int start_x;
+  int width;
+  double box_x;
 
-  if (width == self->column_width)
+  handle = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+  left = g_object_get_data (G_OBJECT (gesture), "spot-left-column");
+  if (!left || !spot_column_handle_pointer_x (gesture, handle, self, &box_x))
     return;
 
+  start_width = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (gesture),
+                                                    "spot-start-width"));
+  start_x = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (gesture),
+                                                "spot-start-x"));
+
+  width = CLAMP (start_width + ((int) box_x - start_x),
+                 SPOT_COLUMN_WIDTH_MIN,
+                 SPOT_COLUMN_WIDTH_MAX);
+
+  gtk_widget_set_size_request (left, width, -1);
+  /* New columns (and the capacity math) adopt the width you set. */
   self->column_width = width;
-  for (child = gtk_widget_get_first_child (self->columns_box);
-       child != NULL;
-       child = gtk_widget_get_next_sibling (child))
-    if (gtk_widget_has_css_class (child, "spot-column"))
-      gtk_widget_set_size_request (child, width, -1);
 }
 
 /* Divider between Miller columns: an Aqua pinline widened into a
- * grab strip that drag-resizes every column, Finder style. */
+ * grab strip that drag-resizes the column to its left, Finder style. */
 static GtkWidget *
 spot_create_column_handle (SpotWindow *self)
 {
