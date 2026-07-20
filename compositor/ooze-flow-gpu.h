@@ -9,6 +9,8 @@ G_DECLARE_FINAL_TYPE (OozeFlowGpu, ooze_flow_gpu, OOZE, FLOW_GPU, GObject)
 
 OozeFlowGpu *ooze_flow_gpu_new (void);
 
+OozeFlowGpu *ooze_flow_gpu_new_for_scene (const char *scene);
+
 ClutterContent *ooze_flow_gpu_get_content (OozeFlowGpu *flow);
 
 void ooze_flow_gpu_set_phase (OozeFlowGpu *flow,

@@ -5,9 +5,12 @@
       <default>'flow'</default>
       <summary>Screensaver visual mode</summary>
       <description>
-        Choose the visual shown when the session is idle. The flow mode
-        displays the animated Ooze Flow backdrop; none keeps the desktop
-        clear while retaining the normal lock-on-idle behavior.
+        Choose the visual shown when the session is idle. Recognised scenes
+        are 'flow' (the animated Ooze Flow lava-lamp backdrop), 'aurora'
+        (drifting light curtains), 'nebula' (layered clouds with a
+        starfield), and 'plasma' (a flowing interference field). Use 'none'
+        to keep the desktop clear while retaining the normal lock-on-idle
+        behavior.
       </description>
     </key>
   </schema>

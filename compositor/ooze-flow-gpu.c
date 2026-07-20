@@ -36,9 +36,38 @@ static const char flow_gpu_declarations[] =
   "  float x = blob.x + xamp * (sin (t * 0.53 + blob.w) +\n"
   "                             0.5 * sin (t * 0.27 + blob.w * 1.7));\n"
   "  return vec2 (x, y);\n"
+  "}\n"
+  "float ooze_hash21 (vec2 p)\n"
+  "{\n"
+  "  p = fract (p * vec2 (123.34, 345.45));\n"
+  "  p += dot (p, p + 34.345);\n"
+  "  return fract (p.x * p.y);\n"
+  "}\n"
+  "float ooze_noise (vec2 p)\n"
+  "{\n"
+  "  vec2 i = floor (p);\n"
+  "  vec2 f = fract (p);\n"
+  "  float a = ooze_hash21 (i);\n"
+  "  float b = ooze_hash21 (i + vec2 (1.0, 0.0));\n"
+  "  float c = ooze_hash21 (i + vec2 (0.0, 1.0));\n"
+  "  float d = ooze_hash21 (i + vec2 (1.0, 1.0));\n"
+  "  vec2 u = f * f * (3.0 - 2.0 * f);\n"
+  "  return mix (mix (a, b, u.x), mix (c, d, u.x), u.y);\n"
+  "}\n"
+  "float ooze_fbm (vec2 p)\n"
+  "{\n"
+  "  float v = 0.0;\n"
+  "  float a = 0.5;\n"
+  "  for (int i = 0; i < 5; i++)\n"
+  "  {\n"
+  "    v += a * ooze_noise (p);\n"
+  "    p *= 2.0;\n"
+  "    a *= 0.5;\n"
+  "  }\n"
+  "  return v;\n"
   "}\n";
 
-static const char flow_gpu_fragment[] = {
+static const char flow_gpu_fragment_flow[] = {
   "vec2 uv = cogl_tex_coord0_in.st;\n"
   "float aspect = ooze_flow_aspect;\n"
   "float field = 0.0;\n"
@@ -110,6 +139,82 @@ static const char flow_gpu_fragment[] = {
   "cogl_color_out = vec4 (color * alpha, alpha);\n"
 };
 
+/* Aurora: slow vertical light curtains shimmering across the screen. */
+static const char flow_gpu_fragment_aurora[] = {
+  "vec2 uv = cogl_tex_coord0_in.st;\n"
+  "float t = ooze_flow_phase;\n"
+  "float aurora = 0.0;\n"
+  "for (int i = 0; i < 4; i++)\n"
+  "{\n"
+  "  float fi = float (i);\n"
+  "  float band = ooze_fbm (vec2 (uv.x * 2.6 + fi * 1.7, t * 0.12 + fi));\n"
+  "  float center = 0.30 + 0.16 * fi +\n"
+  "                 0.06 * sin (t * 0.18 + fi * 2.0) + 0.16 * band;\n"
+  "  float w = 0.10 + 0.05 * band;\n"
+  "  float curtain = exp (-pow ((uv.y - center) / w, 2.0));\n"
+  "  aurora += curtain * (0.55 + 0.45 * band);\n"
+  "}\n"
+  "float streak = 0.55 + 0.45 * ooze_fbm (vec2 (uv.x * 22.0,\n"
+  "                                             uv.y * 3.0 + t * 0.08));\n"
+  "aurora = clamp (aurora * streak, 0.0, 1.4);\n"
+  "vec3 color = ooze_flow_color * 1.15 + vec3 (0.0, 0.28, 0.16) * aurora;\n"
+  "float alpha = clamp (aurora * mix (0.62, 0.82, ooze_flow_dark), 0.0, 0.96);\n"
+  "cogl_color_out = vec4 (color * alpha, alpha);\n"
+};
+
+/* Nebula: layered drifting clouds with a faint starfield. */
+static const char flow_gpu_fragment_nebula[] = {
+  "vec2 uv = cogl_tex_coord0_in.st;\n"
+  "float aspect = ooze_flow_aspect;\n"
+  "vec2 p = vec2 (uv.x * aspect, uv.y);\n"
+  "float t = ooze_flow_phase * 0.04;\n"
+  "float n = ooze_fbm (p * 3.0 + vec2 (t, t * 0.5));\n"
+  "n += 0.5 * ooze_fbm (p * 6.0 - vec2 (t * 0.7, t));\n"
+  "float cloud = ooze_flow_smoothstep (0.45, 1.25, n);\n"
+  "float star = ooze_hash21 (floor (p * 240.0));\n"
+  "star = pow (star, 42.0) *\n"
+  "       (0.5 + 0.5 * sin (ooze_flow_phase * 3.0 + star * 30.0));\n"
+  "vec3 color = ooze_flow_color * (0.45 + cloud) +\n"
+  "             vec3 (0.14, 0.08, 0.34) * cloud;\n"
+  "color += vec3 (star);\n"
+  "float alpha = clamp (cloud * mix (0.70, 0.86, ooze_flow_dark) + star,\n"
+  "                     0.0, 1.0);\n"
+  "cogl_color_out = vec4 (color * alpha, alpha);\n"
+};
+
+/* Plasma: smooth flowing interference field. */
+static const char flow_gpu_fragment_plasma[] = {
+  "vec2 uv = cogl_tex_coord0_in.st;\n"
+  "float aspect = ooze_flow_aspect;\n"
+  "vec2 p = vec2 (uv.x * aspect, uv.y);\n"
+  "float t = ooze_flow_phase;\n"
+  "float v = sin (p.x * 6.0 + t);\n"
+  "v += sin ((p.y * 6.0 + t) * 0.8);\n"
+  "v += sin ((p.x + p.y) * 5.0 + t * 0.6);\n"
+  "float cx = p.x + 0.5 * sin (t * 0.3);\n"
+  "float cy = p.y + 0.5 * cos (t * 0.25);\n"
+  "v += sin (sqrt (cx * cx + cy * cy) * 8.0 + t);\n"
+  "v *= 0.25;\n"
+  "float m = 0.5 + 0.5 * sin (v * 3.14159);\n"
+  "vec3 color = ooze_flow_color +\n"
+  "             vec3 (0.20 * sin (v * 3.14159),\n"
+  "                   0.14 * cos (v * 2.0), 0.24);\n"
+  "float alpha = clamp (m * mix (0.55, 0.72, ooze_flow_dark), 0.0, 0.92);\n"
+  "cogl_color_out = vec4 (color * alpha, alpha);\n"
+};
+
+static const char *
+ooze_flow_gpu_fragment_for_scene (const char *scene)
+{
+  if (g_strcmp0 (scene, "aurora") == 0)
+    return flow_gpu_fragment_aurora;
+  if (g_strcmp0 (scene, "nebula") == 0)
+    return flow_gpu_fragment_nebula;
+  if (g_strcmp0 (scene, "plasma") == 0)
+    return flow_gpu_fragment_plasma;
+  return flow_gpu_fragment_flow;
+}
+
 static gboolean
 ooze_flow_gpu_get_preferred_size (ClutterContent *content G_GNUC_UNUSED,
                                    gfloat         *width G_GNUC_UNUSED,
@@ -170,6 +275,12 @@ ooze_flow_gpu_init (OozeFlowGpu *flow G_GNUC_UNUSED)
 OozeFlowGpu *
 ooze_flow_gpu_new (void)
 {
+  return ooze_flow_gpu_new_for_scene ("flow");
+}
+
+OozeFlowGpu *
+ooze_flow_gpu_new_for_scene (const char *scene)
+{
   ClutterBackend *backend;
   CoglContext *context;
   CoglSnippet *snippet;
@@ -207,7 +318,8 @@ ooze_flow_gpu_new (void)
   g_object_unref (snippet);
 
   snippet = cogl_snippet_new (COGL_SNIPPET_HOOK_FRAGMENT, NULL, NULL);
-  cogl_snippet_set_replace (snippet, flow_gpu_fragment);
+  cogl_snippet_set_replace (snippet,
+                            ooze_flow_gpu_fragment_for_scene (scene));
   cogl_pipeline_add_snippet (flow->pipeline, snippet);
   g_object_unref (snippet);
 

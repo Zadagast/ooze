@@ -41,6 +41,7 @@ typedef struct
   gint64           phase_start_us;
   gint64           last_render_us;
   OozeFlowGpu     *gpu;
+  char            *scene;
 } OozeFlowState;
 
 struct _OozeSaverMode
@@ -56,17 +57,22 @@ static void ooze_screensaver_mode_resize (OozePlugin *plugin,
                                           int          width,
                                           int          height);
 
+static char *
+ooze_screensaver_current_scene (OozePlugin *plugin)
+{
+  if (!plugin->scenery_settings)
+    return g_strdup ("flow");
+
+  return g_settings_get_string (plugin->scenery_settings,
+                                "screensaver-mode");
+}
+
 static gboolean
 ooze_screensaver_flow_enabled (OozePlugin *plugin)
 {
-  g_autofree char *mode = NULL;
+  g_autofree char *mode = ooze_screensaver_current_scene (plugin);
 
-  if (!plugin->scenery_settings)
-    return TRUE;
-
-  mode = g_settings_get_string (plugin->scenery_settings,
-                                "screensaver-mode");
-  return g_strcmp0 (mode, "flow") == 0;
+  return g_strcmp0 (mode, "none") != 0;
 }
 
 static OozeFlowState *
@@ -112,14 +118,23 @@ ooze_screensaver_flow_render (OozePlugin *plugin,
     }
   else if (flow->surface)
     {
-      ooze_flow_render_with_color (flow->surface,
-                                   flow->render_width,
-                                   flow->render_height,
-                                   flow->phase,
-                                   dark,
-                                   CLAMP (red, 0.0, 1.0),
-                                   CLAMP (green, 0.0, 1.0),
-                                   CLAMP (blue, 0.0, 1.0));
+      if (flow->scene && g_strcmp0 (flow->scene, "flow") != 0 &&
+          g_strcmp0 (flow->scene, "none") != 0)
+        ooze_flow_render_scene (flow->surface,
+                                flow->render_width,
+                                flow->render_height,
+                                flow->phase,
+                                dark,
+                                flow->scene);
+      else
+        ooze_flow_render_with_color (flow->surface,
+                                     flow->render_width,
+                                     flow->render_height,
+                                     flow->phase,
+                                     dark,
+                                     CLAMP (red, 0.0, 1.0),
+                                     CLAMP (green, 0.0, 1.0),
+                                     CLAMP (blue, 0.0, 1.0));
 
       {
         g_autoptr (ClutterContent) content = NULL;
@@ -145,6 +160,7 @@ ooze_screensaver_flow_free (OozePlugin *plugin)
 
   ooze_flow_gpu_free (flow->gpu);
   g_clear_pointer (&flow->surface, cairo_surface_destroy);
+  g_free (flow->scene);
   g_free (flow);
   plugin->screensaver_flow = NULL;
 }
@@ -231,7 +247,8 @@ ooze_screensaver_mode_resize (OozePlugin *plugin,
   flow->surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32,
                                               render_width,
                                               render_height);
-  flow->gpu = ooze_flow_gpu_new ();
+  flow->scene = ooze_screensaver_current_scene (plugin);
+  flow->gpu = ooze_flow_gpu_new_for_scene (flow->scene);
   if (flow->gpu)
     {
       g_autoptr (ClutterContent) content = NULL;
@@ -703,9 +720,33 @@ ooze_screensaver_mode_changed (OozePlugin *plugin)
 
   if (!ooze_screensaver_flow_enabled (plugin) &&
       plugin->screensaver_active)
-    ooze_screensaver_dismiss (plugin);
-  else
-    ooze_screensaver_sync_watches (plugin);
+    {
+      ooze_screensaver_dismiss (plugin);
+      return;
+    }
+
+  /* Swap the scene live if the saver is already on screen. */
+  if (plugin->screensaver_active && plugin->screensaver_flow_actor)
+    {
+      OozeFlowState *flow = ooze_screensaver_get_flow (plugin);
+      g_autofree char *scene = ooze_screensaver_current_scene (plugin);
+
+      if (!flow || g_strcmp0 (flow->scene, scene) != 0)
+        {
+          ooze_screensaver_mode_resize (
+            plugin,
+            (int) clutter_actor_get_width (plugin->screensaver_overlay),
+            (int) clutter_actor_get_height (plugin->screensaver_overlay));
+          flow = ooze_screensaver_get_flow (plugin);
+          if (flow)
+            {
+              flow->phase_start_us = g_get_monotonic_time ();
+              ooze_screensaver_flow_render (plugin, TRUE);
+            }
+        }
+    }
+
+  ooze_screensaver_sync_watches (plugin);
 }
 
 void

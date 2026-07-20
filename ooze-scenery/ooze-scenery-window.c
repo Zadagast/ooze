@@ -315,10 +315,10 @@ scenery_draw_screensaver (GtkDrawingArea *area,
                           gpointer        user_data)
 {
   OozeSceneryWindow *self = OOZE_SCENERY_WINDOW (user_data);
-  gboolean flow = g_strcmp0 (self->pending_mode, "flow") == 0;
+  gboolean animated = g_strcmp0 (self->pending_mode, "none") != 0;
 
   scenery_draw_wallpaper (NULL, cr, width, height, self);
-  if (flow && self->flow_surface)
+  if (animated && self->flow_surface)
     {
       cairo_save (cr);
       cairo_scale (cr,
@@ -343,12 +343,13 @@ scenery_mode_tile_draw (GtkDrawingArea *area,
   const char *mode = g_object_get_data (G_OBJECT (area), "mode");
 
   scenery_draw_wallpaper (NULL, cr, width, height, self);
-  if (g_strcmp0 (mode, "flow") == 0)
+  if (mode && g_strcmp0 (mode, "none") != 0)
     {
       cairo_surface_t *surface =
         cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
 
-      ooze_flow_render (surface, width, height, 2.4, ooze_theme_is_dark ());
+      ooze_flow_render_scene (surface, width, height, 2.4,
+                              ooze_theme_is_dark (), mode);
       cairo_surface_mark_dirty (surface);
       cairo_set_source_surface (cr, surface, 0, 0);
       cairo_paint (cr);
@@ -384,7 +385,7 @@ scenery_flow_tick (GtkWidget     *widget,
   gint64 now = gdk_frame_clock_get_frame_time (clock);
 
   if (self->page != SCENERY_PAGE_SCREENSAVER ||
-      g_strcmp0 (self->pending_mode, "flow") != 0)
+      g_strcmp0 (self->pending_mode, "none") == 0)
     return G_SOURCE_CONTINUE;
 
   scenery_flow_resize (self,
@@ -403,11 +404,12 @@ scenery_flow_tick (GtkWidget     *widget,
     cairo_paint (cr);
     cairo_destroy (cr);
   }
-  ooze_flow_render (self->flow_surface,
-                    self->flow_width,
-                    self->flow_height,
-                    self->flow_phase,
-                    ooze_theme_is_dark ());
+  ooze_flow_render_scene (self->flow_surface,
+                          self->flow_width,
+                          self->flow_height,
+                          self->flow_phase,
+                          ooze_theme_is_dark (),
+                          self->pending_mode);
   cairo_surface_mark_dirty (self->flow_surface);
   gtk_widget_queue_draw (widget);
   return G_SOURCE_CONTINUE;
@@ -982,6 +984,12 @@ scenery_build_screensaver_page (OozeSceneryWindow *self)
   gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (modes), GTK_SELECTION_NONE);
   gtk_flow_box_append (GTK_FLOW_BOX (modes),
                        scenery_mode_tile (self, "Ooze Flow", "flow"));
+  gtk_flow_box_append (GTK_FLOW_BOX (modes),
+                       scenery_mode_tile (self, "Aurora", "aurora"));
+  gtk_flow_box_append (GTK_FLOW_BOX (modes),
+                       scenery_mode_tile (self, "Nebula", "nebula"));
+  gtk_flow_box_append (GTK_FLOW_BOX (modes),
+                       scenery_mode_tile (self, "Plasma", "plasma"));
   gtk_flow_box_append (GTK_FLOW_BOX (modes),
                        scenery_mode_tile (self, "None", "none"));
   gtk_box_append (GTK_BOX (content), modes);
