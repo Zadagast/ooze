@@ -35,6 +35,12 @@ struct _OozeWatchPlayer
   guint     event_idle;
   guint     render_idle;
 
+  guint     stall_timer;
+  gint      render_count;   /* GL render vfunc invocations (atomic) */
+  gint      update_count;   /* mpv frame-update callbacks (atomic) */
+  int       last_render_count;
+  int       last_update_count;
+
   GFile    *pending; /* opened before the render context existed */
 };
 
@@ -47,6 +53,8 @@ enum
 };
 
 static guint signals[N_SIGNALS];
+
+static gboolean player_stall_check (gpointer user_data);
 
 static void *
 player_get_proc_address (void *ctx G_GNUC_UNUSED, const char *name)
@@ -120,6 +128,15 @@ player_drain_events (gpointer user_data)
 
         case MPV_EVENT_FILE_LOADED:
           self->has_media = TRUE;
+          if (self->render_ctx && !self->sw_ctx && self->stall_timer == 0)
+            {
+              self->last_update_count =
+                g_atomic_int_get (&self->update_count);
+              self->last_render_count =
+                g_atomic_int_get (&self->render_count);
+              self->stall_timer =
+                g_timeout_add_seconds (2, player_stall_check, self);
+            }
           changed = TRUE;
           break;
 
@@ -163,6 +180,7 @@ player_render_update_cb (void *user_data)
 {
   OozeWatchPlayer *self = user_data;
 
+  g_atomic_int_inc (&self->update_count);
   if (g_atomic_int_get ((gint *) &self->render_idle) == 0)
     self->render_idle = g_idle_add (player_queue_render, self);
 }
@@ -204,6 +222,42 @@ player_create_sw_context (OozeWatchPlayer *self)
 
   mpv_render_context_set_update_callback (self->sw_ctx,
                                           player_sw_update_cb, self);
+}
+
+/* GL can initialize but still never paint (compositor/driver interop
+ * failures leave the frame black while playback runs). Watch for mpv
+ * pushing frames that our GL render vfunc never consumes and swap to
+ * the software renderer. */
+static gboolean
+player_stall_check (gpointer user_data)
+{
+  OozeWatchPlayer *self = user_data;
+  int renders = g_atomic_int_get (&self->render_count);
+  int updates = g_atomic_int_get (&self->update_count);
+
+  if (!self->render_ctx || self->sw_ctx)
+    {
+      self->stall_timer = 0;
+      return G_SOURCE_REMOVE;
+    }
+
+  if (updates > self->last_update_count &&
+      renders == self->last_render_count)
+    {
+      g_warning ("ooze-watch: GL frames are not reaching the screen; "
+                 "switching to software rendering");
+      gtk_gl_area_make_current (GTK_GL_AREA (self));
+      mpv_render_context_free (self->render_ctx);
+      self->render_ctx = NULL;
+      player_create_sw_context (self);
+      gtk_widget_queue_draw (GTK_WIDGET (self));
+      self->stall_timer = 0;
+      return G_SOURCE_REMOVE;
+    }
+
+  self->last_update_count = updates;
+  self->last_render_count = renders;
+  return G_SOURCE_CONTINUE;
 }
 
 static void
@@ -357,6 +411,8 @@ player_render (GtkGLArea *area, GdkGLContext *context G_GNUC_UNUSED)
   if (!self->render_ctx)
     return TRUE;
 
+  g_atomic_int_inc (&self->render_count);
+
   glGetIntegerv (GL_FRAMEBUFFER_BINDING, &fbo);
   mpv_fbo.fbo = fbo;
   mpv_fbo.w = gtk_widget_get_width (GTK_WIDGET (area)) * scale;
@@ -374,6 +430,7 @@ ooze_watch_player_dispose (GObject *object)
 
   g_clear_handle_id (&self->event_idle, g_source_remove);
   g_clear_handle_id (&self->render_idle, g_source_remove);
+  g_clear_handle_id (&self->stall_timer, g_source_remove);
 
   if (self->mpv)
     {
@@ -435,6 +492,16 @@ ooze_watch_player_init (OozeWatchPlayer *self)
       mpv_set_option_string (self->mpv, "terminal", "yes");
       mpv_set_option_string (self->mpv, "msg-level", "all=v");
     }
+
+  {
+    g_autofree char *log_dir =
+      g_build_filename (g_get_user_cache_dir (), "ooze", NULL);
+    g_autofree char *log_path =
+      g_build_filename (log_dir, "watch-mpv.log", NULL);
+
+    if (g_mkdir_with_parents (log_dir, 0700) == 0)
+      mpv_set_option_string (self->mpv, "log-file", log_path);
+  }
 
   if (mpv_initialize (self->mpv) < 0)
     {
