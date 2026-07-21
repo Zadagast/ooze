@@ -38,6 +38,21 @@ test_app_shared_sources = [
   '../shared/ooze-color-scheme.c',
 ]
 
+test_app_smoke_watch_sources = []
+test_app_smoke_watch_incs = []
+test_app_smoke_watch_deps = []
+test_app_smoke_watch_args = []
+if mpv_dep.found() and epoxy_dep.found()
+  test_app_smoke_watch_sources = [
+    '../ooze-watch/ooze-watch-window.c',
+    '../ooze-watch/ooze-watch-player.c',
+    '../ooze-watch/ooze-watch-transport.c',
+  ]
+  test_app_smoke_watch_incs = [include_directories('../ooze-watch')]
+  test_app_smoke_watch_deps = [mpv_dep, epoxy_dep]
+  test_app_smoke_watch_args = ['-DHAVE_MPV=1']
+endif
+
 test_app_smoke = executable('test-app-smoke',
   'ooze-app-smoke.c',
   '../spot/spot-window.c',
@@ -66,6 +81,7 @@ test_app_smoke = executable('test-app-smoke',
   '../ooze-mouse/ooze-mouse-pane.c',
   '../ooze-themes/ooze-themes-window.c',
   '../ooze-themes/ooze-themes-pane.c',
+  test_app_smoke_watch_sources,
   test_app_shared_sources,
   include_directories: [
     inc_ooze_kit,
@@ -84,7 +100,7 @@ test_app_smoke = executable('test-app-smoke',
     include_directories('../ooze-themes'),
     include_directories('../ooze-scenery'),
     inc_compositor,
-  ],
+  ] + test_app_smoke_watch_incs,
   dependencies: [
     ooze_kit_dep,
     gtk4_dep,
@@ -96,11 +112,11 @@ test_app_smoke = executable('test-app-smoke',
     dependency('pango'),
     cairo_dep,
     cc.find_library('m'),
-  ],
+  ] + test_app_smoke_watch_deps,
   c_args: [
     '-DOOZE_DATA_DIR="@0@"'.format(meson.project_source_root() / 'data'),
     '-DOOZE_VERSION="@0@"'.format(meson.project_version()),
-  ],
+  ] + test_app_smoke_watch_args,
 )
 
 test_app_smoke_env = [
@@ -160,3 +176,9 @@ test('app-smoke-scenery', test_app_smoke,
   args: ['-p', '/app/scenery'],
   env: test_app_smoke_env,
 )
+if mpv_dep.found() and epoxy_dep.found()
+  test('app-smoke-watch', test_app_smoke,
+    args: ['-p', '/app/watch'],
+    env: test_app_smoke_env,
+  )
+endif

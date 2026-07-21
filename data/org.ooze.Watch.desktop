@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Ooze Watch
+GenericName=Media Player
+Comment=Retro movie player powered by mpv
+Exec=ooze-watch %U
+Icon=multimedia-video-player
+Terminal=false
+Type=Application
+Categories=AudioVideo;Player;Video;GTK;
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/ogg;audio/mpeg;audio/mp4;audio/flac;audio/ogg;audio/x-wav;audio/webm;
+StartupWMClass=org.ooze.Watch
