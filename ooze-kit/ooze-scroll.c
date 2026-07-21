@@ -128,6 +128,13 @@ ooze_scroll_load_css (void)
       "  opacity: 1;"
       "  background: none;"
       "}"
+      "popover.menu scrollbar.overlay-indicator {"
+      "  opacity: 0;"
+      "}"
+      "popover.menu scrollbar.overlay-indicator.hovering,"
+      "popover.menu scrollbar.overlay-indicator.dragging {"
+      "  opacity: 1;"
+      "}"
 
       ".ooze-scrolled { background: none; }"
 
@@ -239,6 +246,13 @@ ooze_scroll_load_css (void)
       "scrollbar.overlay-indicator.dragging {"
       "  opacity: 1;"
       "  background: none;"
+      "}"
+      "popover.menu scrollbar.overlay-indicator {"
+      "  opacity: 0;"
+      "}"
+      "popover.menu scrollbar.overlay-indicator.hovering,"
+      "popover.menu scrollbar.overlay-indicator.dragging {"
+      "  opacity: 1;"
       "}"
 
       ".ooze-scrolled { background: none; }"
