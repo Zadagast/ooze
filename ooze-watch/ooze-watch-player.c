@@ -13,12 +13,17 @@
 #include <mpv/client.h>
 #include <mpv/render_gl.h>
 
+#include <dlfcn.h>
+
 struct _OozeWatchPlayer
 {
   GtkGLArea parent_instance;
 
   mpv_handle         *mpv;
-  mpv_render_context *render_ctx;
+  mpv_render_context *render_ctx;    /* OpenGL render path */
+  mpv_render_context *sw_ctx;        /* software fallback path */
+  guint8             *sw_buf;
+  gsize               sw_buf_size;
 
   double    time_pos;
   double    duration;
@@ -48,20 +53,23 @@ player_get_proc_address (void *ctx G_GNUC_UNUSED, const char *name)
 {
   GdkDisplay *display = gdk_display_get_default ();
 
+  void *p = NULL;
+
 #ifdef GDK_WINDOWING_WAYLAND
   if (GDK_IS_WAYLAND_DISPLAY (display))
-    return (void *) eglGetProcAddress (name);
+    p = (void *) eglGetProcAddress (name);
 #endif
 #ifdef GDK_WINDOWING_X11
   if (GDK_IS_X11_DISPLAY (display))
     {
-      void *p = (void *) eglGetProcAddress (name);
+      p = (void *) eglGetProcAddress (name);
       if (!p)
         p = (void *) glXGetProcAddressARB ((const GLubyte *) name);
-      return p;
     }
 #endif
-  return NULL;
+  if (!p)
+    p = dlsym (RTLD_DEFAULT, name);
+  return p;
 }
 
 static gboolean
@@ -159,6 +167,45 @@ player_render_update_cb (void *user_data)
     self->render_idle = g_idle_add (player_queue_render, self);
 }
 
+static gboolean
+player_queue_draw (gpointer user_data)
+{
+  OozeWatchPlayer *self = user_data;
+
+  self->render_idle = 0;
+  gtk_widget_queue_draw (GTK_WIDGET (self));
+  return G_SOURCE_REMOVE;
+}
+
+static void
+player_sw_update_cb (void *user_data)
+{
+  OozeWatchPlayer *self = user_data;
+
+  if (g_atomic_int_get ((gint *) &self->render_idle) == 0)
+    self->render_idle = g_idle_add (player_queue_draw, self);
+}
+
+static void
+player_create_sw_context (OozeWatchPlayer *self)
+{
+  mpv_render_param params[] = {
+    { MPV_RENDER_PARAM_API_TYPE, (void *) MPV_RENDER_API_TYPE_SW },
+    { 0, NULL },
+  };
+
+  if (mpv_render_context_create (&self->sw_ctx, self->mpv, params) < 0)
+    {
+      g_warning ("ooze-watch: software render context failed too; "
+                 "video will not play");
+      self->sw_ctx = NULL;
+      return;
+    }
+
+  mpv_render_context_set_update_callback (self->sw_ctx,
+                                          player_sw_update_cb, self);
+}
+
 static void
 player_realize (GtkWidget *widget)
 {
@@ -172,24 +219,41 @@ player_realize (GtkWidget *widget)
     { 0, NULL },
   };
 
+  GError *gl_error;
+
   GTK_WIDGET_CLASS (ooze_watch_player_parent_class)->realize (widget);
 
-  if (!self->mpv || gtk_gl_area_get_error (GTK_GL_AREA (self)))
+  if (!self->mpv)
     return;
 
-  gtk_gl_area_make_current (GTK_GL_AREA (self));
-
-  if (mpv_render_context_create (&self->render_ctx, self->mpv, params) < 0)
+  gl_error = gtk_gl_area_get_error (GTK_GL_AREA (self));
+  if (g_getenv ("OOZE_WATCH_SW"))
+    player_create_sw_context (self);
+  else if (gl_error)
     {
-      g_warning ("ooze-watch: could not create mpv render context");
-      self->render_ctx = NULL;
-      return;
+      g_warning ("ooze-watch: no GL context (%s); using software rendering",
+                 gl_error->message);
+      player_create_sw_context (self);
+    }
+  else
+    {
+      gtk_gl_area_make_current (GTK_GL_AREA (self));
+
+      if (mpv_render_context_create (&self->render_ctx, self->mpv,
+                                     params) < 0)
+        {
+          g_warning ("ooze-watch: mpv GL render context failed; "
+                     "using software rendering");
+          self->render_ctx = NULL;
+          player_create_sw_context (self);
+        }
+      else
+        mpv_render_context_set_update_callback (self->render_ctx,
+                                                player_render_update_cb,
+                                                self);
     }
 
-  mpv_render_context_set_update_callback (self->render_ctx,
-                                          player_render_update_cb, self);
-
-  if (self->pending)
+  if ((self->render_ctx || self->sw_ctx) && self->pending)
     {
       g_autoptr (GFile) file = g_steal_pointer (&self->pending);
 
@@ -208,8 +272,69 @@ player_unrealize (GtkWidget *widget)
       mpv_render_context_free (self->render_ctx);
       self->render_ctx = NULL;
     }
+  if (self->sw_ctx)
+    {
+      mpv_render_context_free (self->sw_ctx);
+      self->sw_ctx = NULL;
+    }
 
   GTK_WIDGET_CLASS (ooze_watch_player_parent_class)->unrealize (widget);
+}
+
+static void
+player_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
+{
+  OozeWatchPlayer *self = OOZE_WATCH_PLAYER (widget);
+  int scale = gtk_widget_get_scale_factor (widget);
+  int w = gtk_widget_get_width (widget) * scale;
+  int h = gtk_widget_get_height (widget) * scale;
+  gsize stride;
+  gsize needed;
+  int size[2];
+  g_autoptr (GBytes) bytes = NULL;
+  g_autoptr (GdkTexture) texture = NULL;
+  graphene_rect_t bounds;
+
+  if (!self->sw_ctx)
+    {
+      GTK_WIDGET_CLASS (ooze_watch_player_parent_class)->snapshot (widget,
+                                                                   snapshot);
+      return;
+    }
+
+  if (w <= 0 || h <= 0)
+    return;
+
+  stride = ((gsize) w * 4 + 63) & ~(gsize) 63;
+  needed = stride * (gsize) h;
+  if (needed > self->sw_buf_size)
+    {
+      self->sw_buf = g_realloc (self->sw_buf, needed);
+      self->sw_buf_size = needed;
+    }
+
+  size[0] = w;
+  size[1] = h;
+  {
+    mpv_render_param params[] = {
+      { MPV_RENDER_PARAM_SW_SIZE, size },
+      { MPV_RENDER_PARAM_SW_FORMAT, (void *) "bgr0" },
+      { MPV_RENDER_PARAM_SW_STRIDE, &stride },
+      { MPV_RENDER_PARAM_SW_POINTER, self->sw_buf },
+      { 0, NULL },
+    };
+
+    if (mpv_render_context_render (self->sw_ctx, params) < 0)
+      return;
+  }
+
+  bytes = g_bytes_new (self->sw_buf, needed);
+  texture = gdk_memory_texture_new (w, h, GDK_MEMORY_B8G8R8X8, bytes,
+                                    stride);
+  bounds = GRAPHENE_RECT_INIT (0, 0,
+                               gtk_widget_get_width (widget),
+                               gtk_widget_get_height (widget));
+  gtk_snapshot_append_texture (snapshot, texture, &bounds);
 }
 
 static gboolean
@@ -257,6 +382,8 @@ ooze_watch_player_dispose (GObject *object)
       self->mpv = NULL;
     }
   g_clear_pointer (&self->title, g_free);
+  g_clear_pointer (&self->sw_buf, g_free);
+  self->sw_buf_size = 0;
   g_clear_object (&self->pending);
 
   G_OBJECT_CLASS (ooze_watch_player_parent_class)->dispose (object);
@@ -272,6 +399,7 @@ ooze_watch_player_class_init (OozeWatchPlayerClass *klass)
   object_class->dispose = ooze_watch_player_dispose;
   widget_class->realize = player_realize;
   widget_class->unrealize = player_unrealize;
+  widget_class->snapshot = player_snapshot;
   area_class->render = player_render;
 
   signals[SIGNAL_CHANGED] =
@@ -341,7 +469,7 @@ ooze_watch_player_open (OozeWatchPlayer *self, GFile *file)
   if (!self->mpv)
     return;
 
-  if (!self->render_ctx)
+  if (!self->render_ctx && !self->sw_ctx)
     {
       /* mpv's libmpv VO refuses files until a render context exists;
        * defer until realize. */
