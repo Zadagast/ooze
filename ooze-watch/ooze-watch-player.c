@@ -14,6 +14,7 @@
 #include <mpv/render_gl.h>
 
 #include <dlfcn.h>
+#include <locale.h>
 
 struct _OozeWatchPlayer
 {
@@ -473,6 +474,10 @@ ooze_watch_player_init (OozeWatchPlayer *self)
 
   gtk_widget_set_hexpand (GTK_WIDGET (self), TRUE);
   gtk_widget_set_vexpand (GTK_WIDGET (self), TRUE);
+
+  /* libmpv refuses to create a handle unless LC_NUMERIC is "C"
+   * (gtk_init applies the user's locale). */
+  setlocale (LC_NUMERIC, "C");
 
   self->mpv = mpv_create ();
   if (!self->mpv)
