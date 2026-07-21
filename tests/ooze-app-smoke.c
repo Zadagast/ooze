@@ -2,6 +2,9 @@
 #include "ooze-command-window.h"
 #include "ooze-defaults-window.h"
 #include "ooze-mouse-window.h"
+#ifdef HAVE_MPV
+#include "ooze-watch-window.h"
+#endif
 #include "ooze-eye-window.h"
 #include "ooze-init.h"
 #include "ooze-king-window.h"
@@ -366,6 +369,20 @@ test_mouse (void)
   assert_window_renders (test_app, new_mouse_window, "Ooze Mouse");
 }
 
+#ifdef HAVE_MPV
+static GtkWidget *
+new_watch_window (GtkApplication *app)
+{
+  return ooze_watch_window_new (app);
+}
+
+static void
+test_watch (void)
+{
+  assert_window_renders (test_app, new_watch_window, "Ooze Watch");
+}
+#endif
+
 static void
 test_monitor (void)
 {
@@ -420,6 +437,9 @@ main (int argc, char **argv)
   g_test_add_func ("/app/themes", test_themes);
   g_test_add_func ("/app/pak", test_pak);
   g_test_add_func ("/app/scenery", test_scenery);
+#ifdef HAVE_MPV
+  g_test_add_func ("/app/watch", test_watch);
+#endif
 
   {
     int status = g_test_run ();

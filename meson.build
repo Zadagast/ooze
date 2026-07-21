@@ -38,6 +38,8 @@ libpng_dep = dependency('libpng')
 gtk4_dep = dependency('gtk4', required: false)
 adw_dep = dependency('libadwaita-1', required: false)
 cairo_dep = dependency('cairo')
+mpv_dep = dependency('mpv', required: false)
+epoxy_dep = dependency('epoxy', required: false)
 
 wayland_server_dep = dependency('wayland-server')
 wayland_scanner = find_program('wayland-scanner')
@@ -652,6 +654,33 @@ if gtk4_dep.found() and adw_dep.found()
   install_data('data/org.ooze.Mouse.desktop',
     install_dir: get_option('datadir') / 'applications',
   )
+
+  if mpv_dep.found() and epoxy_dep.found()
+    executable('ooze-watch',
+      'ooze-watch/main.c',
+      'ooze-watch/ooze-watch-window.c',
+      'ooze-watch/ooze-watch-player.c',
+      'ooze-watch/ooze-watch-transport.c',
+      ooze_shared_sources,
+      include_directories: ooze_app_inc + [include_directories('ooze-watch')],
+      dependencies: [
+        ooze_kit_dep,
+        gtk4_dep,
+        adw_dep,
+        gio_dep,
+        cairo_dep,
+        mpv_dep,
+        epoxy_dep,
+        cc.find_library('m'),
+      ],
+      c_args: ooze_app_c_args,
+      install: true,
+    )
+
+    install_data('data/org.ooze.Watch.desktop',
+      install_dir: get_option('datadir') / 'applications',
+    )
+  endif
 
   executable('ooze-eye',
     'ooze-eye/main.c',

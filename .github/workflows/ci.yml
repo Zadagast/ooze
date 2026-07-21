@@ -61,6 +61,8 @@ jobs:
             libpolkit-agent-1-dev \
             libpolkit-gobject-1-dev \
             libpipewire-0.3-dev \
+            libmpv-dev \
+            libepoxy-dev \
             desktop-file-utils \
             xvfb \
             dbus-x11
